@@ -1,4 +1,4 @@
-# Project guidance docs (kept locally, not part of commit history)
+# Project guidance docs - kept locally, not part of commit history
 /Agent.md
 /Design.md
 
@@ -7,7 +7,7 @@ node_modules/
 
 # Build output
 dist/
-build/
+dist-ssr/
 *.tsbuildinfo
 
 # Environment
@@ -16,7 +16,6 @@ build/
 
 # Logs
 *.log
-npm-debug.log*
 
 # Editor / OS
 .vscode/*
@@ -24,6 +23,11 @@ npm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
 # Testing / coverage
 coverage/
