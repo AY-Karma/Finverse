@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useStore } from '../useStore'
 
 export function ImportView() {
-  const { uploadFile } = useStore()
+  const { uploadFile, positions } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -19,17 +19,29 @@ export function ImportView() {
 
   return (
     <>
-      <div>
-        <div className="eyebrow">Portfolio</div>
-        <h1 className="page-title">Import portfolio</h1>
-        <p className="hint" style={{ marginTop: 4 }}>
-          Upload a broker export (.xlsx or .csv). Finverse reads ticker, quantity, buy price, and
-          optionally last price / type columns automatically.
+      <div className="page-head enter d0">
+        <div>
+          <div className="page-eyebrow">02 · Portfolio</div>
+          <h1 className="page-title">Feed the machine</h1>
+        </div>
+        <p className="page-sub">
+          Drop a broker export (.xlsx / .csv). Finverse reads ticker, quantity, cost, and optional
+          last price — then runs it onto the scoreboard.
         </p>
       </div>
 
+      {positions.length > 0 && (
+        <div className="panel enter d1" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div className="score-label live-dot" />
+          <span className="hint">
+            {positions.length} position{positions.length === 1 ? '' : 's'} currently on the board.
+            Re-upload to replace the lineup.
+          </span>
+        </div>
+      )}
+
       <div
-        className="dropzone"
+        className={`dropzone enter d2${dragOver ? ' dropzone--over' : ''}`}
         onDragOver={(e) => {
           e.preventDefault()
           setDragOver(true)
@@ -41,13 +53,10 @@ export function ImportView() {
           handleFile(e.dataTransfer.files?.[0])
         }}
         onClick={() => inputRef.current?.click()}
-        style={dragOver ? { borderColor: 'var(--primary)' } : undefined}
       >
-        <div className="page-title" style={{ fontSize: 22 }}>
-          Drop your file here
-        </div>
+        <div className="drop-title">Drop your sheet in the pit</div>
         <p className="hint" style={{ marginTop: 8 }}>
-          or click to browse
+          or click to browse · .xlsx, .xls, .csv
         </p>
         <input
           ref={inputRef}
@@ -59,20 +68,46 @@ export function ImportView() {
       </div>
 
       {error && (
-        <div className="card" style={{ borderColor: 'var(--semantic-danger)' }}>
-          <p className="hint">{error}</p>
+        <div className="panel enter d3" style={{ borderColor: 'var(--semantic-danger)' }}>
+          <p className="hint down">{error}</p>
         </div>
       )}
 
-      <div className="card" style={{ display: 'grid', gap: 16 }}>
-        <div className="stat-label">Supported columns</div>
-        <ul className="hint" style={{ paddingLeft: 20 }}>
-          <li><span className="mono">Ticker / Symbol</span> — required</li>
-          <li><span className="mono">Quantity / Units / Shares</span> — required</li>
-          <li><span className="mono">Buy price / Avg cost / NAV</span> — required</li>
-          <li><span className="mono">Last price / LTP / Current</span> — optional, powers P&L & value</li>
-          <li><span className="mono">Type / Asset class</span> — optional (stock / ETF / mutual fund)</li>
-        </ul>
+      <div className="panel enter d4" style={{ display: 'grid', gap: 16 }}>
+        <div className="panel-head">
+          <span className="panel-title">Scout column aliases</span>
+          <span className="section-index">Auto-detected</span>
+        </div>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Recognizes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="sym">Ticker</td>
+              <td className="muted">ticker · symbol · security · name · isin</td>
+            </tr>
+            <tr>
+              <td className="sym">Quantity</td>
+              <td className="muted">quantity · qty · units · shares · no of units</td>
+            </tr>
+            <tr>
+              <td className="sym">Buy / Cost</td>
+              <td className="muted">buy price · avg cost · nav · price · cost</td>
+            </tr>
+            <tr>
+              <td className="sym">Last Price</td>
+              <td className="muted">optional · ltp · current price · market price · close</td>
+            </tr>
+            <tr>
+              <td className="sym">Type</td>
+              <td className="muted">optional · stock / etf / mutual fund</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </>
   )

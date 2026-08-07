@@ -6,11 +6,11 @@ import { ImportView } from './views/ImportView'
 import { AssistantView } from './views/AssistantView'
 import { SettingsView } from './views/SettingsView'
 
-const NAV: { id: View; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'import', label: 'Import portfolio' },
-  { id: 'assistant', label: 'AI Assistant' },
-  { id: 'settings', label: 'Settings' },
+const NAV: { id: View; label: string; index: string }[] = [
+  { id: 'overview', label: 'Overview', index: '01' },
+  { id: 'import', label: 'Portfolio', index: '02' },
+  { id: 'assistant', label: 'AI Assistant', index: '03' },
+  { id: 'settings', label: 'Settings', index: '04' },
 ]
 
 export default function App() {
@@ -21,28 +21,33 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">F</div>
-          <div className="brand-name">Finverse</div>
+          <div className="brand-mark">⌁</div>
+          <div>
+            <div className="brand-name">Finverse</div>
+            <div className="brand-sub">Live · Market Scoreboard</div>
+          </div>
         </div>
 
         <nav className="nav">
+          <span className="nav-label">Terminal</span>
           {NAV.map((item) => (
             <button
               key={item.id}
               className={`nav-item${view === item.id ? ' nav-item--active' : ''}`}
               onClick={() => setView(item.id)}
             >
-              {item.label}
+              <span>{item.label}</span>
+              <span className="nav-index">{item.index}</span>
             </button>
           ))}
         </nav>
 
-        <div>
-          <p className="hint">
+        <div className="sidebar-foot">
+          <span className="hint">
             {positions.length > 0
-              ? `${positions.length} position${positions.length === 1 ? '' : 's'} loaded`
-              : 'No portfolio loaded yet'}
-          </p>
+              ? `${positions.length} position${positions.length === 1 ? '' : 's'} in the arena`
+              : 'No portfolio loaded'}
+          </span>
         </div>
       </aside>
 

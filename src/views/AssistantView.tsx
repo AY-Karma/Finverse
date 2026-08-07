@@ -14,7 +14,14 @@ export function AssistantView() {
 
   async function send() {
     const text = input.trim()
-    if (!text || loading) return
+    if (!text || loading || !settings.provider || !settings.apiKey) {
+      setError(
+        !settings.provider || !settings.apiKey
+          ? 'Open Settings and add a provider + API key first.'
+          : null,
+      )
+      if (!text) return
+    }
     setInput('')
     setError(null)
 
@@ -22,14 +29,13 @@ export function AssistantView() {
     setMessages(history)
     setLoading(true)
 
-    const controller = new AbortController()
     try {
       const reply = await chat({
         provider: settings.provider,
         apiKey: settings.apiKey,
-        history: messages,
+        history,
         context,
-        signal: controller.signal,
+        signal: new AbortController().signal,
       })
       setMessages([...history, { role: 'assistant', content: reply }])
     } catch (e) {
@@ -41,39 +47,50 @@ export function AssistantView() {
 
   return (
     <>
-      <div>
-        <div className="eyebrow">AI Assistant</div>
-        <h1 className="page-title">Ask about your portfolio</h1>
-        <p className="hint" style={{ marginTop: 4 }}>
-          The assistant sees your uploaded positions. Configure a provider and API key in Settings
-          first.
+      <div className="page-head enter d0">
+        <div>
+          <div className="page-eyebrow">03 · AI Assistant</div>
+          <h1 className="page-title">Call the coach</h1>
+        </div>
+        <p className="page-sub">
+          The assistant reads your board and the portfolio you uploaded. Ask about a single holding or
+          the whole lineup.
         </p>
       </div>
 
-      {!positions.length && (
-        <div className="card" style={{ borderColor: 'var(--hairline-strong)' }}>
-          <p className="hint">No portfolio loaded. Import a spreadsheet to give the assistant context.</p>
+      {positions.length === 0 && (
+        <div className="panel enter d1">
+          <p className="hint">
+            No positions loaded — the coach has nothing to study yet. Import a sheet first.
+          </p>
         </div>
       )}
 
-      <div className="card">
+      <div className="panel enter d2">
+        <div className="panel-head">
+          <span className="panel-title">Conversation</span>
+          <span className="section-index">
+            {settings.provider ? settings.provider : 'no provider'}
+          </span>
+        </div>
+
         <div className="chat">
           {messages.length === 0 && (
             <div className="msg msg--assistant">
-              Hello. I\u2019m your investment assistant. Ask me about your holdings, allocation, or a
-              single position, and I\u2019ll base my answer on the portfolio you\u2019ve uploaded.
+              Coach on deck. Ask about allocation, a single stock / ETF / mutual fund, or how your
+              portfolio is spread across the field.
             </div>
           )}
           {messages.map((m, i) => (
             <div key={i} className={`msg msg--${m.role}`}>{m.content}</div>
           ))}
-          {loading && <div className="msg msg--assistant muted">Thinking\u2026</div>}
+          {loading && <div className="msg msg--assistant">Studying the tape…</div>}
         </div>
 
-        <div className="chat-input" style={{ marginTop: 16 }}>
+        <div className="chat-input">
           <input
             className="input"
-            placeholder="Ask about your investments\u2026"
+            placeholder="Ask your coach…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
