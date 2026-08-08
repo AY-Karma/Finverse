@@ -255,6 +255,47 @@ body::before {
   line-height: 1.6;
 }
 
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.icon-btn:hover {
+  color: var(--ink);
+  border-color: var(--primary);
+}
+.icon-btn--active {
+  color: var(--primary-hover);
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+/* Peek mode — mask every value in plain white so no gain/loss signal leaks */
+.peek .score-value,
+.peek .score-foot,
+.peek .ticker-sym,
+.peek .ticker-val,
+.peek .ticker-delta,
+.peek .mf-sum-value,
+.peek .alloc-sym,
+.peek .alloc-pct,
+.peek .alloc-val,
+.peek .table td {
+  color: #ffffff !important;
+}
+
 /* ============ Scoreboard ============ */
 .scoreboard {
   display: grid;

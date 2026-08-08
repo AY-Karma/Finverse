@@ -41,6 +41,7 @@ export interface Settings {
   currency: Currency
   density: Density
   accent: Accent
+  hideValues: boolean
 }
 
 export interface ChatMessage {

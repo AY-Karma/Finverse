@@ -54,6 +54,7 @@ export function loadSettings(): Settings {
     currency: 'INR',
     density: 'comfortable',
     accent: 'indigo',
+    hideValues: false,
   }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
