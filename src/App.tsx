@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { View } from './useStore'
 import { useStore } from './useStore'
+import { applyTheme } from './theme'
 import { Overview } from './views/Overview'
 import { ImportView } from './views/ImportView'
 import { AssistantView } from './views/AssistantView'
@@ -15,7 +16,12 @@ const NAV: { id: View; label: string; index: string }[] = [
 
 export default function App() {
   const [view, setView] = useState<View>('overview')
-  const { positions } = useStore()
+  const { positions, settings } = useStore()
+
+  // Reflect theme + density across the whole app as soon as it loads or changes.
+  useEffect(() => {
+    applyTheme(settings.accent, settings.density)
+  }, [settings.accent, settings.density])
 
   return (
     <div className="app-shell">

@@ -46,7 +46,15 @@ export function saveSettings(settings: Settings): void {
 }
 
 export function loadSettings(): Settings {
-  const DEFAULTS: Settings = { provider: '', apiKey: '', model: '', baseUrl: '', currency: 'INR' }
+  const DEFAULTS: Settings = {
+    provider: '',
+    apiKey: '',
+    model: '',
+    baseUrl: '',
+    currency: 'INR',
+    density: 'comfortable',
+    accent: 'indigo',
+  }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
     return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) } : DEFAULTS

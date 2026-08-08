@@ -4,6 +4,9 @@ export type ProviderId = 'openai' | 'anthropic' | 'openrouter' | 'ollama'
 
 export type Currency = 'INR' | 'USD'
 
+export type Density = 'comfortable' | 'compact'
+export type Accent = 'indigo' | 'emerald' | 'cobalt' | 'amber'
+
 export interface Position {
   id: string
   ticker: string
@@ -36,6 +39,8 @@ export interface Settings {
   model: string
   baseUrl: string
   currency: Currency
+  density: Density
+  accent: Accent
 }
 
 export interface ChatMessage {

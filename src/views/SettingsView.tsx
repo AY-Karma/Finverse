@@ -1,5 +1,8 @@
+import type { CSSProperties } from 'react'
 import { useStore } from '../useStore'
 import { PROVIDERS, isLocalProvider } from '../providers'
+import { ACCENTS, ACCENT_KEYS } from '../theme'
+import type { Accent, Density } from '../types'
 
 const STORAGE_HINT =
   'Keys live only in this browser\u2019s local storage and go straight to the provider you pick — nothing routes through a Finverse server. For a local Ollama model, the app talks to your machine directly and never leaves it. Use a low-limit key, and don\u2019t share this device. This is informational, not financial advice.'
@@ -12,6 +15,11 @@ export function SettingsView() {
 
   const local = settings.provider ? isLocalProvider(settings.provider) : false
 
+  // "Connected" = a provider is armed and the coach can actually run: a selected
+  // provider always counts for local Ollama (no key), otherwise an API key must be set.
+  const connected = Boolean(settings.provider) && (local || Boolean(settings.apiKey))
+  const statusLabel = connected ? 'Connected' : 'Disconnected'
+
   return (
     <>
       <div className="page-head enter d0">
@@ -22,35 +30,78 @@ export function SettingsView() {
         <p className="page-sub">Pick a provider to arm the AI coach. Local Ollama needs no key.</p>
       </div>
 
-      <div className="panel enter d1" style={{ display: 'grid', gap: 20, maxWidth: 520 }}>
+      <div className="settings-grid">
+      <div className="panel enter d1" style={{ display: 'grid', gap: 20 }}>
         <div className="panel-head">
           <span className="panel-title">Display</span>
           <span className="section-index">Market</span>
         </div>
-        <div className="field">
-          <label className="field-label" htmlFor="currency">Currency</label>
-          <select
-            id="currency"
-            className="select"
-            value={settings.currency || 'INR'}
-            onChange={(e) =>
-              update({ currency: e.target.value as typeof settings.currency })
-            }
-          >
-            <option value="INR">INR (₹)</option>
-            <option value="USD">USD ($)</option>
-          </select>
-          <p className="hint" style={{ marginTop: 8 }}>
-            Live prices are converted automatically (USD ↔ INR) when the holding trades in a
-            different currency.
-          </p>
+
+        <div className="settings-row">
+          <div className="field">
+            <label className="field-label" htmlFor="currency">Currency</label>
+            <select
+              id="currency"
+              className="select"
+              value={settings.currency || 'INR'}
+              onChange={(e) =>
+                update({ currency: e.target.value as typeof settings.currency })
+              }
+            >
+              <option value="INR">INR (₹)</option>
+              <option value="USD">USD ($)</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="density">Density</label>
+            <select
+              id="density"
+              className="select"
+              value={settings.density}
+              onChange={(e) => update({ density: e.target.value as Density })}
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
         </div>
+
+        <div className="field">
+          <label className="field-label">Accent</label>
+          <div className="accent-row">
+            {ACCENT_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={`accent-swatch${settings.accent === key ? ' accent-swatch--active' : ''}`}
+                style={{ '--swatch': ACCENTS[key].primary } as CSSProperties}
+                aria-label={`${key} accent`}
+                title={key}
+                onClick={() => update({ accent: key as Accent })}
+              >
+                <span className="accent-swatch-swatch" />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="hint" style={{ marginTop: 0 }}>
+          Live prices are converted automatically (USD ↔ INR) when the holding trades in a different
+          currency. Density and accent are applied across every screen instantly.
+        </p>
       </div>
 
-      <div className="panel enter d1" style={{ display: 'grid', gap: 20, maxWidth: 520 }}>
+      <div className="panel enter d1" style={{ display: 'grid', gap: 20 }}>
         <div className="panel-head">
           <span className="panel-title">AI Provider</span>
-          <span className="section-index">{local ? 'LOCAL' : 'BYOK'}</span>
+          <span
+            className={`provider-status ${connected ? 'provider-status--on' : 'provider-status--off'}`}
+            role="status"
+          >
+            <span className="provider-status-dot" />
+            {statusLabel}
+          </span>
         </div>
 
         <div className="field">
@@ -135,6 +186,7 @@ export function SettingsView() {
         <p className="hint" style={{ borderTop: '1px solid var(--hairline)', paddingTop: 16 }}>
           {STORAGE_HINT}
         </p>
+      </div>
       </div>
     </>
   )

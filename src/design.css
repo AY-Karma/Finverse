@@ -54,6 +54,7 @@ body,
 
 html {
   color-scheme: dark;
+  overscroll-behavior: none;
 }
 
 body {
@@ -84,7 +85,7 @@ body::before {
 .app-shell {
   position: relative;
   display: grid;
-  grid-template-columns: 264px 1fr;
+  grid-template-columns: 264px minmax(0, 1fr);
   min-height: 100vh;
   z-index: 1;
 }
@@ -215,8 +216,8 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: var(--sp-xl);
-  max-width: 1360px;
   width: 100%;
+  min-width: 0;
 }
 
 /* ============ Scoreboard / hero type ============ */
@@ -398,12 +399,14 @@ body::before {
   display: grid;
   grid-template-columns: 1.15fr 1fr;
   gap: var(--sp-xl);
+  min-width: 0;
 }
 .panel {
   background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
   border: 1px solid var(--hairline);
   border-radius: var(--r-xl);
   padding: var(--sp-xl);
+  min-width: 0;
   overflow: hidden;
 }
 .panel-head {
@@ -512,6 +515,52 @@ body::before {
 }
 
 /* ============ Top exposure list ============ */
+/* The Allocation Mix panel sits beside the (taller) ledger, so it stretches.
+   Make the panel a flex column and let the list rows share the leftover height
+   evenly — that spreads the rows so no empty band is left below the list, and
+   keeps clean, even spacing to the panel border. */
+.panel--alloc {
+  display: flex;
+  flex-direction: column;
+}
+.panel--alloc .alloc-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--sp-lg);
+}
+.panel--alloc .alloc-list-head {
+  flex: none;
+}
+.panel--alloc .alloc-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-sm) 0;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.panel--alloc .alloc-sym {
+  flex: 0 1 auto;
+  font-weight: 600;
+  color: var(--ink);
+}
+.panel--alloc .alloc-pct {
+  margin-left: auto;
+  color: var(--primary-hover);
+  font-size: 12px;
+}
+.panel--alloc .alloc-val {
+  color: var(--ink-subtle);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.panel--alloc .alloc-row:last-child {
+  border-bottom: 0;
+}
+
 .alloc-list {
   margin-top: var(--sp-lg);
 }
@@ -619,6 +668,112 @@ body::before {
 }
 .mf-sum-value.down {
   color: var(--semantic-danger);
+}
+
+/* ============ Provider connection status ============ */
+.provider-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.provider-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+.provider-status--on {
+  color: var(--semantic-success);
+  border-color: rgba(46, 224, 106, 0.45);
+  box-shadow: 0 0 14px rgba(46, 224, 106, 0.18);
+}
+.provider-status--off {
+  color: var(--semantic-danger);
+  border-color: rgba(255, 92, 97, 0.45);
+  box-shadow: 0 0 14px rgba(255, 92, 97, 0.16);
+}
+
+/* ============ Settings layout (Display) ============ */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--sp-xl);
+  align-items: stretch;
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+.settings-grid .panel-head {
+  align-items: center;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-lg);
+}
+.accent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-md);
+}
+.accent-swatch {
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+.accent-swatch:hover {
+  border-color: var(--ink-tertiary);
+  transform: translateY(-1px);
+}
+.accent-swatch--active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--spark), 0 0 14px var(--spark);
+}
+.accent-swatch-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--swatch);
+}
+
+/* ============ Compact density ============ */
+[data-density='compact'] .panel {
+  padding: var(--sp-lg);
+}
+[data-density='compact'] .scoreboard {
+  gap: var(--sp-md);
+}
+[data-density='compact'] .span-grid {
+  gap: var(--sp-lg);
+}
+[data-density='compact'] .table td {
+  padding: var(--sp-sm) var(--sp-md);
+}
+[data-density='compact'] .panel-head {
+  margin-bottom: var(--sp-md);
+}
+[data-density='compact'] .page-head {
+  padding: var(--sp-md) 0;
+}
+[data-density='compact'] .alloc-row {
+  padding: var(--sp-xs) 0;
 }
 
 /* ============ Folio list ============ */

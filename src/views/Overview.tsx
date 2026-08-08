@@ -333,7 +333,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           )}
         </div>
 
-        <div className="panel">
+        <div className="panel panel--alloc">
           <div className="panel-head">
             <div className="panel-head-titles">
               <span className="panel-title">Allocation Mix</span>
