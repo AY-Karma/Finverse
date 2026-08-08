@@ -1,19 +1,44 @@
-import type { Position, Settings } from './types'
+import type { Currency, Folio, Position, Settings } from './types'
 
-const POSITIONS_KEY = 'finverse:positions'
+const FOLIOS_KEY = 'finverse:folios'
+const LEGACY_POSITIONS_KEY = 'finverse:positions'
 const SETTINGS_KEY = 'finverse:settings'
 
-export function savePositions(positions: Position[]): void {
-  localStorage.setItem(POSITIONS_KEY, JSON.stringify(positions))
+export function saveFolios(folios: Folio[]): void {
+  localStorage.setItem(FOLIOS_KEY, JSON.stringify(folios))
 }
 
-export function loadPositions(): Position[] {
+export function loadFolios(): Folio[] {
   try {
-    const raw = localStorage.getItem(POSITIONS_KEY)
-    return raw ? (JSON.parse(raw) as Position[]) : []
+    const raw = localStorage.getItem(FOLIOS_KEY)
+    if (raw) return JSON.parse(raw) as Folio[]
   } catch {
-    return []
+    /* fall through to migration */
   }
+  // Migrate the old single-list format into one folio.
+  try {
+    const raw = localStorage.getItem(LEGACY_POSITIONS_KEY)
+    if (raw) {
+      const positions = JSON.parse(raw) as Position[]
+      if (Array.isArray(positions) && positions.length > 0) {
+        return [
+          {
+            id: crypto.randomUUID(),
+            name: 'My portfolio',
+            importedAt: Date.now(),
+            positions,
+          },
+        ]
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return []
+}
+
+export function flattenFolios(folios: Folio[]): Position[] {
+  return folios.flatMap((f) => f.positions)
 }
 
 export function saveSettings(settings: Settings): void {
@@ -21,13 +46,12 @@ export function saveSettings(settings: Settings): void {
 }
 
 export function loadSettings(): Settings {
+  const DEFAULTS: Settings = { provider: '', apiKey: '', model: '', baseUrl: '', currency: 'INR' }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
-    return raw
-      ? (JSON.parse(raw) as Settings)
-      : { provider: '', apiKey: '' }
+    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) } : DEFAULTS
   } catch {
-    return { provider: '', apiKey: '' }
+    return DEFAULTS
   }
 }
 
@@ -39,10 +63,18 @@ export interface PortfolioStats {
   allocations: { symbol: string; value: number; type: string }[]
 }
 
-export function computeStats(positions: Position[]): PortfolioStats {
+function effectivePrice(p: Position, prices?: Map<string, number>): number | null {
+  if (prices?.has(p.ticker)) return prices.get(p.ticker)!
+  return p.lastPrice ?? (p.invested > 0 ? p.buyPrice : null)
+}
+
+export function computeStats(
+  positions: Position[],
+  prices?: Map<string, number>,
+): PortfolioStats {
   const invested = positions.reduce((s, p) => s + p.invested, 0)
   const currentValue = positions.reduce(
-    (s, p) => s + (p.lastPrice != null ? p.lastPrice * p.quantity : p.invested),
+    (s, p) => s + (effectivePrice(p, prices) ?? 0) * p.quantity,
     0,
   )
   const pnl = currentValue - invested
@@ -50,7 +82,7 @@ export function computeStats(positions: Position[]): PortfolioStats {
 
   const bySymbol = new Map<string, { value: number; type: string }>()
   for (const p of positions) {
-    const v = p.lastPrice != null ? p.lastPrice * p.quantity : p.invested
+    const v = (effectivePrice(p, prices) ?? 0) * p.quantity
     const prev = bySymbol.get(p.ticker)
     if (prev) prev.value += v
     else bySymbol.set(p.ticker, { value: v, type: p.type })
@@ -67,14 +99,21 @@ export function computeStats(positions: Position[]): PortfolioStats {
   return { invested, currentValue, pnl, pnlPct, allocations }
 }
 
-export function formatCurrency(n: number): string {
-  return new Intl.NumberFormat('en-US', {
+const MINUS_SIGN = '\u2212'
+
+export function formatCurrency(n: number, currency: Currency = 'INR'): string {
+  const s = new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: 'USD',
+    currency,
     maximumFractionDigits: n >= 1000 ? 0 : 2,
   }).format(n)
+  // Use the typographic minus (U+2212) instead of the ASCII hyphen the formatter
+  // emits — the hyphen sits high on many display fonts and renders the negative
+  // sign as if it were floating above the digits.
+  return n < 0 ? s.replace('-', MINUS_SIGN) : s
 }
 
 export function formatPercent(n: number): string {
-  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
+  const sign = n >= 0 ? '+' : MINUS_SIGN
+  return `${sign}${Math.abs(n).toFixed(2)}%`
 }

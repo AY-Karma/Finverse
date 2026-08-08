@@ -26,7 +26,26 @@ export const PROVIDERS: Provider[] = [
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     model: 'openai/gpt-4o-mini',
   },
+  {
+    id: 'ollama',
+    name: 'Ollama (local)',
+    endpoint: 'http://localhost:11434/v1/chat/completions',
+    model: 'qwen2.5:1.5b',
+  },
 ]
+
+export function isLocalProvider(id: string): boolean {
+  return id === 'ollama'
+}
+
+/** Accept a base URL with or without the /v1/chat/completions suffix. */
+function normalizeEndpoint(base: string | undefined, fallback: string): string {
+  if (!base) return fallback
+  const clean = base.trim().replace(/\/+$/, '')
+  if (!clean) return fallback
+  if (clean.endsWith('/chat/completions')) return clean
+  return `${clean.replace(/\/v1$/, '')}/v1/chat/completions`
+}
 
 export function getProvider(id: string): Provider | undefined {
   return PROVIDERS.find((p) => p.id === id)
@@ -62,19 +81,23 @@ export function portfolioContext(positions: Position[]): string {
 export async function chat({
   provider,
   apiKey,
+  model,
+  baseUrl,
   history,
   context,
   signal,
 }: {
   provider: string
   apiKey: string
+  model?: string
+  baseUrl?: string
   history: { role: 'user' | 'assistant'; content: string }[]
   context: string
   signal: AbortSignal
 }): Promise<string> {
   const p = getProvider(provider)
   if (!p) throw new Error('Unknown provider selected.')
-  if (!apiKey) throw new Error('Add an API key in Settings before chatting.')
+  const usedModel = model || p.model
 
   const userHistory = history.map((m) => ({ role: m.role, content: m.content }))
 
@@ -87,7 +110,7 @@ export async function chat({
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: p.model,
+        model: usedModel,
         max_tokens: 1024,
         system: [SYSTEM_PROMPT, context],
         messages: userHistory,
@@ -105,6 +128,27 @@ export async function chat({
     ...userHistory,
   ]
 
+  // ---- Local provider (Ollama OpenAI-compatible endpoint) ----
+  if (isLocalProvider(provider)) {
+    const endpoint = normalizeEndpoint(baseUrl, p.endpoint)
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: usedModel,
+        messages,
+        max_tokens: 1024,
+        stream: false,
+      }),
+      signal,
+    })
+    if (!res.ok) throw new Error(`Ollama error: ${res.status}`)
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content ?? ''
+  }
+
+  if (!apiKey) throw new Error('Add an API key in Settings before chatting.')
+
   const res = await fetch(p.endpoint, {
     method: 'POST',
     headers: {
@@ -112,7 +156,7 @@ export async function chat({
       authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: p.model,
+      model: usedModel,
       messages,
       max_tokens: 1024,
     }),

@@ -1,6 +1,8 @@
+import { useMemo, useState } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { computeStats, formatCurrency, formatPercent } from '../store'
 import { useStore } from '../useStore'
+import type { Currency } from '../types'
 import type { View } from '../useStore'
 
 const PIE_COLORS = [
@@ -23,9 +25,83 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
 }
 
+type Scope = 'all' | 'equity' | 'mutual'
+type SortField = 'symbol' | 'qty' | 'buy' | 'value' | 'pnl'
+type SortDir = 'asc' | 'desc'
+
+interface LedgerRow {
+  id: string
+  symbol: string
+  qty: number
+  buy: number
+  value: number
+  pnl: number | null
+}
+
 export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
-  const { positions } = useStore()
-  const stats = computeStats(positions)
+  const { positions, settings } = useStore()
+  const currency = settings.currency || 'INR'
+  const [scope, setScope] = useState<Scope>('all')
+  const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
+
+  const equityCount = positions.filter((p) => p.type !== 'mutual-fund').length
+  const mfCount = positions.filter((p) => p.type === 'mutual-fund').length
+
+  const scopePositions = useMemo(
+    () =>
+      scope === 'all'
+        ? positions
+        : positions.filter((p) => (scope === 'mutual' ? p.type === 'mutual-fund' : p.type !== 'mutual-fund')),
+    [positions, scope],
+  )
+
+  const stats = computeStats(scopePositions)
+
+  // Hooks are all called unconditionally — no early return may happen above these.
+  const ledgerRows: LedgerRow[] = useMemo(
+    () =>
+      scopePositions.map((p) => {
+        const price = p.lastPrice
+        const value = price != null ? price * p.quantity : p.invested
+        const pnl = price != null ? value - p.invested : null
+        return {
+          id: p.id,
+          symbol: p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker,
+          qty: p.quantity,
+          buy: p.buyPrice,
+          value,
+          pnl,
+        }
+      }),
+    [scopePositions],
+  )
+
+  const sortedRows = useMemo(() => {
+    if (!sort) return ledgerRows
+    const dir = sort.dir === 'asc' ? 1 : -1
+    return [...ledgerRows].sort((a, b) => {
+      if (sort.field === 'symbol') return a.symbol.localeCompare(b.symbol) * dir
+      if (sort.field === 'qty') return (a.qty - b.qty) * dir
+      if (sort.field === 'buy') return (a.buy - b.buy) * dir
+      if (sort.field === 'value') return (a.value - b.value) * dir
+      const ap = a.pnl ?? -Infinity
+      const bp = b.pnl ?? -Infinity
+      return (ap - bp) * dir
+    })
+  }, [ledgerRows, sort])
+
+  const mfSummary = useMemo(() => {
+    if (scope !== 'mutual') return null
+    const invested = scopePositions.reduce((s, p) => s + p.invested, 0)
+    const current = scopePositions.reduce((s, p) => {
+      const price = p.lastPrice
+      return s + (price != null ? price * p.quantity : p.invested)
+    }, 0)
+    const pnl = current - invested
+    const xirrs = scopePositions.map((p) => p.xirr).filter((x): x is number => x != null)
+    const xirrAvg = xirrs.length ? xirrs.reduce((s, x) => s + x, 0) / xirrs.length : null
+    return { invested, current, pnl, xirrAvg }
+  }, [scope, scopePositions])
 
   if (positions.length === 0) {
     return (
@@ -47,18 +123,80 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     )
   }
 
+  if (scopePositions.length === 0) {
+    // Switch to a scope with no holdings yet — point at import rather than a dead page.
+    return (
+      <div className="enter" style={{ display: 'grid', gap: 28, justifyItems: 'center', padding: '12vh 24px', textAlign: 'center' }}>
+        <div>
+          <div className="page-eyebrow">Live Market Scoreboard</div>
+          <h1 className="page-title" style={{ textTransform: 'none' }}>
+            {scope === 'mutual' ? 'No mutual funds on the board yet.' : 'No equity holdings on the board yet.'}
+          </h1>
+          <p className="page-sub" style={{ textAlign: 'center', maxWidth: 560, margin: '0 auto', marginTop: 12 }}>
+            {scope === 'mutual'
+              ? 'Import a mutual-fund export (.xlsx) with Scheme Name, Units and Invested Value — Finverse maps it into its own Mutual Funds ledger and allocation mix.'
+              : 'Import a broker export (.xlsx / .csv) with ticker, quantity, and cost to run it onto the equity scoreboard.'}
+          </p>
+        </div>
+        <button className="btn btn--primary" onClick={() => onGoTo('import')}>
+          Import holdings →
+        </button>
+      </div>
+    )
+  }
+
   const pnlUp = stats.pnl >= 0
-  const best = positions
-    .filter((p) => p.lastPrice != null && p.invested > 0)
-    .sort(
-      (a, b) =>
-        ((b.lastPrice! - b.buyPrice) / b.buyPrice) * 100 -
-        ((a.lastPrice! - a.buyPrice) / a.buyPrice) * 100,
-    )[0]
+  const eff = (p: (typeof positions)[number]) =>
+    p.lastPrice ?? (p.invested > 0 ? p.buyPrice : null)
+  const best = scopePositions
+    .filter((p) => eff(p) != null && p.invested > 0)
+    .sort((a, b) => ((eff(b)! - b.buyPrice) / b.buyPrice) * 100 - ((eff(a)! - a.buyPrice) / a.buyPrice) * 100)[0]
   const bestPct =
-    best && best.lastPrice != null && best.buyPrice > 0
-      ? ((best.lastPrice - best.buyPrice) / best.buyPrice) * 100
+    best && eff(best) != null && best.buyPrice > 0
+      ? ((eff(best)! - best.buyPrice) / best.buyPrice) * 100
       : null
+
+  const toggleSort = (field: SortField) => {
+    setSort((prev) => {
+      if (!prev || prev.field !== field) return { field, dir: 'asc' }
+      if (prev.dir === 'asc') return { field, dir: 'desc' }
+      return null
+    })
+  }
+
+  const sortIcon = (field: SortField) => {
+    if (!sort || sort.field !== field) return '↕'
+    return sort.dir === 'asc' ? '▲' : '▼'
+  }
+
+  const sortCls = (field: SortField) =>
+    sort && sort.field === field ? 'th-sort th-sort--active' : 'th-sort'
+
+  const Th = ({ field, children }: { field: SortField; children: string }) => (
+    <th>
+      <button className={sortCls(field)} onClick={() => toggleSort(field)}>
+        {children}
+        <span className="th-sort-icon">{sortIcon(field)}</span>
+      </button>
+    </th>
+  )
+
+  const Scope = () => (
+    <div className="scope-switch">
+      <button className={`scope-btn${scope === 'all' ? ' scope-btn--active' : ''}`} onClick={() => setScope('all')}>
+        All
+        <span className="scope-count">{positions.length}</span>
+      </button>
+      <button className={`scope-btn${scope === 'equity' ? ' scope-btn--active' : ''}`} onClick={() => setScope('equity')}>
+        Equity
+        <span className="scope-count">{equityCount}</span>
+      </button>
+      <button className={`scope-btn${scope === 'mutual' ? ' scope-btn--active' : ''}`} onClick={() => setScope('mutual')}>
+        Mutual Funds
+        <span className="scope-count">{mfCount}</span>
+      </button>
+    </div>
+  )
 
   return (
     <>
@@ -67,9 +205,12 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           <div className="page-eyebrow">Live Market Scoreboard</div>
           <h1 className="page-title">Your Arena</h1>
         </div>
-        <p className="page-sub">
-          Net position across {positions.length} holding{positions.length === 1 ? '' : 's'} — refreshed
-          from the last known prices in your sheet.
+        <p className="page-sub" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <Scope />
+          <span>
+            Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
+            {scope === 'mutual' ? ' — mutual funds' : ''} marked with sheet prices.
+          </span>
         </p>
       </div>
 
@@ -80,22 +221,19 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             <span>Current Value</span>
             <span className="live-dot" />
           </div>
-          <div className="score-value">{formatCurrency(stats.currentValue)}</div>
+          <div className="score-value">{formatCurrency(stats.currentValue, currency)}</div>
           <div className="score-foot">Total market exposure</div>
         </div>
         <div className="score">
           <div className="score-label">Invested</div>
-          <div className="score-value">{formatCurrency(stats.invested)}</div>
+          <div className="score-value">{formatCurrency(stats.invested, currency)}</div>
           <div className="score-foot">Cost basis deployed</div>
         </div>
         <div className="score">
-          <div className="score-label">
-            <span>Unrealized P&L</span>
-            <span className="nav-index">{pnlUp ? '' : ''}</span>
-          </div>
+          <div className="score-label">Unrealized P&L</div>
           <div className={`score-value ${pnlUp ? 'up' : 'down'}`}>
             {pnlUp ? '+' : ''}
-            {formatCurrency(stats.pnl)}
+            {formatCurrency(stats.pnl, currency)}
           </div>
           <div className={`score-foot ${pnlUp ? 'up' : 'down'}`}>
             {formatPercent(stats.pnlPct)} on cost
@@ -114,10 +252,10 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
       <div className="tiker-wrap enter d2">
         <div className="ticker">
           <div className="ticker-track">
-            {tickerItems(positions).map((t, i) => (
+            {tickerItems(scopePositions, currency).map((t, i) => (
               <TickerCell key={i} t={t} />
             ))}
-            {tickerItems(positions).map((t, i) => (
+            {tickerItems(scopePositions, currency).map((t, i) => (
               <TickerCell key={`dup-${i}`} t={t} />
             ))}
           </div>
@@ -126,48 +264,82 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
 
       {/* Panels */}
       <div className="span-grid enter d3">
-        <div className="panel">
+        <div className="panel panel--ledger">
           <div className="panel-head">
-            <span className="panel-title">The Ledger</span>
-            <span className="section-index">01 · Holdings</span>
+            <div className="panel-head-titles">
+              <span className="panel-title">The Ledger</span>
+              <span className="section-index">01 · Holdings</span>
+            </div>
+            <Scope />
           </div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Type</th>
-                <th>Qty</th>
-                <th>Buy</th>
-                <th>Value</th>
-                <th>P&L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {positions.map((p) => {
-                const value = p.lastPrice != null ? p.lastPrice * p.quantity : p.invested
-                const pnl = p.lastPrice != null ? value - p.invested : null
-                const pnlUp = pnl != null && pnl >= 0
-                return (
-                  <tr key={p.id}>
-                    <td className="sym">{p.ticker}</td>
-                    <td className="muted">{p.type}</td>
-                    <td>{p.quantity}</td>
-                    <td>{p.buyPrice}</td>
-                    <td>{formatCurrency(value)}</td>
-                    <td className={pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
-                      {pnl != null ? `${pnlUp ? '+' : ''}${formatCurrency(pnl)}` : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          {scope === 'mutual' && mfSummary && (
+            <div className="mf-summary">
+              <div className="mf-sum-item">
+                <span className="mf-sum-label">Total Investments</span>
+                <span className="mf-sum-value">{formatCurrency(mfSummary.invested, currency)}</span>
+              </div>
+              <div className="mf-sum-item">
+                <span className="mf-sum-label">Portfolio Value</span>
+                <span className="mf-sum-value">{formatCurrency(mfSummary.current, currency)}</span>
+              </div>
+              <div className="mf-sum-item">
+                <span className="mf-sum-label">Profit / Loss</span>
+                <span className={`mf-sum-value ${mfSummary.pnl >= 0 ? 'up' : 'down'}`}>
+                  {formatCurrency(mfSummary.pnl, currency)}
+                </span>
+              </div>
+              <div className="mf-sum-item">
+                <span className="mf-sum-label">P/L %</span>
+                <span className={`mf-sum-value ${mfSummary.pnl >= 0 ? 'up' : 'down'}`}>
+                  {mfSummary.invested > 0 ? formatPercent((mfSummary.pnl / mfSummary.invested) * 100) : '—'}
+                </span>
+              </div>
+              <div className="mf-sum-item">
+                <span className="mf-sum-label">XIRR</span>
+                <span className="mf-sum-value">{mfSummary.xirrAvg != null ? formatPercent(mfSummary.xirrAvg) : '—'}</span>
+              </div>
+            </div>
+          )}
+          {scope === 'mutual' ? (
+            <MFLedger rows={scopePositions} currency={currency} />
+          ) : (
+            <table className="table table--ledger">
+              <thead>
+                <tr>
+                  <Th field="symbol">Symbol</Th>
+                  <Th field="qty">Qty</Th>
+                  <Th field="buy">Buy</Th>
+                  <Th field="value">Value</Th>
+                  <Th field="pnl">P&L</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRows.map((r) => {
+                  const pnlUp = r.pnl != null && r.pnl >= 0
+                  return (
+                    <tr key={r.id}>
+                      <td className="sym">{r.symbol}</td>
+                      <td>{fmtUnits(r.qty)}</td>
+                      <td>{formatCurrency(r.buy, currency)}</td>
+                      <td>{formatCurrency(r.value, currency)}</td>
+                      <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
+                        {r.pnl != null ? `${pnlUp ? '+' : ''}${formatCurrency(r.pnl, currency)}` : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="panel">
           <div className="panel-head">
-            <span className="panel-title">Allocation Mix</span>
-            <span className="section-index">02 · Exposure</span>
+            <div className="panel-head-titles">
+              <span className="panel-title">Allocation Mix</span>
+              <span className="section-index">02 · Exposure</span>
+            </div>
+            <Scope />
           </div>
           <div style={{ height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -185,18 +357,142 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
                     <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v) => formatCurrency(v == null ? 0 : Number(v))} contentStyle={TOOLTIP_STYLE} />
+                <Tooltip formatter={(v) => formatCurrency(v == null ? 0 : Number(v), currency)} contentStyle={TOOLTIP_STYLE} />
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="panel-head" style={{ marginTop: 4, marginBottom: 0 }}>
-            <span className="epsilon">Top exposure by symbol</span>
-            <span className="section-index">{stats.allocations.length} shown</span>
+          <div className="alloc-list">
+            <div className="alloc-list-head">
+              <span className="epsilon">Top exposure by {scope === 'mutual' ? 'scheme' : 'symbol'}</span>
+              <span className="section-index">{stats.allocations.length} shown</span>
+            </div>
+            {stats.allocations.length === 0 ? (
+              <div className="muted">No valued holdings yet.</div>
+            ) : (
+              stats.allocations.map((a) => {
+                const pct = stats.currentValue > 0 ? (a.value / stats.currentValue) * 100 : 0
+                return (
+                  <div className="alloc-row" key={a.symbol}>
+                    <span className="alloc-sym">{a.symbol}</span>
+                    <span className="alloc-pct">{formatPercent(pct)}</span>
+                    <span className="alloc-val">{formatCurrency(a.value, currency)}</span>
+                  </div>
+                )
+              })
+            )}
           </div>
         </div>
       </div>
     </>
   )
+}
+
+/** Mutual-fund ledger — layout maps to the holdings export: Scheme, AMC, Folio, Units, Values, Returns, XIRR. */
+function MFLedger({ rows, currency }: { rows: ReturnType<typeof useStore>['positions']; currency: Currency }) {
+  const [sort, setSort] = useState<{ field: string; dir: SortDir } | null>(null)
+
+  const sorted = useMemo(() => {
+    if (!sort) return rows
+    const dir = sort.dir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const num = (x: PositionLike) =>
+        sort.field === 'value'
+          ? valueOf(x, currency)
+          : sort.field === 'units'
+            ? x.quantity
+            : sort.field === 'invested'
+              ? x.invested
+              : mfReturnPct(x, currency) ?? -Infinity
+      switch (sort.field) {
+        case 'scheme':
+          return (a.name || a.ticker).localeCompare(b.name || b.ticker) * dir
+        default:
+          return (num(a) - num(b)) * dir
+      }
+    })
+  }, [rows, sort])
+
+  const toggle = (field: string) =>
+    setSort((prev) => {
+      if (!prev || prev.field !== field) return { field, dir: 'asc' } as { field: string; dir: SortDir }
+      if (prev.dir === 'asc') return { field, dir: 'desc' }
+      return null
+    })
+
+  const icon = (field: string) => {
+    if (!sort || sort.field !== field) return '↕'
+    return sort.dir === 'asc' ? '▲' : '▼'
+  }
+  const cls = (field: string) =>
+    sort && sort.field === field ? 'th-sort th-sort--active' : 'th-sort'
+
+  const Th = ({ field, children }: { field: string; children: string }) => (
+    <th>
+      <button className={cls(field)} onClick={() => toggle(field)}>
+        {children}
+        <span className="th-sort-icon">{icon(field)}</span>
+      </button>
+    </th>
+  )
+
+  return (
+    <table className="table">
+      <thead>
+        <tr>
+          <Th field="scheme">Scheme</Th>
+          <Th field="units">Units</Th>
+          <Th field="invested">Invested</Th>
+          <Th field="value">Current Value</Th>
+          <Th field="returns">Returns</Th>
+          <Th field="xirr">XIRR</Th>
+          <th>AMC / Folio</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((p) => {
+          const value = valueOf(p, currency)
+          return (
+            <tr key={p.id}>
+              <td className="sym">
+                <span className="mf-name" data-full={p.name || p.ticker}>
+                  {p.name || p.ticker}
+                </span>
+              </td>
+              <td>{fmtUnits(p.quantity)}</td>
+              <td>{formatCurrency(p.invested, currency)}</td>
+              <td>{formatCurrency(value, currency)}</td>
+              <td className={valueOf(p, currency) >= p.invested ? 'up' : 'down'}>
+                {formatPercent(mfReturnPct(p, currency) ?? 0)}
+              </td>
+              <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'}>
+                {p.xirr != null ? formatPercent(p.xirr) : '—'}
+              </td>
+              <td className="muted">
+                {[p.amc, p.folio].filter(Boolean).join(' · ') || '—'}
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
+type PositionLike = ReturnType<typeof useStore>['positions'][number]
+
+function fmtUnits(n: number): string {
+  return n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
+}
+
+function valueOf(p: PositionLike, _currency: Currency): number {
+  const price = p.lastPrice
+  return price != null ? price * p.quantity : p.invested
+}
+
+/** General return: (current value − invested) ÷ invested × 100. */
+function mfReturnPct(p: PositionLike, currency: Currency): number | null {
+  if (p.invested <= 0) return null
+  return ((valueOf(p, currency) - p.invested) / p.invested) * 100
 }
 
 interface TickerCellData {
@@ -206,13 +502,17 @@ interface TickerCellData {
   pct: number | null
 }
 
-function tickerItems(positions: ReturnType<typeof useStore>['positions']): TickerCellData[] {
+function tickerItems(
+  positions: ReturnType<typeof useStore>['positions'],
+  currency: Currency,
+): TickerCellData[] {
   return positions
     .map((p) => {
-      const value = p.lastPrice != null ? p.lastPrice * p.quantity : p.invested
-      const delta = p.lastPrice != null ? value - p.invested : null
-      const pct = p.lastPrice != null && p.invested > 0 ? ((delta! / p.invested) * 100) : null
-      return { sym: p.ticker, val: formatCurrency(value), delta, pct }
+      const price = p.lastPrice
+      const value = price != null ? price * p.quantity : p.invested
+      const delta = price != null ? value - p.invested : null
+      const pct = price != null && p.invested > 0 ? ((delta! / p.invested) * 100) : null
+      return { sym: p.ticker, val: formatCurrency(value, currency), delta, pct }
     })
     .slice(0, 24)
 }

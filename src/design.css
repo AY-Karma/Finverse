@@ -321,6 +321,11 @@ body::before {
   box-shadow: 0 0 0 0 rgba(46, 224, 106, 0.6);
   animation: pulse 2s infinite;
 }
+.live-dot--loading::before {
+  background: var(--ink-faint, #5a5c66);
+  animation: none;
+  opacity: 0.6;
+}
 @keyframes pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(46, 224, 106, 0.5);
@@ -403,9 +408,22 @@ body::before {
 }
 .panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-md);
   margin-bottom: var(--sp-lg);
+}
+.panel-head-titles {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-md);
+  padding-right: var(--sp-lg);
+}
+.panel-head .scope-switch {
+  margin-left: auto;
 }
 .panel-title {
   font-family: var(--font-mono);
@@ -434,7 +452,7 @@ body::before {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-tertiary);
-  padding: var(--sp-sm) var(--sp-md);
+  padding: 0; /* padding lives on the sortable cell (`.th-sort`) */
   border-bottom: 1px solid var(--hairline);
 }
 .table td {
@@ -451,6 +469,197 @@ body::before {
 }
 .table tbody tr:hover {
   background: var(--surface-2);
+}
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: var(--sp-sm) var(--sp-md);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.12s ease;
+}
+.th-sort:hover {
+  color: var(--ink);
+}
+.th-sort--active {
+  color: var(--primary-hover);
+}
+.th-sort-icon {
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+/* Equity Holdings ledger in the Overview (All / Equity scopes) — tighten the
+   horizontal cell padding so the numeric columns (Qty, Buy, Value, P&L) pull a
+   small step toward the Symbol column without the values crowding together. */
+.table--ledger td {
+  padding: var(--sp-md) 9px;
+}
+.table--ledger .th-sort {
+  padding: var(--sp-sm) 9px;
+}
+
+/* ============ Top exposure list ============ */
+.alloc-list {
+  margin-top: var(--sp-lg);
+}
+.alloc-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-md);
+}
+.alloc-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: var(--sp-md);
+  padding: var(--sp-sm) 0;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.alloc-row:last-child {
+  border-bottom: 0;
+}
+.alloc-sym {
+  font-weight: 600;
+  color: var(--ink);
+}
+.alloc-pct {
+  color: var(--primary-hover);
+  font-size: 12px;
+}
+.alloc-val {
+  color: var(--ink-subtle);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============ Scope switch (Equity / Mutual Funds) ============ */
+.scope-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 3px;
+  background: var(--surface-1);
+}
+.scope-btn {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding: 6px 14px;
+  border-radius: 999px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.scope-btn:hover {
+  color: var(--ink);
+}
+.scope-btn--active {
+  background: var(--primary);
+  color: #fff;
+}
+.scope-btn--active:hover {
+  color: #fff;
+}
+.scope-count {
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+/* Holdings summary strip for the mutual-fund scope */
+.mf-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--sp-md);
+  margin-bottom: var(--sp-lg);
+  padding: var(--sp-lg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+}
+.mf-sum-item {
+  display: grid;
+  gap: 4px;
+}
+.mf-sum-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+.mf-sum-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.mf-sum-value.up {
+  color: var(--semantic-success);
+}
+.mf-sum-value.down {
+  color: var(--semantic-danger);
+}
+
+/* ============ Folio list ============ */
+.folio-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.folio-row:last-child {
+  border-bottom: 0;
+}
+.folio-marker {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 0 rgba(94, 106, 210, 0.5);
+  flex: none;
+}
+.btn-remove {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-tertiary);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.btn-remove:hover {
+  background: var(--surface-3);
+  color: var(--semantic-danger);
+  border-color: var(--hairline-strong);
 }
 
 /* ============ Buttons ============ */
@@ -638,6 +847,38 @@ body::before {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+.panel--ledger {
+  overflow: visible;
+}
+.mf-name {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  position: relative;
+}
+.mf-name:hover::after {
+  content: attr(data-full);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  max-width: min(420px, 72vw);
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  white-space: normal;
+  color: var(--ink);
+}
 .up {
   color: var(--semantic-success);
 }
@@ -705,5 +946,48 @@ body::before {
   }
   .page-sub {
     text-align: left;
+  }
+}
+
+/* ============ AI Coach setup warning popup ============ */
+.coach-warn {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(1, 1, 2, 0.72);
+  backdrop-filter: blur(2px);
+  animation: coach-fade 0.14s ease;
+}
+.coach-warn-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xl);
+  max-width: 420px;
+  width: calc(100% - 48px);
+  padding: var(--sp-xxl);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, #2a1517, var(--surface-2));
+  border: 1px solid var(--semantic-danger);
+  box-shadow: 0 24px 60px rgba(255, 92, 97, 0.18), 0 8px 24px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+.coach-warn-msg {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #ffd7d9;
+  letter-spacing: -0.01em;
+}
+@keyframes coach-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }

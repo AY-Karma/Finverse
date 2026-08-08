@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useStore } from '../useStore'
 
 export function ImportView() {
-  const { uploadFile, positions } = useStore()
+  const { uploadFile, folios, positions, removeFolio } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -25,18 +25,44 @@ export function ImportView() {
           <h1 className="page-title">Feed the machine</h1>
         </div>
         <p className="page-sub">
-          Drop a broker export (.xlsx / .csv). Finverse reads ticker, quantity, cost, and optional
-          last price — then runs it onto the scoreboard.
+          Drop a broker export (.xlsx / .csv) for equity, or a mutual-fund holdings sheet for
+          schemes. Finverse detects the layout automatically — ticker/symbol, quantity/units, and
+          cost — then runs it onto the scoreboard across Equity and Mutual Funds scopes.
         </p>
       </div>
 
-      {positions.length > 0 && (
-        <div className="panel enter d1" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div className="score-label live-dot" />
-          <span className="hint">
-            {positions.length} position{positions.length === 1 ? '' : 's'} currently on the board.
-            Re-upload to replace the lineup.
-          </span>
+      {folios.length > 0 && (
+        <div className="panel enter d1" style={{ display: 'grid', gap: 4 }}>
+          <div className="panel-head">
+            <span className="panel-title">Folios on the board</span>
+            <span className="section-index">
+              {positions.length} position{positions.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          {folios.map((f) => (
+            <div key={f.id} className="folio-row">
+              <div className="folio-marker" />
+              <div style={{ display: 'grid', gap: 2, flex: 1 }}>
+                <span className="sym">{f.name}</span>
+                <span className="hint">
+                  {f.positions.length} position{f.positions.length === 1 ? '' : 's'} ·{' '}
+                  {new Date(f.importedAt).toLocaleString()}
+                </span>
+              </div>
+              <button
+                className="btn-remove"
+                aria-label={`Remove ${f.name}`}
+                title="Remove folio"
+                onClick={() => removeFolio(f.id)}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <p className="hint" style={{ borderTop: '1px solid var(--hairline)', paddingTop: 12 }}>
+            Remove a folio to drop a duplicate or outdated import. The rest of the board re-tallies
+            instantly.
+          </p>
         </div>
       )}
 
@@ -56,7 +82,7 @@ export function ImportView() {
       >
         <div className="drop-title">Drop your sheet in the pit</div>
         <p className="hint" style={{ marginTop: 8 }}>
-          or click to browse · .xlsx, .xls, .csv
+          or click to browse · .xlsx, .xls, .csv — each file becomes its own folio
         </p>
         <input
           ref={inputRef}
@@ -96,15 +122,22 @@ export function ImportView() {
             </tr>
             <tr>
               <td className="sym">Buy / Cost</td>
-              <td className="muted">buy price · avg cost · nav · price · cost</td>
+              <td className="muted">average price · buy price · avg cost · nav · cost</td>
             </tr>
             <tr>
               <td className="sym">Last Price</td>
-              <td className="muted">optional · ltp · current price · market price · close</td>
+              <td className="muted">optional · ltp · previous closing · current · market price</td>
             </tr>
             <tr>
               <td className="sym">Type</td>
               <td className="muted">optional · stock / etf / mutual fund</td>
+            </tr>
+            <tr>
+              <td className="sym">Mutual Funds</td>
+              <td className="muted">
+                scheme name · amc · category · sub-category · folio · units · invested value · current
+                value · xirr
+              </td>
             </tr>
           </tbody>
         </table>

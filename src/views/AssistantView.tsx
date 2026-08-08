@@ -1,27 +1,27 @@
 import { useState } from 'react'
 import type { ChatMessage } from '../types'
-import { chat, portfolioContext } from '../providers'
-import { useStore } from '../useStore'
+import { chat, portfolioContext, isLocalProvider } from '../providers'
+import { useStore, type View } from '../useStore'
 
-export function AssistantView() {
+export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
   const { positions, settings } = useStore()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [warnOpen, setWarnOpen] = useState(false)
 
   const context = portfolioContext(positions)
 
   async function send() {
     const text = input.trim()
-    if (!text || loading || !settings.provider || !settings.apiKey) {
-      setError(
-        !settings.provider || !settings.apiKey
-          ? 'Open Settings and add a provider + API key first.'
-          : null,
-      )
-      if (!text) return
+    const local = settings.provider ? isLocalProvider(settings.provider) : false
+
+    if (!settings.provider || (!local && !settings.apiKey)) {
+      setWarnOpen(true)
+      return
     }
+    if (!text || loading) return
     setInput('')
     setError(null)
 
@@ -33,6 +33,8 @@ export function AssistantView() {
       const reply = await chat({
         provider: settings.provider,
         apiKey: settings.apiKey,
+        model: settings.model || undefined,
+        baseUrl: settings.baseUrl || undefined,
         history,
         context,
         signal: new AbortController().signal,
@@ -104,6 +106,19 @@ export function AssistantView() {
 
         {error && <p className="hint down" style={{ marginTop: 12 }}>{error}</p>}
       </div>
+
+      {warnOpen && (
+        <div className="coach-warn" role="alert">
+          <div className="coach-warn-card">
+            <p className="coach-warn-msg">
+              Looks like your Coach isn't wired up - Get him on board!
+            </p>
+            <button className="btn btn--primary" onClick={() => { setWarnOpen(false); onGoTo('settings') }}>
+              Set up Provider
+            </button>
+          </div>
+        </div>
+      )}
     </>
   )
 }

@@ -31,3 +31,7 @@ Thumbs.db
 
 # Testing / coverage
 coverage/
+
+# Local debugging scratch
+.testdata/
+/out/

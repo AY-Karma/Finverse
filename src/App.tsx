@@ -54,7 +54,7 @@ export default function App() {
       <main className="main">
         {view === 'overview' && <Overview onGoTo={setView} />}
         {view === 'import' && <ImportView />}
-        {view === 'assistant' && <AssistantView />}
+        {view === 'assistant' && <AssistantView onGoTo={setView} />}
         {view === 'settings' && <SettingsView />}
       </main>
     </div>
