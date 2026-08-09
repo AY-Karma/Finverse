@@ -6,7 +6,7 @@ import type { LiveQuote, Position } from './types'
 // ---------------------------------------------------------------------------
 
 /** NSE trading holidays 2026 (weekday closures only; weekends are closed anyway). */
-export const NSE_HOLIDAYS_2026: ReadonlySet<string> = new Set([
+const NSE_HOLIDAYS_2026: ReadonlySet<string> = new Set([
   '2026-01-15', // Municipal Corporation Election — Maharashtra
   '2026-01-26', // Republic Day
   '2026-03-03', // Holi
@@ -45,7 +45,7 @@ export function isMarketOpen(date: Date = new Date()): boolean {
 }
 
 /** The IST calendar date (YYYY-MM-DD) for "has this NAV already been fetched today?" checks. */
-export function istDate(date: Date = new Date()): string {
+function istDate(date: Date = new Date()): string {
   return new Date(date.getTime() + (5 * 60 + 30) * 60 * 1000).toISOString().slice(0, 10)
 }
 
@@ -60,7 +60,7 @@ export function marketStatusText(open: boolean, liveCount: number): string {
 // ---------------------------------------------------------------------------
 
 /** Stable key used for a position in the live-quotes map. */
-export function quoteKey(p: Position): string {
+function quoteKey(p: Position): string {
   return p.type === 'mutual-fund' ? (p.name || p.ticker).trim() : p.ticker.trim().toUpperCase()
 }
 
@@ -108,7 +108,7 @@ const YAHOO_ALIASES: Record<string, string> = {
  * to NSE (.NS) by default; symbols that already carry a suffix pass through.
  * Mutual funds have no intraday Yahoo price — they return null (handled by NAV).
  */
-export function resolveYahooSymbol(p: Position): string | null {
+function resolveYahooSymbol(p: Position): string | null {
   if (p.type === 'mutual-fund') return null
   const raw = p.ticker.trim()
   if (!raw) return null
@@ -123,7 +123,7 @@ export function resolveYahooSymbol(p: Position): string | null {
 // Yahoo Finance fetch (via the CORS relay; NSE data is ~15-20 min delayed)
 // ---------------------------------------------------------------------------
 
-export interface YahooResult {
+interface YahooResult {
   price: number
   change: number | null
   pct: number | null
@@ -275,7 +275,7 @@ const MANUAL_LIMIT_PER_HOUR = 5 // max manual refreshes per rolling hour
 const MANUAL_COOLDOWN_MS = 5 * 60 * 1000 // min gap between two manual refreshes
 const MANUAL_KEY = 'finverse:manualRefresh'
 
-export interface ManualRefreshResult {
+interface ManualRefreshResult {
   allowed: boolean
   reason?: 'cooldown' | 'limit'
   retryInMs?: number

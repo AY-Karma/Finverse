@@ -1,7 +1,7 @@
 import type { ChartSpec, Position, ProviderId, Currency, LiveQuote } from './types'
 import { fetchYahooPrice, livePriceOf } from './live'
 
-export interface Provider {
+interface Provider {
   id: ProviderId
   name: string
   endpoint: string
@@ -48,7 +48,7 @@ function normalizeEndpoint(base: string | undefined, fallback: string): string {
   return `${clean.replace(/\/v1$/, '')}/v1/chat/completions`
 }
 
-export function getProvider(id: string): Provider | undefined {
+function getProvider(id: string): Provider | undefined {
   return PROVIDERS.find((p) => p.id === id)
 }
 

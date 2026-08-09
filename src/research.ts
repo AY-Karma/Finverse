@@ -19,14 +19,14 @@ export interface ResearchLink {
 }
 
 /** Ticker → screener.in canonical slug (upper-case, dots/spaces removed). */
-export function screenerSlug(symbol: string): string {
+function screenerSlug(symbol: string): string {
   return symbol
     .toUpperCase()
     .replace(/\.(NS|NSE|BSE)$/, '')
     .replace(/[^A-Z0-9]/g, '')
 }
 
-export function screenerSearchUrl(query: string): string {
+function screenerSearchUrl(query: string): string {
   return `https://www.screener.in/search/?q=${encodeURIComponent(query)}`
 }
 
