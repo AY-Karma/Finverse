@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import type { ChatMessage, Position } from '../types'
+import type { ChatMessage, Currency, LiveQuote, Position } from '../types'
 import { chat, portfolioContext, isLocalProvider } from '../providers'
 import { renderMessage, extractCharts } from '../format'
 import { ChatChart } from '../ChatChart'
+import { livePriceOf } from '../live'
 import { useStore, type View } from '../useStore'
 
 const CHAT_KEY = 'finverse:chat'
@@ -27,15 +28,70 @@ const WORKING_PHRASES = [
 
 const CHIP_CAP = 6
 
+// Quick mode is a promise: it must come back fast. If the model hasn't answered
+// within this window, we abort and hand over the computed snapshot instead.
+const QUICK_CAP_MS = 30 * 1000
+
+function fmtMoney(n: number, currency: Currency): string {
+  const s = new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n)
+  return n < 0 ? s.replace('-', '\u2212') : s
+}
+
+/** Computed snapshot shown when quick mode hits its 30s cap. */
+function quickSummary(
+  positions: Position[],
+  liveQuotes: Record<string, LiveQuote>,
+  currency: Currency,
+): string {
+  if (positions.length === 0) {
+    return 'Quick mode hit its 30-second cap, but there are no positions loaded yet — import a sheet and ask again.'
+  }
+  const invested = positions.reduce((s, p) => s + p.invested, 0)
+  const value = positions.reduce((s, p) => s + (livePriceOf(p, liveQuotes) ?? 0) * p.quantity, 0)
+  const pnl = value - invested
+  const pnlPct = invested > 0 ? (pnl / invested) * 100 : null
+  const equity = positions.filter((p) => p.type !== 'mutual-fund').length
+  const mf = positions.length - equity
+
+  const rows = positions
+    .map((p) => {
+      const price = livePriceOf(p, liveQuotes)
+      const v = price != null ? price * p.quantity : p.invested
+      const hPnlPct = p.invested > 0 && price != null ? ((v - p.invested) / p.invested) * 100 : null
+      const weight = value > 0 ? (v / value) * 100 : null
+      const label = p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
+      return (
+        `${label} — ${p.quantity} @ ${fmtMoney(p.buyPrice, currency)} | last ` +
+        `${price != null ? fmtMoney(price, currency) : 'n/a'} | P&L ` +
+        `${hPnlPct != null ? (hPnlPct >= 0 ? '+' : '') + hPnlPct.toFixed(2) + '%' : 'n/a'} | ` +
+        `weight ${weight != null ? weight.toFixed(1) + '%' : 'n/a'}`
+      )
+    })
+    .join('\n')
+
+  return [
+    'Quick mode hit its 30-second cap, so here is the computed snapshot of your board:',
+    `Invested: ${fmtMoney(invested, currency)} | Current: ${fmtMoney(value, currency)} | ` +
+      `P&L: ${pnl >= 0 ? '+' : ''}${fmtMoney(pnl, currency)}` +
+      `${pnlPct != null ? ` (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)` : ''}`,
+    `Holdings: ${positions.length} (${equity} equity, ${mf} mutual fund${mf === 1 ? '' : 's'})`,
+    '',
+    rows,
+  ].join('\n')
+}
+
 function labelOf(p: Position): string {
   return p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
 }
 
 /** Follow-up chips derived from the current portfolio, so suggestions stay relevant. */
-function contextualSuggestions(positions: Position[]): string[] {
+function contextualSuggestions(
+  positions: Position[],
+  liveQuotes: Record<string, LiveQuote>,
+): string[] {
   const valued = positions
     .map((p) => {
-      const price = p.lastPrice ?? (p.invested > 0 ? p.buyPrice : null)
+      const price = livePriceOf(p, liveQuotes)
       const value = price != null ? price * p.quantity : p.invested
       const pnlPct =
         p.invested > 0 && price != null ? ((value - p.invested) / p.invested) * 100 : null
@@ -68,7 +124,7 @@ function loadChat(): ChatMessage[] {
 }
 
 export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
-  const { positions, settings } = useStore()
+  const { positions, settings, liveQuotes, quickMode, setQuickMode } = useStore()
   const [messages, setMessages] = useState<ChatMessage[]>(loadChat)
   const [input, setInput] = useState('')
   const [chips, setChips] = useState<string[]>(QUICK_PROMPTS)
@@ -77,12 +133,22 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
   const [statusIdx, setStatusIdx] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [warnOpen, setWarnOpen] = useState(false)
+  const [escalate, setEscalate] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
   const chatRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     localStorage.setItem(CHAT_KEY, JSON.stringify(messages))
   }, [messages])
+
+  // Leaving the tab resets the conversation to its initial state: abort any
+  // in-flight generation and wipe the persisted history.
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.abort()
+      localStorage.setItem(CHAT_KEY, JSON.stringify([]))
+    }
+  }, [])
 
   useEffect(() => {
     const el = chatRef.current
@@ -108,16 +174,17 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
 
   const status = WORKING_PHRASES[statusIdx]
 
-  const context = portfolioContext(positions, settings.currency || 'INR')
+  const context = portfolioContext(positions, settings.currency || 'INR', liveQuotes)
 
   const refillChips = () =>
     setChips((prev) => {
-      const fresh = contextualSuggestions(positions).filter((ch) => !prev.includes(ch))
+      const fresh = contextualSuggestions(positions, liveQuotes).filter((ch) => !prev.includes(ch))
       return [...prev, ...fresh].slice(0, CHIP_CAP)
     })
 
-  async function sendText(text: string) {
+  async function sendText(text: string, opts: { quick?: boolean } = {}) {
     const trimmed = text.trim()
+    const quick = opts.quick ?? quickMode
     const local = settings.provider ? isLocalProvider(settings.provider) : false
 
     if (!settings.provider || (!local && !settings.apiKey)) {
@@ -137,6 +204,14 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
     const controller = new AbortController()
     controllerRef.current = controller
 
+    // Quick mode answers in <=30s; full mode gets a 5-minute generation cap.
+    // Either way, if the cap is hit we abort and respond with what we have.
+    const timedOut = { current: false }
+    const timeoutId = window.setTimeout(() => {
+      timedOut.current = true
+      controller.abort()
+    }, quick ? QUICK_CAP_MS : 5 * 60 * 1000)
+
     try {
       const { content, charts } = await chat({
         provider: settings.provider,
@@ -146,18 +221,44 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
         history,
         context,
         positions,
+        liveQuotes,
         signal: controller.signal,
+        quick,
       })
       setMessages([...history, { role: 'assistant', content, charts }])
       refillChips()
     } catch (e) {
       if (controller.signal.aborted) {
-        setMessages([...history, { role: 'assistant', content: 'Generation stopped.' }])
+        if (timedOut.current && quick) {
+          // 30s cap hit in quick mode: hand over the computed snapshot and
+          // offer to continue the request in full mode.
+          setMessages([
+            ...history,
+            {
+              role: 'assistant',
+              content: quickSummary(positions, liveQuotes, settings.currency || 'INR'),
+              kind: 'quick-fallback',
+            },
+          ])
+          setEscalate(trimmed)
+        } else {
+          setMessages([
+            ...history,
+            {
+              role: 'assistant',
+              content: timedOut.current
+                ? 'That took too long to generate. Please simplify your prompt or narrow the context — ask about a single holding or one metric — so I can answer more quickly.'
+                : 'Generation stopped.',
+              kind: timedOut.current ? 'timeout' : 'stopped',
+            },
+          ])
+        }
         setError(null)
       } else {
         setError(e instanceof Error ? e.message : 'Request failed.')
       }
     } finally {
+      window.clearTimeout(timeoutId)
       if (controllerRef.current === controller) controllerRef.current = null
       setLoading(false)
     }
@@ -202,7 +303,15 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
 
       <div className="panel enter d2">
         <div className="panel-head">
-          <span className="panel-title">Conversation</span>
+          <div className="panel-head-title-group">
+            <span className="panel-title">Conversation</span>
+            {quickMode && (
+              <span className="quick-badge">
+                <span className="quick-badge-dot" aria-hidden="true" />
+                Quick
+              </span>
+            )}
+          </div>
           <div className="panel-head-actions">
             {messages.length > 0 && (
               <button className="btn btn--ghost btn--small" onClick={clearChat} disabled={loading}>
@@ -224,23 +333,32 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
           )}
           {messages.map((m, i) =>
             m.role === 'assistant' ? (
-              (() => {
-                const extracted = extractCharts(m.content)
-                const charts = (m.charts ?? []).concat(extracted.charts)
-                return (
-                  <Fragment key={i}>
-                    <div className="msg msg--assistant">{renderMessage(extracted.text)}</div>
-                    {charts.map((c, ci) => <ChatChart key={ci} spec={c} />)}
-                  </Fragment>
-                )
-              })()
+              m.kind === 'stopped' || m.kind === 'timeout' ? (
+                <div key={i} className={`msg msg--assistant msg--${m.kind}`}>
+                  <span className="msg-danger-sym" aria-hidden="true">!</span>
+                  <span>{m.content}</span>
+                </div>
+              ) : (
+                (() => {
+                  const extracted = extractCharts(m.content)
+                  const charts = (m.charts ?? []).concat(extracted.charts)
+                  return (
+                    <Fragment key={i}>
+                      <div className="msg msg--assistant">{renderMessage(extracted.text)}</div>
+                      {charts.map((c, ci) => <ChatChart key={ci} spec={c} />)}
+                    </Fragment>
+                  )
+                })()
+              )
             ) : (
               <div key={i} className="msg msg--user">{m.content}</div>
             ),
           )}
           {loading && (
             <div className="msg msg--assistant coach-working">
-              <span className="coach-status">{status}</span>
+              <span className="coach-status">
+                {elapsed >= 240 ? 'Running long — consider simplifying the prompt' : status}
+              </span>
               <span className="coach-dots" aria-hidden="true">
                 <span>.</span><span>.</span><span>.</span>
               </span>
@@ -257,26 +375,35 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
           ))}
         </div>
 
-        <div className="chat-input">
-          <input
-            className="input"
-            placeholder="Ask your coach…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') send()
-            }}
-          />
-          {loading ? (
-            <button className="btn btn--stop" onClick={stop}>
-              ⏹ Stop
+          <div className="chat-input">
+            <input
+              className="input"
+              placeholder={quickMode ? 'Quick ask…' : 'Ask your coach…'}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') send()
+              }}
+            />
+            <button
+              className={`btn btn--ghost btn--quick${quickMode ? ' btn--quick--on' : ''}`}
+              aria-pressed={quickMode}
+              title={quickMode ? 'Quick responses: ON — short answers (Send and suggestions)' : 'Quick responses: OFF — full analysis (Send and suggestions)'}
+              disabled={loading}
+              onClick={() => setQuickMode(!quickMode)}
+            >
+              &gt;&gt;
             </button>
-          ) : (
-            <button className="btn btn--primary" onClick={send}>
-              Send
-            </button>
-          )}
-        </div>
+            {loading ? (
+              <button className="btn btn--stop" onClick={stop}>
+                ⏹ Stop
+              </button>
+            ) : (
+              <button className="btn btn--primary" onClick={send}>
+                Send
+              </button>
+            )}
+          </div>
 
         {error && <p className="hint down" style={{ marginTop: 12 }}>{error}</p>}
       </div>
@@ -290,6 +417,32 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
             <button className="btn btn--primary" onClick={() => { setWarnOpen(false); onGoTo('settings') }}>
               Set up Provider
             </button>
+          </div>
+        </div>
+      )}
+
+      {escalate && (
+        <div className="coach-warn coach-escalate" role="alert">
+          <div className="coach-warn-card coach-escalate-card">
+            <p className="coach-warn-msg coach-escalate-msg">
+              Quick mode hit its 30-second cap. Need more info? Switch to full mode and I'll dig deeper into
+              your request.
+            </p>
+            <div className="coach-escalate-actions">
+              <button className="btn btn--ghost" onClick={() => setEscalate(null)}>
+                Dismiss
+              </button>
+              <button
+                className="btn btn--primary"
+                onClick={() => {
+                  const q = escalate
+                  setEscalate(null)
+                  void sendText(q, { quick: false })
+                }}
+              >
+                Full analysis
+              </button>
+            </div>
           </div>
         </div>
       )}

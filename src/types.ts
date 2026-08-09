@@ -50,8 +50,16 @@ export interface ChartSpec {
   data: { label: string; value: number }[]
 }
 
+export interface LiveQuote {
+  price: number
+  at: number
+  source: 'yahoo' | 'nav'
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   charts?: ChartSpec[]
+  /** Abort notices rendered with danger styling: 'stopped' (Stop button) or 'timeout' (generation cap). */
+  kind?: 'stopped' | 'timeout' | 'quick-fallback'
 }

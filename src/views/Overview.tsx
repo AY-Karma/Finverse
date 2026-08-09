@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { computeStats, formatCurrency, formatPercent } from '../store'
 import { useStore } from '../useStore'
-import type { Currency } from '../types'
+import type { Currency, LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
+import { isLiveQuote, isMarketOpen, livePriceOf, marketStatusText } from '../live'
+import { marketLinks, resolveScreenerCompanyPath, screenerSectionLinks } from '../research'
+import type { ResearchLink } from '../research'
 
 const PIE_COLORS = [
   '#5e6ad2',
@@ -26,7 +29,7 @@ const TOOLTIP_STYLE = {
 }
 
 type Scope = 'all' | 'equity' | 'mutual'
-type SortField = 'symbol' | 'qty' | 'buy' | 'value' | 'pnl'
+type SortField = 'symbol' | 'qty' | 'buy' | 'ltp' | 'value' | 'pnl'
 type SortDir = 'asc' | 'desc'
 
 interface LedgerRow {
@@ -34,19 +37,62 @@ interface LedgerRow {
   symbol: string
   qty: number
   buy: number
+  ltp: number | null
+  isLive: boolean
   value: number
   pnl: number | null
 }
 
 export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
-  const { positions, settings, setSettings } = useStore()
+  const { positions, settings, setSettings, liveQuotes, refreshNow } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [limitMsg, setLimitMsg] = useState<{ text: string; until?: number } | null>(null)
+  const [researchOpen, setResearchOpen] = useState<string | null>(null)
+  const [, setNowTick] = useState(0)
   const hideValues = settings.hideValues
+
+  // Live countdown for the manual-refresh rate-limit note.
+  useEffect(() => {
+    if (!limitMsg?.until) return
+    const id = window.setInterval(() => {
+      if (limitMsg.until! <= Date.now()) setLimitMsg(null)
+      else setNowTick(Date.now())
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [limitMsg])
+
+  const onManualRefresh = async () => {
+    if (refreshing || positions.length === 0) return
+    setRefreshing(true)
+    try {
+      const res = await refreshNow()
+      if (!res.ok) {
+        setLimitMsg({
+          text: res.reason === 'limit' ? 'Manual refresh limit reached (5 per hour).' : 'Refreshing too quickly.',
+          until: Date.now() + res.retryInMs,
+        })
+      } else {
+        setLimitMsg(null)
+      }
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const live = settings.currency === 'INR' ? liveQuotes : {}
+  const liveCount = Object.keys(live).length
+  const marketOpen = isMarketOpen()
 
   const MASK = '••••••'
   const mask = (s: string) => (hideValues ? MASK : s)
+
+  const fmtCd = (ms: number) => {
+    const s = Math.max(0, Math.ceil(ms / 1000))
+    return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`
+  }
 
   const equityCount = positions.filter((p) => p.type !== 'mutual-fund').length
   const mfCount = positions.filter((p) => p.type === 'mutual-fund').length
@@ -59,13 +105,36 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     [positions, scope],
   )
 
-  const stats = computeStats(scopePositions)
+  const pricesMap = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const p of positions) {
+      const v = livePriceOf(p, live)
+      if (v != null) m.set(p.ticker, v)
+    }
+    return m
+  }, [positions, live])
+
+  const stats = computeStats(scopePositions, pricesMap)
+
+  // Top holdings, enriched for the research list: weight, live P&L and the
+  // matching position (for type-aware deep-links).
+  const researchRows = useMemo(
+    () =>
+      stats.allocations.map((a) => {
+        const p = positions.find((x) => x.ticker === a.symbol)
+        const price = p ? livePriceOf(p, live) : null
+        const pnl = p && price != null ? price * p.quantity - p.invested : null
+        const pct = stats.currentValue > 0 ? (a.value / stats.currentValue) * 100 : 0
+        return { a, p, pnl, pct }
+      }),
+    [stats.allocations, stats.currentValue, positions, live],
+  )
 
   // Hooks are all called unconditionally — no early return may happen above these.
   const ledgerRows: LedgerRow[] = useMemo(
     () =>
       scopePositions.map((p) => {
-        const price = p.lastPrice
+        const price = livePriceOf(p, live)
         const value = price != null ? price * p.quantity : p.invested
         const pnl = price != null ? value - p.invested : null
         return {
@@ -73,11 +142,13 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           symbol: p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker,
           qty: p.quantity,
           buy: p.buyPrice,
+          ltp: price,
+          isLive: isLiveQuote(p, live),
           value,
           pnl,
         }
       }),
-    [scopePositions],
+    [scopePositions, live],
   )
 
   const sortedRows = useMemo(() => {
@@ -87,6 +158,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
       if (sort.field === 'symbol') return a.symbol.localeCompare(b.symbol) * dir
       if (sort.field === 'qty') return (a.qty - b.qty) * dir
       if (sort.field === 'buy') return (a.buy - b.buy) * dir
+      if (sort.field === 'ltp') return ((a.ltp ?? -Infinity) - (b.ltp ?? -Infinity)) * dir
       if (sort.field === 'value') return (a.value - b.value) * dir
       const ap = a.pnl ?? -Infinity
       const bp = b.pnl ?? -Infinity
@@ -98,14 +170,14 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     if (scope !== 'mutual') return null
     const invested = scopePositions.reduce((s, p) => s + p.invested, 0)
     const current = scopePositions.reduce((s, p) => {
-      const price = p.lastPrice
+      const price = livePriceOf(p, live)
       return s + (price != null ? price * p.quantity : p.invested)
     }, 0)
     const pnl = current - invested
     const xirrs = scopePositions.map((p) => p.xirr).filter((x): x is number => x != null)
     const xirrAvg = xirrs.length ? xirrs.reduce((s, x) => s + x, 0) / xirrs.length : null
     return { invested, current, pnl, xirrAvg }
-  }, [scope, scopePositions])
+  }, [scope, scopePositions, live])
 
   if (positions.length === 0) {
     return (
@@ -150,8 +222,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
   }
 
   const pnlUp = stats.pnl >= 0
-  const eff = (p: (typeof positions)[number]) =>
-    p.lastPrice ?? (p.invested > 0 ? p.buyPrice : null)
+  const eff = (p: (typeof positions)[number]) => livePriceOf(p, live)
   const best = scopePositions
     .filter((p) => eff(p) != null && p.invested > 0)
     .sort((a, b) => ((eff(b)! - b.buyPrice) / b.buyPrice) * 100 - ((eff(a)! - a.buyPrice) / a.buyPrice) * 100)[0]
@@ -229,9 +300,34 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
               </svg>
             )}
           </button>
+          <button
+            className={`icon-btn${refreshing ? ' icon-btn--spinning' : ''}`}
+            onClick={onManualRefresh}
+            title={positions.length === 0 ? 'Import a portfolio first' : 'Refresh last-trade prices for all holdings now (5 per hour)'}
+            disabled={refreshing || positions.length === 0}
+            aria-label="Refresh prices now"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <path d="M21 3v6h-6" />
+            </svg>
+          </button>
+          {limitMsg && (
+            <span className="manual-note">
+              {limitMsg.text}
+              {limitMsg.until && Date.now() < limitMsg.until && <> Retry in {fmtCd(limitMsg.until - Date.now())}.</>}
+            </span>
+          )}
+          <span className="market-status">
+            <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} aria-hidden="true" />
+            {marketStatusText(marketOpen, liveCount)}
+            {liveCount > 0 && (
+              <span className="market-status-time">· last refresh {lastRefreshTime(live)}</span>
+            )}
+          </span>
           <span>
             Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
-            {scope === 'mutual' ? ' — mutual funds' : ''} marked with sheet prices.
+            {scope === 'mutual' ? ' — mutual funds' : ''} at current market prices.
           </span>
         </p>
       </div>
@@ -241,7 +337,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
         <div className="score">
           <div className="score-label">
             <span>Current Value</span>
-            <span className="live-dot" />
+            <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} />
           </div>
           <div className="score-value">{mask(formatCurrency(stats.currentValue, currency))}</div>
           <div className="score-foot">Total market exposure</div>
@@ -273,10 +369,10 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
       <div className="tiker-wrap enter d2">
         <div className="ticker">
           <div className="ticker-track">
-            {tickerItems(scopePositions, currency, hideValues).map((t, i) => (
+            {tickerItems(scopePositions, currency, hideValues, live).map((t, i) => (
               <TickerCell key={i} t={t} hideValues={hideValues} />
             ))}
-            {tickerItems(scopePositions, currency, hideValues).map((t, i) => (
+            {tickerItems(scopePositions, currency, hideValues, live).map((t, i) => (
               <TickerCell key={`dup-${i}`} t={t} hideValues={hideValues} />
             ))}
           </div>
@@ -322,7 +418,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             </div>
           )}
           {scope === 'mutual' ? (
-            <MFLedger rows={scopePositions} currency={currency} hideValues={hideValues} />
+            <MFLedger rows={scopePositions} currency={currency} hideValues={hideValues} live={live} />
           ) : (
             <table className="table table--ledger">
               <thead>
@@ -330,6 +426,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
                   <Th field="symbol">Symbol</Th>
                   <Th field="qty">Qty</Th>
                   <Th field="buy">Buy</Th>
+                  <Th field="ltp">Last Trade</Th>
                   <Th field="value">Value</Th>
                   <Th field="pnl">P&L</Th>
                 </tr>
@@ -339,9 +436,21 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
                   const pnlUp = r.pnl != null && r.pnl >= 0
                   return (
                     <tr key={r.id}>
-                      <td className="sym">{mask(r.symbol)}</td>
+                      <td className="sym" title={r.symbol}>{mask(r.symbol)}</td>
                       <td>{mask(fmtUnits(r.qty))}</td>
                       <td>{mask(formatCurrency(r.buy, currency))}</td>
+                      <td>
+                        {r.ltp != null && r.buy > 0 && r.ltp !== r.buy ? (
+                          <span className={`ltp ltp--${r.ltp > r.buy ? 'up' : 'down'}`}>
+                            <span className="ltp-arrow" aria-hidden="true">{r.ltp > r.buy ? '▲' : '▼'}</span>
+                            {mask(formatCurrency(r.ltp, currency))}
+                          </span>
+                        ) : r.ltp != null ? (
+                          <span className="ltp ltp--flat">{mask(formatCurrency(r.ltp, currency))}</span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td>{mask(formatCurrency(r.value, currency))}</td>
                       <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
                         {r.pnl != null ? mask(`${pnlUp ? '+' : ''}${formatCurrency(r.pnl, currency)}`) : '—'}
@@ -384,21 +493,36 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="alloc-list">
+          <div className="alloc-list alloc-list--research">
             <div className="alloc-list-head">
-              <span className="epsilon">Top exposure by {scope === 'mutual' ? 'scheme' : 'symbol'}</span>
+              <span className="panel-title">Top holdings · research</span>
               <span className="section-index">{stats.allocations.length} shown</span>
             </div>
-            {stats.allocations.length === 0 ? (
+            {researchRows.length === 0 ? (
               <div className="muted">No valued holdings yet.</div>
             ) : (
-              stats.allocations.map((a) => {
-                const pct = stats.currentValue > 0 ? (a.value / stats.currentValue) * 100 : 0
+              researchRows.map(({ a, p, pnl, pct }) => {
+                const open = researchOpen === a.symbol
+                const pnlUp = pnl != null && pnl >= 0
                 return (
-                  <div className="alloc-row" key={a.symbol}>
-                    <span className="alloc-sym">{mask(a.symbol)}</span>
-                    <span className="alloc-pct">{mask(formatPercent(pct))}</span>
-                    <span className="alloc-val">{mask(formatCurrency(a.value, currency))}</span>
+                  <div className="research-row" key={a.symbol}>
+                    <button
+                      className="research-main"
+                      onClick={() => setResearchOpen(open ? null : a.symbol)}
+                      aria-expanded={open}
+                    >
+                      <span className="research-sym">{mask(a.symbol)}</span>
+                      <span className="research-pct">{mask(formatPercent(pct))}</span>
+                      {pnl != null && (
+                        <span className={`research-pnl${pnlUp ? ' up' : ' down'}`}>
+                          {mask(`${pnlUp ? '+' : ''}${formatCurrency(pnl, currency)}`)}
+                        </span>
+                      )}
+                      <span className={`research-chev${open ? ' research-chev--open' : ''}`} aria-hidden="true">
+                        ›
+                      </span>
+                    </button>
+                    {open && p && <ResearchDrawer p={p} />}
                   </div>
                 )
               })
@@ -410,8 +534,71 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
   )
 }
 
+/** Expandable research drawer: resolves the canonical screener.in company path
+ *  on open (cached), then shows section links + secondary sources. */
+function ResearchDrawer({ p }: { p: Position }) {
+  const [links, setLinks] = useState<ResearchLink[] | null>(null)
+
+  useEffect(() => {
+    if (p.type === 'mutual-fund') return
+    let alive = true
+    setLinks(null)
+    resolveScreenerCompanyPath(p.ticker).then((base) => {
+      if (alive) setLinks(screenerSectionLinks(base))
+    })
+    return () => {
+      alive = false
+    }
+  }, [p.ticker, p.type])
+
+  const other = marketLinks(p)
+
+  return (
+    <div className="research-drawer">
+      {p.type !== 'mutual-fund' && (
+        <div className="research-group">
+          <div className="research-group-title">FOR MORE INFO</div>
+          <div className="research-links">
+            {links ? (
+              links.map((l) => (
+                <a className="research-link" key={l.label} href={l.url} target="_blank" rel="noreferrer">
+                  {l.label} ↗
+                </a>
+              ))
+            ) : (
+              <span className="muted">Locating on screener.in…</span>
+            )}
+          </div>
+        </div>
+      )}
+      {other.length > 0 && (
+        <div className="research-group">
+          <div className="research-group-title">Other sources</div>
+          <div className="research-links">
+            {other.map((l) => (
+              <a className="research-link" key={l.label} href={l.url} target="_blank" rel="noreferrer">
+                {l.label} ↗
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Mutual-fund ledger — layout maps to the holdings export: Scheme, AMC, Folio, Units, Values, Returns, XIRR. */
-function MFLedger({ rows, currency, hideValues }: { rows: ReturnType<typeof useStore>['positions']; currency: Currency; hideValues: boolean }) {
+function MFLedger({
+  rows,
+  currency,
+  hideValues,
+  live,
+}: {
+  rows: ReturnType<typeof useStore>['positions']
+  currency: Currency
+  hideValues: boolean
+  live: Record<string, LiveQuote>
+}) {
   const [sort, setSort] = useState<{ field: string; dir: SortDir } | null>(null)
   const mask = (s: string) => (hideValues ? '••••••' : s)
 
@@ -421,12 +608,12 @@ function MFLedger({ rows, currency, hideValues }: { rows: ReturnType<typeof useS
     return [...rows].sort((a, b) => {
       const num = (x: PositionLike) =>
         sort.field === 'value'
-          ? valueOf(x, currency)
+          ? valueOf(x, currency, live)
           : sort.field === 'units'
             ? x.quantity
             : sort.field === 'invested'
               ? x.invested
-              : mfReturnPct(x, currency) ?? -Infinity
+              : mfReturnPct(x, currency, live) ?? -Infinity
       switch (sort.field) {
         case 'scheme':
           return (a.name || a.ticker).localeCompare(b.name || b.ticker) * dir
@@ -474,7 +661,7 @@ function MFLedger({ rows, currency, hideValues }: { rows: ReturnType<typeof useS
       </thead>
       <tbody>
         {sorted.map((p) => {
-          const value = valueOf(p, currency)
+          const value = valueOf(p, currency, live)
           return (
             <tr key={p.id}>
               <td className="sym">
@@ -485,8 +672,8 @@ function MFLedger({ rows, currency, hideValues }: { rows: ReturnType<typeof useS
               <td>{mask(fmtUnits(p.quantity))}</td>
               <td>{mask(formatCurrency(p.invested, currency))}</td>
               <td>{mask(formatCurrency(value, currency))}</td>
-              <td className={valueOf(p, currency) >= p.invested ? 'up' : 'down'}>
-                {mask(formatPercent(mfReturnPct(p, currency) ?? 0))}
+              <td className={valueOf(p, currency, live) >= p.invested ? 'up' : 'down'}>
+                {mask(formatPercent(mfReturnPct(p, currency, live) ?? 0))}
               </td>
               <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'}>
                 {p.xirr != null ? mask(formatPercent(p.xirr)) : '—'}
@@ -508,15 +695,29 @@ function fmtUnits(n: number): string {
   return n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
 }
 
-function valueOf(p: PositionLike, _currency: Currency): number {
-  const price = p.lastPrice
+function valueOf(p: PositionLike, _currency: Currency, live: Record<string, LiveQuote>): number {
+  const price = livePriceOf(p, live)
   return price != null ? price * p.quantity : p.invested
 }
 
 /** General return: (current value − invested) ÷ invested × 100. */
-function mfReturnPct(p: PositionLike, currency: Currency): number | null {
+function mfReturnPct(p: PositionLike, currency: Currency, live: Record<string, LiveQuote>): number | null {
   if (p.invested <= 0) return null
-  return ((valueOf(p, currency) - p.invested) / p.invested) * 100
+  return ((valueOf(p, currency, live) - p.invested) / p.invested) * 100
+}
+
+/** Latest refresh time across all live quotes, in IST. */
+function lastRefreshTime(live: Record<string, LiveQuote>): string {
+  const ats = Object.values(live).map((q) => q.at)
+  if (ats.length === 0) return '—'
+  const max = Math.max(...ats)
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(new Date(max))
 }
 
 interface TickerCellData {
@@ -530,11 +731,12 @@ function tickerItems(
   positions: ReturnType<typeof useStore>['positions'],
   currency: Currency,
   hideValues: boolean,
+  live: Record<string, LiveQuote>,
 ): TickerCellData[] {
   const mask = (s: string) => (hideValues ? '••••••' : s)
   return positions
     .map((p) => {
-      const price = p.lastPrice
+      const price = livePriceOf(p, live)
       const value = price != null ? price * p.quantity : p.invested
       const delta = price != null ? value - p.invested : null
       const pct = price != null && p.invested > 0 ? ((delta! / p.invested) * 100) : null

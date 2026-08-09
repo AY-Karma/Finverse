@@ -16,7 +16,7 @@ const NAV: { id: View; label: string; index: string }[] = [
 
 export default function App() {
   const [view, setView] = useState<View>('overview')
-  const { positions, settings } = useStore()
+  const { positions, settings, quickMode } = useStore()
 
   // Reflect theme + density across the whole app as soon as it loads or changes.
   useEffect(() => {
@@ -42,7 +42,12 @@ export default function App() {
               className={`nav-item${view === item.id ? ' nav-item--active' : ''}`}
               onClick={() => setView(item.id)}
             >
-              <span>{item.label}</span>
+              <span className="nav-item-label">
+                {item.label}
+                {item.id === 'assistant' && quickMode && (
+                  <span className="nav-quick-dot" aria-label="Quick mode on" title="Quick mode is on" />
+                )}
+              </span>
               <span className="nav-index">{item.index}</span>
             </button>
           ))}

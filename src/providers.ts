@@ -1,4 +1,5 @@
-import type { ChartSpec, Position, ProviderId, Currency } from './types'
+import type { ChartSpec, Position, ProviderId, Currency, LiveQuote } from './types'
+import { fetchYahooPrice, livePriceOf } from './live'
 
 export interface Provider {
   id: ProviderId
@@ -160,17 +161,24 @@ const ANTHROPIC_TOOLS = TOOLS.map((t) => ({
 const MAX_TOOL_ROUNDS = 5
 const MAX_TOKENS = 2048
 
+// Quick-response mode ("&gt;&gt;" button): a single short generation with no
+// tool loop, so it returns in seconds instead of running the full pipeline.
+const QUICK_MAX_TOKENS = 320
+const QUICK_INSTRUCTION =
+  'Answer in 1-3 short bullet points, no charts, no tool calls, under 60 words. Skip the preamble; just answer directly.'
+
 // ---- Portfolio digest (#3) ------------------------------------------------
 /** Pre-computed portfolio digest so weak models don't have to do arithmetic. */
 export function portfolioContext(
   positions: Position[],
   currency: Currency = 'INR',
+  liveQuotes: Record<string, LiveQuote> = {},
 ): string {
   if (positions.length === 0) return 'The user has no uploaded positions yet.'
 
   const invested = positions.reduce((s, p) => s + p.invested, 0)
   const totalValue = positions.reduce(
-    (s, p) => s + (effectivePrice(p) ?? 0) * p.quantity,
+    (s, p) => s + (livePriceOf(p, liveQuotes) ?? 0) * p.quantity,
     0,
   )
   const pnl = totalValue - invested
@@ -181,7 +189,7 @@ export function portfolioContext(
 
   const byTicker = new Map<string, { value: number; type: Position['type'] }>()
   for (const p of positions) {
-    const v = (effectivePrice(p) ?? 0) * p.quantity
+    const v = (livePriceOf(p, liveQuotes) ?? 0) * p.quantity
     const prev = byTicker.get(p.ticker)
     if (prev) prev.value += v
     else byTicker.set(p.ticker, { value: v, type: p.type })
@@ -207,7 +215,7 @@ export function portfolioContext(
   lines.push('=== Positions (per holding) ===')
 
   for (const p of positions) {
-    const price = effectivePrice(p)
+    const price = livePriceOf(p, liveQuotes)
     const value = price != null ? price * p.quantity : p.invested
     const pnlH = price != null ? value - p.invested : null
     const pnlPctH = p.invested > 0 && pnlH != null ? (pnlH / p.invested) * 100 : null
@@ -224,10 +232,6 @@ export function portfolioContext(
   return lines.join('\n')
 }
 
-function effectivePrice(p: Position): number | null {
-  return p.lastPrice ?? (p.invested > 0 ? p.buyPrice : null)
-}
-
 function fmtMoney(n: number, currency: Currency): string {
   const s = new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n)
   return n < 0 ? s.replace('-', '\u2212') : s
@@ -239,13 +243,14 @@ async function executeTool(
   args: Record<string, unknown>,
   positions: Position[],
   charts: ChartSpec[],
+  liveQuotes: Record<string, LiveQuote> = {},
 ): Promise<string> {
   try {
     switch (name) {
       case 'get_quote':
         return await getQuote(String(args.symbol ?? ''))
       case 'portfolio_metrics':
-        return portfolioMetrics(String(args.symbol ?? ''), positions)
+        return portfolioMetrics(String(args.symbol ?? ''), positions, liveQuotes)
       case 'render_chart':
         return renderChart(args, charts)
       default:
@@ -322,40 +327,25 @@ async function getQuote(symbol: string): Promise<string> {
 
 async function yahooQuote(symbol: string): Promise<string | null> {
   const withSuffix = symbol.includes('.') ? symbol : `${symbol}.NS`
-  const url =
-    'https://corsproxy.io/?url=' +
-    encodeURIComponent(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(withSuffix)}?interval=1d&range=1d`,
-    )
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(12000) })
-    if (!res.ok) return null
-    const json = (await res.json()) as {
-      chart?: { result?: { meta?: { regularMarketPrice?: number; chartPreviousClose?: number; currency?: string } }[] }
-    }
-    const meta = json.chart?.result?.[0]?.meta
-    const price = meta?.regularMarketPrice
-    if (!meta || price == null) return null
-    const prev = meta.chartPreviousClose
-    const chg = prev != null && prev !== 0 ? price - prev : null
-    const pct = chg != null && prev != null ? (chg / prev) * 100 : null
-    const cur = meta.currency ?? 'USD'
-    const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}`
-    return `LIVE quote ${symbol} (${withSuffix}): ${price.toFixed(2)} ${cur} today; change ${chg != null ? signed(chg) : 'n/a'} (${pct != null ? signed(pct) + '%' : 'n/a'}).`
-  } catch {
-    return null
-  }
+  const q = await fetchYahooPrice(withSuffix)
+  if (!q) return null
+  const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}`
+  return `LIVE quote ${symbol} (${withSuffix}): ${q.price.toFixed(2)} INR today; change ${q.change != null ? signed(q.change) : 'n/a'} (${q.pct != null ? signed(q.pct) + '%' : 'n/a'}).`
 }
 
-function portfolioMetrics(symbol: string, positions: Position[]): string {
+function portfolioMetrics(
+  symbol: string,
+  positions: Position[],
+  liveQuotes: Record<string, LiveQuote> = {},
+): string {
   const sym = symbol.trim().toLowerCase()
   const p = positions.find((x) => (x.name || x.ticker).toLowerCase() === sym)
   if (!p) return `No holding matching "${symbol}" in the uploaded portfolio.`
-  const price = effectivePrice(p)
+  const price = livePriceOf(p, liveQuotes)
   const value = price != null ? price * p.quantity : p.invested
   const pnlH = price != null ? value - p.invested : null
   const pnlPctH = p.invested > 0 && pnlH != null ? (pnlH / p.invested) * 100 : null
-  const total = positions.reduce((s, x) => s + (effectivePrice(x) ?? 0) * x.quantity, 0)
+  const total = positions.reduce((s, x) => s + (livePriceOf(x, liveQuotes) ?? 0) * x.quantity, 0)
   const weight = total > 0 ? (value / total) * 100 : null
   const label = p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
   return [
@@ -388,7 +378,9 @@ export async function chat({
   history,
   context,
   positions,
+  liveQuotes,
   signal,
+  quick,
 }: {
   provider: string
   apiKey: string
@@ -397,7 +389,9 @@ export async function chat({
   history: { role: 'user' | 'assistant'; content: string }[]
   context: string
   positions: Position[]
+  liveQuotes: Record<string, LiveQuote>
   signal: AbortSignal
+  quick?: boolean
 }): Promise<{ content: string; charts: ChartSpec[] }> {
   const p = getProvider(provider)
   if (!p) throw new Error('Unknown provider selected.')
@@ -406,7 +400,7 @@ export async function chat({
   const charts: ChartSpec[] = []
 
   if (provider === 'anthropic') {
-    return anthropicChat({ apiKey, model: usedModel, userHistory, context, positions, signal, charts })
+    return anthropicChat({ apiKey, model: usedModel, userHistory, context, positions, liveQuotes, signal, charts, quick })
   }
 
   if (isLocalProvider(provider)) {
@@ -417,13 +411,15 @@ export async function chat({
       userHistory,
       context,
       positions,
+      liveQuotes,
       signal,
       charts,
+      quick,
     })
   }
 
   if (!apiKey) throw new Error('Add an API key in Settings before chatting.')
-  return openaiCompat({ endpoint: p.endpoint, apiKey, model: usedModel, userHistory, context, positions, signal, charts })
+  return openaiCompat({ endpoint: p.endpoint, apiKey, model: usedModel, userHistory, context, positions, liveQuotes, signal, charts, quick })
 }
 
 /**
@@ -464,8 +460,10 @@ async function openaiCompat({
   userHistory,
   context,
   positions,
+  liveQuotes,
   signal,
   charts,
+  quick,
 }: {
   endpoint: string
   apiKey: string
@@ -473,8 +471,10 @@ async function openaiCompat({
   userHistory: { role: 'user' | 'assistant'; content: string }[]
   context: string
   positions: Position[]
+  liveQuotes: Record<string, LiveQuote>
   signal: AbortSignal
   charts: ChartSpec[]
+  quick?: boolean
 }): Promise<{ content: string; charts: ChartSpec[] }> {
   const messages: unknown[] = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -486,10 +486,10 @@ async function openaiCompat({
     const body: Record<string, unknown> = {
       model,
       messages,
-      max_tokens: MAX_TOKENS,
+      max_tokens: quick ? QUICK_MAX_TOKENS : MAX_TOKENS,
       stream: false,
     }
-    if (useTools) body.tools = TOOLS
+    if (useTools && !quick) body.tools = TOOLS
     const headers: Record<string, string> = { 'content-type': 'application/json' }
     if (apiKey) headers.authorization = `Bearer ${apiKey}`
     const res = await fetch(endpoint, {
@@ -506,6 +506,15 @@ async function openaiCompat({
 
   const finish = (content: string) => ({ content, charts })
 
+  if (quick) {
+    const last = messages[messages.length - 1] as { role?: string; content?: string } | undefined
+    if (last && last.role === 'user') {
+      last.content = `[QUICK ANSWER MODE — ${QUICK_INSTRUCTION}]\n\n${last.content}`
+    }
+    const data = await call(false)
+    return finish(data.choices?.[0]?.message?.content ?? '')
+  }
+
   let useTools = true
   try {
     for (let i = 0; i < MAX_TOOL_ROUNDS; i++) {
@@ -520,7 +529,7 @@ async function openaiCompat({
       }
       messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: toolCalls })
       for (const tc of toolCalls) {
-        const result = await executeTool(tc.function?.name ?? '', safeParse(tc.function?.arguments), positions, charts)
+        const result = await executeTool(tc.function?.name ?? '', safeParse(tc.function?.arguments), positions, charts, liveQuotes)
         messages.push({ role: 'tool', tool_call_id: tc.id, content: result })
       }
     }
@@ -546,27 +555,31 @@ async function anthropicChat({
   userHistory,
   context,
   positions,
+  liveQuotes,
   signal,
   charts,
+  quick,
 }: {
   apiKey: string
   model: string
   userHistory: { role: 'user' | 'assistant'; content: string }[]
   context: string
   positions: Position[]
+  liveQuotes: Record<string, LiveQuote>
   signal: AbortSignal
   charts: ChartSpec[]
+  quick?: boolean
 }): Promise<{ content: string; charts: ChartSpec[] }> {
   const messages: unknown[] = [...withFirstTurnContext(userHistory, context)]
 
   const call = async (useTools: boolean) => {
     const body: Record<string, unknown> = {
       model,
-      max_tokens: MAX_TOKENS,
+      max_tokens: quick ? QUICK_MAX_TOKENS : MAX_TOKENS,
       system: [SYSTEM_PROMPT, context],
       messages,
     }
-    if (useTools) body.tools = ANTHROPIC_TOOLS
+    if (useTools && !quick) body.tools = ANTHROPIC_TOOLS
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -586,6 +599,15 @@ async function anthropicChat({
 
   const finish = (content: string) => ({ content, charts })
 
+  if (quick) {
+    const last = messages[messages.length - 1] as { role?: string; content?: string } | undefined
+    if (last && last.role === 'user') {
+      last.content = `[QUICK ANSWER MODE — ${QUICK_INSTRUCTION}]\n\n${last.content}`
+    }
+    const data = await call(false)
+    return finish((data.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join(''))
+  }
+
   let useTools = true
   try {
     for (let i = 0; i < MAX_TOOL_ROUNDS; i++) {
@@ -596,7 +618,7 @@ async function anthropicChat({
         const results = []
         for (const b of blocks) {
           if (b.type === 'tool_use') {
-            results.push({ type: 'tool_result', tool_use_id: b.id, content: await executeTool(b.name ?? '', b.input ?? {}, positions, charts) })
+            results.push({ type: 'tool_result', tool_use_id: b.id, content: await executeTool(b.name ?? '', b.input ?? {}, positions, charts, liveQuotes) })
           }
         }
         messages.push({ role: 'user', content: results })
