@@ -44,7 +44,14 @@ export interface Settings {
   hideValues: boolean
 }
 
+export interface ChartSpec {
+  kind: 'bar' | 'pie' | 'line'
+  title?: string
+  data: { label: string; value: number }[]
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  charts?: ChartSpec[]
 }
