@@ -39,9 +39,15 @@ export interface Settings {
   model: string
   baseUrl: string
   currency: Currency
+  allowExternalData: boolean
   density: Density
   accent: Accent
   hideValues: boolean
+}
+
+export interface FxRate {
+  usdInr: number
+  at: number
 }
 
 export interface ChartSpec {

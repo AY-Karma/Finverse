@@ -3,7 +3,7 @@ import type { ChatMessage, Currency, LiveQuote, Position } from '../types'
 import { chat, portfolioContext, isLocalProvider } from '../providers'
 import { renderMessage, extractCharts } from '../format'
 import { ChatChart } from '../ChatChart'
-import { livePriceOf } from '../live'
+import { positionPnlPct, positionValue, formatCurrency } from '../valuation'
 import { useStore, type View } from '../useStore'
 
 const CHAT_KEY = 'finverse:chat'
@@ -32,22 +32,18 @@ const CHIP_CAP = 6
 // within this window, we abort and hand over the computed snapshot instead.
 const QUICK_CAP_MS = 30 * 1000
 
-function fmtMoney(n: number, currency: Currency): string {
-  const s = new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n)
-  return n < 0 ? s.replace('-', '\u2212') : s
-}
-
 /** Computed snapshot shown when quick mode hits its 30s cap. */
 function quickSummary(
   positions: Position[],
   liveQuotes: Record<string, LiveQuote>,
   currency: Currency,
+  usdInrRate?: number | null,
 ): string {
   if (positions.length === 0) {
     return 'Quick mode hit its 30-second cap, but there are no positions loaded yet — import a sheet and ask again.'
   }
   const invested = positions.reduce((s, p) => s + p.invested, 0)
-  const value = positions.reduce((s, p) => s + (livePriceOf(p, liveQuotes) ?? 0) * p.quantity, 0)
+  const value = positions.reduce((s, p) => s + positionValue(p, liveQuotes), 0)
   const pnl = value - invested
   const pnlPct = invested > 0 ? (pnl / invested) * 100 : null
   const equity = positions.filter((p) => p.type !== 'mutual-fund').length
@@ -55,14 +51,14 @@ function quickSummary(
 
   const rows = positions
     .map((p) => {
-      const price = livePriceOf(p, liveQuotes)
-      const v = price != null ? price * p.quantity : p.invested
-      const hPnlPct = p.invested > 0 && price != null ? ((v - p.invested) / p.invested) * 100 : null
+      const price = p.quantity > 0 ? positionValue(p, liveQuotes) / p.quantity : null
+      const v = positionValue(p, liveQuotes)
+      const hPnlPct = positionPnlPct(p, liveQuotes)
       const weight = value > 0 ? (v / value) * 100 : null
       const label = p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
       return (
-        `${label} — ${p.quantity} @ ${fmtMoney(p.buyPrice, currency)} | last ` +
-        `${price != null ? fmtMoney(price, currency) : 'n/a'} | P&L ` +
+        `${label} — ${p.quantity} @ ${formatCurrency(p.buyPrice, currency, usdInrRate)} | last ` +
+        `${price != null ? formatCurrency(price, currency, usdInrRate) : 'n/a'} | P&L ` +
         `${hPnlPct != null ? (hPnlPct >= 0 ? '+' : '') + hPnlPct.toFixed(2) + '%' : 'n/a'} | ` +
         `weight ${weight != null ? weight.toFixed(1) + '%' : 'n/a'}`
       )
@@ -71,8 +67,8 @@ function quickSummary(
 
   return [
     'Quick mode hit its 30-second cap, so here is the computed snapshot of your board:',
-    `Invested: ${fmtMoney(invested, currency)} | Current: ${fmtMoney(value, currency)} | ` +
-      `P&L: ${pnl >= 0 ? '+' : ''}${fmtMoney(pnl, currency)}` +
+    `Invested: ${formatCurrency(invested, currency, usdInrRate)} | Current: ${formatCurrency(value, currency, usdInrRate)} | ` +
+      `P&L: ${pnl >= 0 ? '+' : ''}${formatCurrency(pnl, currency, usdInrRate)}` +
       `${pnlPct != null ? ` (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)` : ''}`,
     `Holdings: ${positions.length} (${equity} equity, ${mf} mutual fund${mf === 1 ? '' : 's'})`,
     '',
@@ -91,10 +87,8 @@ function contextualSuggestions(
 ): string[] {
   const valued = positions
     .map((p) => {
-      const price = livePriceOf(p, liveQuotes)
-      const value = price != null ? price * p.quantity : p.invested
-      const pnlPct =
-        p.invested > 0 && price != null ? ((value - p.invested) / p.invested) * 100 : null
+      const value = positionValue(p, liveQuotes)
+      const pnlPct = positionPnlPct(p, liveQuotes)
       return { p, value, pnlPct }
     })
     .sort((a, b) => b.value - a.value)
@@ -124,7 +118,7 @@ function loadChat(): ChatMessage[] {
 }
 
 export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
-  const { positions, settings, liveQuotes, quickMode, setQuickMode } = useStore()
+  const { positions, settings, liveQuotes, fxRate, quickMode, setQuickMode } = useStore()
   const [messages, setMessages] = useState<ChatMessage[]>(loadChat)
   const [input, setInput] = useState('')
   const [chips, setChips] = useState<string[]>(QUICK_PROMPTS)
@@ -174,7 +168,12 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
 
   const status = WORKING_PHRASES[statusIdx]
 
-  const context = portfolioContext(positions, settings.currency || 'INR', liveQuotes)
+  const context = portfolioContext(
+    positions,
+    settings.currency || 'INR',
+    liveQuotes,
+    fxRate?.usdInr,
+  )
 
   const refillChips = () =>
     setChips((prev) => {
@@ -236,7 +235,12 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
             ...history,
             {
               role: 'assistant',
-              content: quickSummary(positions, liveQuotes, settings.currency || 'INR'),
+              content: quickSummary(
+                positions,
+                liveQuotes,
+                settings.currency || 'INR',
+                fxRate?.usdInr,
+              ),
               kind: 'quick-fallback',
             },
           ])

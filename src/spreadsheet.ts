@@ -1,5 +1,9 @@
-import * as XLSX from 'xlsx'
+import * as XLSX from '@e965/xlsx'
 import type { AssetType, Position } from './types'
+
+export const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024
+const MAX_IMPORT_ROWS = 100_000
+const MAX_IMPORT_POSITIONS = 5_000
 
 type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'name' | 'type'
 
@@ -428,6 +432,9 @@ function combineHeaderRow(a: readonly unknown[], b: readonly unknown[]): string[
 }
 
 export function parseSpreadsheet(file: ArrayBuffer): Position[] {
+  if (file.byteLength > MAX_IMPORT_FILE_BYTES) {
+    throw new Error('Portfolio files must be 10 MB or smaller.')
+  }
   const wb = XLSX.read(file, { type: 'array' })
   for (const sheetName of wb.SheetNames) {
     const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], {
@@ -436,6 +443,9 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
       raw: true,
     })
     if (rows.length === 0) continue
+    if (rows.length > MAX_IMPORT_ROWS) {
+      throw new Error(`Each sheet must contain ${MAX_IMPORT_ROWS.toLocaleString()} rows or fewer.`)
+    }
 
     // ---- Detect the true header (skip title / blank / meta rows) ----
     // A header can be one row, or two vertically-merged rows (fund exports often
@@ -506,6 +516,9 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
     const positions = mfMode
       ? parseMfRows(rows, dataStart, assignMfFields(headCells))
       : parseEquityColumnRow(rows, dataStart, assignFields(headCells))
+    if (positions.length > MAX_IMPORT_POSITIONS) {
+      throw new Error(`Portfolio imports are limited to ${MAX_IMPORT_POSITIONS.toLocaleString()} holdings.`)
+    }
     if (positions.length > 0) return positions
   }
   // Help the user fix the sheet: name the sheets we looked at and dump rows.

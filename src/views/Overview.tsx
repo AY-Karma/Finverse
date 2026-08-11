@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { computeStats, formatCurrency, formatPercent } from '../store'
+import { computePortfolioStats, formatCurrency, formatPercent } from '../valuation'
 import { useStore } from '../useStore'
 import type { Currency, LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
-import { isLiveQuote, isMarketOpen, livePriceOf, marketStatusText } from '../live'
+import {
+  isLiveQuote,
+  isMarketOpen,
+  livePriceOf,
+  marketStatusText,
+  positionPnl,
+  positionPnlPct,
+  positionValue,
+} from '../live'
 import { marketLinks, resolveScreenerCompanyPath, screenerSectionLinks } from '../research'
 import type { ResearchLink } from '../research'
 
@@ -44,7 +52,7 @@ interface LedgerRow {
 }
 
 export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
-  const { positions, settings, setSettings, liveQuotes, refreshNow } = useStore()
+  const { positions, settings, setSettings, liveQuotes, fxRate, refreshNow } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
@@ -71,8 +79,13 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
       const res = await refreshNow()
       if (!res.ok) {
         setLimitMsg({
-          text: res.reason === 'limit' ? 'Manual refresh limit reached (5 per hour).' : 'Refreshing too quickly.',
-          until: Date.now() + res.retryInMs,
+          text:
+            res.reason === 'disabled'
+              ? 'External market data is off. Enable it in Settings to refresh prices.'
+              : res.reason === 'limit'
+                ? 'Manual refresh limit reached (5 per hour).'
+                : 'Refreshing too quickly.',
+          until: res.reason === 'disabled' ? undefined : Date.now() + res.retryInMs,
         })
       } else {
         setLimitMsg(null)
@@ -82,9 +95,10 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     }
   }
 
-  const live = settings.currency === 'INR' ? liveQuotes : {}
+  const live = settings.allowExternalData ? liveQuotes : {}
   const liveCount = Object.keys(live).length
   const marketOpen = isMarketOpen()
+  const fxReady = currency === 'INR' || !!fxRate?.usdInr
 
   const MASK = '••••••'
   const mask = (s: string) => (hideValues ? MASK : s)
@@ -105,25 +119,18 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     [positions, scope],
   )
 
-  const pricesMap = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const p of positions) {
-      const v = livePriceOf(p, live)
-      if (v != null) m.set(p.ticker, v)
-    }
-    return m
-  }, [positions, live])
-
-  const stats = computeStats(scopePositions, pricesMap)
+  const stats = useMemo(
+    () => computePortfolioStats(scopePositions, live),
+    [scopePositions, live],
+  )
 
   // Top holdings, enriched for the research list: weight, live P&L and the
   // matching position (for type-aware deep-links).
   const researchRows = useMemo(
     () =>
-      stats.allocations.map((a) => {
+      stats.allocations.slice(0, 10).map((a) => {
         const p = positions.find((x) => x.ticker === a.symbol)
-        const price = p ? livePriceOf(p, live) : null
-        const pnl = p && price != null ? price * p.quantity - p.invested : null
+        const pnl = p ? positionPnl(p, live) : null
         const pct = stats.currentValue > 0 ? (a.value / stats.currentValue) * 100 : 0
         return { a, p, pnl, pct }
       }),
@@ -135,8 +142,8 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     () =>
       scopePositions.map((p) => {
         const price = livePriceOf(p, live)
-        const value = price != null ? price * p.quantity : p.invested
-        const pnl = price != null ? value - p.invested : null
+        const value = positionValue(p, live)
+        const pnl = positionPnl(p, live)
         return {
           id: p.id,
           symbol: p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker,
@@ -170,8 +177,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     if (scope !== 'mutual') return null
     const invested = scopePositions.reduce((s, p) => s + p.invested, 0)
     const current = scopePositions.reduce((s, p) => {
-      const price = livePriceOf(p, live)
-      return s + (price != null ? price * p.quantity : p.invested)
+      return s + positionValue(p, live)
     }, 0)
     const pnl = current - invested
     const xirrs = scopePositions.map((p) => p.xirr).filter((x): x is number => x != null)
@@ -222,14 +228,12 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
   }
 
   const pnlUp = stats.pnl >= 0
-  const eff = (p: (typeof positions)[number]) => livePriceOf(p, live)
+  const eff = (p: (typeof positions)[number]) => positionPnlPct(p, live)
   const best = scopePositions
-    .filter((p) => eff(p) != null && p.invested > 0)
-    .sort((a, b) => ((eff(b)! - b.buyPrice) / b.buyPrice) * 100 - ((eff(a)! - a.buyPrice) / a.buyPrice) * 100)[0]
+    .filter((p) => eff(p) != null)
+    .sort((a, b) => (eff(b)! - eff(a)!))[0]
   const bestPct =
-    best && eff(best) != null && best.buyPrice > 0
-      ? ((eff(best)! - best.buyPrice) / best.buyPrice) * 100
-      : null
+    best && eff(best) != null ? eff(best) : null
 
   const toggleSort = (field: SortField) => {
     setSort((prev) => {
@@ -280,7 +284,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           <div className="page-eyebrow">Live Market Scoreboard</div>
           <h1 className="page-title">Your Arena</h1>
         </div>
-        <p className="page-sub" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <div className="page-sub" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <Scope />
           <button
             className={`icon-btn${hideValues ? ' icon-btn--active' : ''}`}
@@ -320,7 +324,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           )}
           <span className="market-status">
             <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} aria-hidden="true" />
-            {marketStatusText(marketOpen, liveCount)}
+            {marketStatusText(marketOpen, liveCount, settings.allowExternalData, fxReady)}
             {liveCount > 0 && (
               <span className="market-status-time">· last refresh {lastRefreshTime(live)}</span>
             )}
@@ -329,7 +333,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
             {scope === 'mutual' ? ' — mutual funds' : ''} at current market prices.
           </span>
-        </p>
+        </div>
       </div>
 
       {/* Scoreboard */}
@@ -339,18 +343,18 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             <span>Current Value</span>
             <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} />
           </div>
-          <div className="score-value">{mask(formatCurrency(stats.currentValue, currency))}</div>
+          <div className="score-value">{mask(formatCurrency(stats.currentValue, currency, fxRate?.usdInr))}</div>
           <div className="score-foot">Total market exposure</div>
         </div>
         <div className="score">
           <div className="score-label">Invested</div>
-          <div className="score-value">{mask(formatCurrency(stats.invested, currency))}</div>
+          <div className="score-value">{mask(formatCurrency(stats.invested, currency, fxRate?.usdInr))}</div>
           <div className="score-foot">Cost basis deployed</div>
         </div>
         <div className="score">
           <div className="score-label">Unrealized P&L</div>
           <div className={`score-value ${pnlUp ? 'up' : 'down'}`}>
-            {mask(`${pnlUp ? '+' : ''}${formatCurrency(stats.pnl, currency)}`)}
+            {mask(`${pnlUp ? '+' : ''}${formatCurrency(stats.pnl, currency, fxRate?.usdInr)}`)}
           </div>
           <div className={`score-foot ${pnlUp ? 'up' : 'down'}`}>
             {mask(formatPercent(stats.pnlPct))} on cost
@@ -369,10 +373,10 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
       <div className="tiker-wrap enter d2">
         <div className="ticker">
           <div className="ticker-track">
-            {tickerItems(scopePositions, currency, hideValues, live).map((t, i) => (
+            {tickerItems(scopePositions, currency, hideValues, live, fxRate?.usdInr).map((t, i) => (
               <TickerCell key={i} t={t} hideValues={hideValues} />
             ))}
-            {tickerItems(scopePositions, currency, hideValues, live).map((t, i) => (
+            {tickerItems(scopePositions, currency, hideValues, live, fxRate?.usdInr).map((t, i) => (
               <TickerCell key={`dup-${i}`} t={t} hideValues={hideValues} />
             ))}
           </div>
@@ -393,16 +397,16 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             <div className="mf-summary">
               <div className="mf-sum-item">
                 <span className="mf-sum-label">Total Investments</span>
-                <span className="mf-sum-value">{mask(formatCurrency(mfSummary.invested, currency))}</span>
+                <span className="mf-sum-value">{mask(formatCurrency(mfSummary.invested, currency, fxRate?.usdInr))}</span>
               </div>
               <div className="mf-sum-item">
                 <span className="mf-sum-label">Portfolio Value</span>
-                <span className="mf-sum-value">{mask(formatCurrency(mfSummary.current, currency))}</span>
+                <span className="mf-sum-value">{mask(formatCurrency(mfSummary.current, currency, fxRate?.usdInr))}</span>
               </div>
               <div className="mf-sum-item">
                 <span className="mf-sum-label">Profit / Loss</span>
                 <span className={`mf-sum-value ${mfSummary.pnl >= 0 ? 'up' : 'down'}`}>
-                  {mask(formatCurrency(mfSummary.pnl, currency))}
+                  {mask(formatCurrency(mfSummary.pnl, currency, fxRate?.usdInr))}
                 </span>
               </div>
               <div className="mf-sum-item">
@@ -418,7 +422,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             </div>
           )}
           {scope === 'mutual' ? (
-            <MFLedger rows={scopePositions} currency={currency} hideValues={hideValues} live={live} />
+            <MFLedger rows={scopePositions} currency={currency} hideValues={hideValues} live={live} usdInrRate={fxRate?.usdInr} />
           ) : (
             <table className="table table--ledger">
               <thead>
@@ -438,22 +442,22 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
                     <tr key={r.id}>
                       <td className="sym" title={r.symbol}>{mask(r.symbol)}</td>
                       <td>{mask(fmtUnits(r.qty))}</td>
-                      <td>{mask(formatCurrency(r.buy, currency))}</td>
+                      <td>{mask(formatCurrency(r.buy, currency, fxRate?.usdInr))}</td>
                       <td>
                         {r.ltp != null && r.buy > 0 && r.ltp !== r.buy ? (
                           <span className={`ltp ltp--${r.ltp > r.buy ? 'up' : 'down'}`}>
                             <span className="ltp-arrow" aria-hidden="true">{r.ltp > r.buy ? '▲' : '▼'}</span>
-                            {mask(formatCurrency(r.ltp, currency))}
+                            {mask(formatCurrency(r.ltp, currency, fxRate?.usdInr))}
                           </span>
                         ) : r.ltp != null ? (
-                          <span className="ltp ltp--flat">{mask(formatCurrency(r.ltp, currency))}</span>
+                          <span className="ltp ltp--flat">{mask(formatCurrency(r.ltp, currency, fxRate?.usdInr))}</span>
                         ) : (
                           '—'
                         )}
                       </td>
-                      <td>{mask(formatCurrency(r.value, currency))}</td>
+                      <td>{mask(formatCurrency(r.value, currency, fxRate?.usdInr))}</td>
                       <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
-                        {r.pnl != null ? mask(`${pnlUp ? '+' : ''}${formatCurrency(r.pnl, currency)}`) : '—'}
+                        {r.pnl != null ? mask(`${pnlUp ? '+' : ''}${formatCurrency(r.pnl, currency, fxRate?.usdInr)}`) : '—'}
                       </td>
                     </tr>
                   )
@@ -488,7 +492,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
                   ))}
                 </Pie>
                 {!hideValues && (
-                  <Tooltip formatter={(v) => formatCurrency(v == null ? 0 : Number(v), currency)} contentStyle={TOOLTIP_STYLE} />
+                  <Tooltip formatter={(v) => formatCurrency(v == null ? 0 : Number(v), currency, fxRate?.usdInr)} contentStyle={TOOLTIP_STYLE} />
                 )}
               </PieChart>
             </ResponsiveContainer>
@@ -515,7 +519,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
                       <span className="research-pct">{mask(formatPercent(pct))}</span>
                       {pnl != null && (
                         <span className={`research-pnl${pnlUp ? ' up' : ' down'}`}>
-                          {mask(`${pnlUp ? '+' : ''}${formatCurrency(pnl, currency)}`)}
+                          {mask(`${pnlUp ? '+' : ''}${formatCurrency(pnl, currency, fxRate?.usdInr)}`)}
                         </span>
                       )}
                       <span className={`research-chev${open ? ' research-chev--open' : ''}`} aria-hidden="true">
@@ -593,11 +597,13 @@ function MFLedger({
   currency,
   hideValues,
   live,
+  usdInrRate,
 }: {
   rows: ReturnType<typeof useStore>['positions']
   currency: Currency
   hideValues: boolean
   live: Record<string, LiveQuote>
+  usdInrRate?: number | null
 }) {
   const [sort, setSort] = useState<{ field: string; dir: SortDir } | null>(null)
   const mask = (s: string) => (hideValues ? '••••••' : s)
@@ -670,8 +676,8 @@ function MFLedger({
                 </span>
               </td>
               <td>{mask(fmtUnits(p.quantity))}</td>
-              <td>{mask(formatCurrency(p.invested, currency))}</td>
-              <td>{mask(formatCurrency(value, currency))}</td>
+              <td>{mask(formatCurrency(p.invested, currency, usdInrRate))}</td>
+              <td>{mask(formatCurrency(value, currency, usdInrRate))}</td>
               <td className={valueOf(p, currency, live) >= p.invested ? 'up' : 'down'}>
                 {mask(formatPercent(mfReturnPct(p, currency, live) ?? 0))}
               </td>
@@ -696,8 +702,7 @@ function fmtUnits(n: number): string {
 }
 
 function valueOf(p: PositionLike, _currency: Currency, live: Record<string, LiveQuote>): number {
-  const price = livePriceOf(p, live)
-  return price != null ? price * p.quantity : p.invested
+  return positionValue(p, live)
 }
 
 /** General return: (current value − invested) ÷ invested × 100. */
@@ -732,15 +737,15 @@ function tickerItems(
   currency: Currency,
   hideValues: boolean,
   live: Record<string, LiveQuote>,
+  usdInrRate?: number | null,
 ): TickerCellData[] {
   const mask = (s: string) => (hideValues ? '••••••' : s)
   return positions
     .map((p) => {
-      const price = livePriceOf(p, live)
-      const value = price != null ? price * p.quantity : p.invested
-      const delta = price != null ? value - p.invested : null
-      const pct = price != null && p.invested > 0 ? ((delta! / p.invested) * 100) : null
-      return { sym: mask(p.ticker), val: mask(formatCurrency(value, currency)), delta, pct }
+      const value = positionValue(p, live)
+      const delta = positionPnl(p, live)
+      const pct = positionPnlPct(p, live)
+      return { sym: mask(p.ticker), val: mask(formatCurrency(value, currency, usdInrRate)), delta, pct }
     })
     .slice(0, 24)
 }

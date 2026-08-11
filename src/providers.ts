@@ -1,5 +1,13 @@
 import type { ChartSpec, Position, ProviderId, Currency, LiveQuote } from './types'
-import { fetchYahooPrice, livePriceOf } from './live'
+import { fetchYahooPrice } from './live'
+import {
+  computePortfolioStats,
+  effectivePrice as livePriceOf,
+  formatCurrency,
+  positionPnl,
+  positionPnlPct,
+  positionValue,
+} from './valuation'
 
 interface Provider {
   id: ProviderId
@@ -173,30 +181,17 @@ export function portfolioContext(
   positions: Position[],
   currency: Currency = 'INR',
   liveQuotes: Record<string, LiveQuote> = {},
+  usdInrRate?: number | null,
 ): string {
   if (positions.length === 0) return 'The user has no uploaded positions yet.'
 
-  const invested = positions.reduce((s, p) => s + p.invested, 0)
-  const totalValue = positions.reduce(
-    (s, p) => s + (livePriceOf(p, liveQuotes) ?? 0) * p.quantity,
-    0,
-  )
-  const pnl = totalValue - invested
-  const pnlPct = invested > 0 ? (pnl / invested) * 100 : null
+  const stats = computePortfolioStats(positions, liveQuotes)
+  const { invested, currentValue: totalValue, pnl, pnlPct } = stats
 
   const equity = positions.filter((p) => p.type !== 'mutual-fund').length
   const mf = positions.length - equity
 
-  const byTicker = new Map<string, { value: number; type: Position['type'] }>()
-  for (const p of positions) {
-    const v = (livePriceOf(p, liveQuotes) ?? 0) * p.quantity
-    const prev = byTicker.get(p.ticker)
-    if (prev) prev.value += v
-    else byTicker.set(p.ticker, { value: v, type: p.type })
-  }
-  const topAlloc = Array.from(byTicker.entries())
-    .map(([symbol, { value, type }]) => ({ symbol, value, type }))
-    .sort((a, b) => b.value - a.value)
+  const topAlloc = stats.allocations
     .slice(0, 5)
     .map(
       (a) =>
@@ -206,9 +201,10 @@ export function portfolioContext(
 
   const lines: string[] = []
   lines.push('=== Portfolio Digest ===')
-  lines.push(`Invested: ${fmtMoney(invested, currency)}`)
-  lines.push(`Current value: ${fmtMoney(totalValue, currency)}`)
-  lines.push(`Unrealized P&L: ${fmtMoney(pnl, currency)}${pnlPct != null ? ` (${pnlPct.toFixed(2)}%)` : ''}`)
+  lines.push('Source currency: INR (imported portfolio values)')
+  lines.push(`Invested: ${fmtMoney(invested, currency, usdInrRate)}`)
+  lines.push(`Current value: ${fmtMoney(totalValue, currency, usdInrRate)}`)
+  lines.push(`Unrealized P&L: ${fmtMoney(pnl, currency, usdInrRate)}${pnlPct != null ? ` (${pnlPct.toFixed(2)}%)` : ''}`)
   lines.push(`Holdings: ${positions.length} (${equity} equity, ${mf} mutual fund${mf === 1 ? '' : 's'})`)
   lines.push(`Top allocations: ${topAlloc || 'none'}`)
   lines.push('')
@@ -216,15 +212,14 @@ export function portfolioContext(
 
   for (const p of positions) {
     const price = livePriceOf(p, liveQuotes)
-    const value = price != null ? price * p.quantity : p.invested
-    const pnlH = price != null ? value - p.invested : null
-    const pnlPctH = p.invested > 0 && pnlH != null ? (pnlH / p.invested) * 100 : null
+    const value = positionValue(p, liveQuotes)
+    const pnlPctH = positionPnlPct(p, liveQuotes)
     const weight = totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : '0'
     const xirr = p.xirr != null ? p.xirr.toFixed(2) + '%' : 'n/a'
     const sym = p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
     lines.push(
-      `${sym} | ${p.type} | qty=${p.quantity} | buy=${fmtMoney(p.buyPrice, currency)} | ` +
-        `last=${price != null ? fmtMoney(price, currency) : 'n/a'} | value=${fmtMoney(value, currency)} | ` +
+      `${sym} | ${p.type} | qty=${p.quantity} | buy=${fmtMoney(p.buyPrice, currency, usdInrRate)} | ` +
+        `last=${price != null ? fmtMoney(price, currency, usdInrRate) : 'n/a'} | value=${fmtMoney(value, currency, usdInrRate)} | ` +
         `pnl=${pnlPctH != null ? pnlPctH.toFixed(2) + '%' : 'n/a'} | weight=${weight}% | xirr=${xirr}`,
     )
   }
@@ -232,9 +227,11 @@ export function portfolioContext(
   return lines.join('\n')
 }
 
-function fmtMoney(n: number, currency: Currency): string {
-  const s = new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n)
-  return n < 0 ? s.replace('-', '\u2212') : s
+function fmtMoney(n: number, currency: Currency, usdInrRate?: number | null): string {
+  const formatted = formatCurrency(n, currency, usdInrRate)
+  return formatted === '—'
+    ? `${formatCurrency(n, 'INR')} INR (USD rate unavailable)`
+    : formatted
 }
 
 // ---- Tools execution ------------------------------------------------------
@@ -341,15 +338,15 @@ function portfolioMetrics(
   const sym = symbol.trim().toLowerCase()
   const p = positions.find((x) => (x.name || x.ticker).toLowerCase() === sym)
   if (!p) return `No holding matching "${symbol}" in the uploaded portfolio.`
-  const price = livePriceOf(p, liveQuotes)
-  const value = price != null ? price * p.quantity : p.invested
-  const pnlH = price != null ? value - p.invested : null
-  const pnlPctH = p.invested > 0 && pnlH != null ? (pnlH / p.invested) * 100 : null
-  const total = positions.reduce((s, x) => s + (livePriceOf(x, liveQuotes) ?? 0) * x.quantity, 0)
+  const value = positionValue(p, liveQuotes)
+  const pnlH = positionPnl(p, liveQuotes)
+  const pnlPctH = positionPnlPct(p, liveQuotes)
+  const total = positions.reduce((s, x) => s + positionValue(x, liveQuotes), 0)
   const weight = total > 0 ? (value / total) * 100 : null
   const label = p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
   return [
     `Metrics for ${label}:`,
+    '  sourceCurrency=INR',
     `  value=${value.toFixed(2)}`,
     `  invested=${p.invested.toFixed(2)}`,
     `  pnl=${pnlH != null ? pnlH.toFixed(2) : 'n/a'}`,

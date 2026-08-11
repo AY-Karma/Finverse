@@ -8,10 +8,11 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Folio, LiveQuote, Position, Settings } from './types'
+import type { Folio, FxRate, LiveQuote, Position, Settings } from './types'
 import { flattenFolios, loadFolios, loadSettings, saveFolios, saveSettings } from './store'
-import { parseSpreadsheet } from './spreadsheet'
+import { MAX_IMPORT_FILE_BYTES, parseSpreadsheet } from './spreadsheet'
 import {
+  fetchUsdInrRate,
   fetchLiveQuotes,
   isMarketOpen,
   manualRefreshCheck,
@@ -22,7 +23,7 @@ export type View = 'overview' | 'import' | 'assistant' | 'settings'
 
 export type RefreshResult =
   | { ok: true }
-  | { ok: false; reason: 'cooldown' | 'limit'; retryInMs: number }
+  | { ok: false; reason: 'disabled' | 'cooldown' | 'limit'; retryInMs: number }
 
 const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
 const REFRESH_MS = 60_000 // live quote refresh cadence during market hours
@@ -31,6 +32,7 @@ interface Store {
   folios: Folio[]
   positions: Position[]
   liveQuotes: Record<string, LiveQuote>
+  fxRate: FxRate | null
   setFolios: (f: Folio[]) => void
   addFolio: (name: string, positions: Position[]) => void
   removeFolio: (id: string) => void
@@ -38,6 +40,7 @@ interface Store {
   settings: Settings
   uploadFile: (file: File) => Promise<void>
   refreshNow: () => Promise<RefreshResult>
+  refreshFxRate: () => Promise<boolean>
   quickMode: boolean
   setQuickMode: (v: boolean) => void
 }
@@ -48,6 +51,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [folios, setFoliosState] = useState<Folio[]>(() => loadFolios())
   const [settings, setSettingsState] = useState<Settings>(() => loadSettings())
   const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>({})
+  const [fxRate, setFxRateState] = useState<FxRate | null>(null)
   const [quickMode, setQuickModeState] = useState(false)
   const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
 
@@ -80,6 +84,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const uploadFile = useCallback(
     async (file: File) => {
+      const extension = file.name.toLowerCase().split('.').pop()
+      if (!extension || !['xlsx', 'xls', 'csv'].includes(extension)) {
+        throw new Error('Use an .xlsx, .xls, or .csv portfolio file.')
+      }
+      if (file.size > MAX_IMPORT_FILE_BYTES) {
+        throw new Error('Portfolio files must be 10 MB or smaller.')
+      }
       const buffer = await file.arrayBuffer()
       const parsed = parseSpreadsheet(buffer)
       addFolio(file.name || 'Portfolio', parsed)
@@ -91,6 +102,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // regardless of market hours, bounded by a rate limit so the free quote
   // relays can't be spammed. `force` bypasses the once-per-day NAV guard.
   const refreshNow = useCallback(async (): Promise<RefreshResult> => {
+    if (!settings.allowExternalData) {
+      return { ok: false, reason: 'disabled', retryInMs: 0 }
+    }
     const check = manualRefreshCheck()
     if (!check.allowed) {
       return { ok: false, reason: check.reason ?? 'cooldown', retryInMs: check.retryInMs ?? 0 }
@@ -106,13 +120,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch {
       /* keep the previous quotes on any failure */
     }
+    if (settings.currency === 'USD') {
+      const rate = await fetchUsdInrRate()
+      if (rate) setFxRateState(rate)
+    }
     return { ok: true }
-  }, [folios, setLiveQuotes])
+  }, [folios, settings.allowExternalData, settings.currency, setLiveQuotes])
 
   // Live-quote polling: only while the NSE market is open, only while the tab
   // is visible, and at most once every 60s. Stops entirely off-hours/holidays.
   useEffect(() => {
-    if (settings.currency !== 'INR') return
+    if (!settings.allowExternalData) return
     let open = isMarketOpen()
     let inFlight = false
 
@@ -148,12 +166,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       window.clearInterval(refreshTimer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [folios, settings.currency, setLiveQuotes])
+  }, [folios, settings.allowExternalData, setLiveQuotes])
+
+  // USD display converts the INR-denominated import using a short-lived rate.
+  // The rate is intentionally kept in memory and fetched only after explicit
+  // consent to external data requests.
+  const refreshFxRate = useCallback(async (): Promise<boolean> => {
+    if (!settings.allowExternalData || settings.currency !== 'USD') {
+      setFxRateState(null)
+      return false
+    }
+    const rate = await fetchUsdInrRate()
+    if (!rate) return false
+    setFxRateState(rate)
+    return true
+  }, [settings.allowExternalData, settings.currency])
+
+  useEffect(() => {
+    if (!settings.allowExternalData || settings.currency !== 'USD') {
+      setFxRateState(null)
+      return
+    }
+    let active = true
+    const refresh = async () => {
+      const rate = await fetchUsdInrRate()
+      if (active && rate) setFxRateState(rate)
+    }
+    void refresh()
+    const timer = window.setInterval(refresh, 15 * 60 * 1000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [settings.allowExternalData, settings.currency])
 
   const value: Store = {
     folios,
     positions,
     liveQuotes,
+    fxRate,
     setFolios,
     addFolio,
     removeFolio,
@@ -161,6 +212,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setSettings,
     uploadFile,
     refreshNow,
+    refreshFxRate,
     quickMode,
     setQuickMode,
   }

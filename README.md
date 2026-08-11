@@ -1,6 +1,6 @@
 # Finverse — Portfolio Terminal
 
-A client-side investment portfolio dashboard with a live market-scoreboard feel. Import holdings, watch your ledger and allocation live, and ask an AI coach about your board — all without a backend, all stored locally in your browser.
+A client-side investment portfolio dashboard with a live market-scoreboard feel. Import holdings, review your ledger and allocation, and ask an AI coach about your portfolio.
 
 ## Features
 
@@ -8,15 +8,14 @@ A client-side investment portfolio dashboard with a live market-scoreboard feel.
 - **Live scoreboard** — invested, current value, P&L, and XIRR at a glance, across All / Equity / Mutual Fund scopes.
 - **Holdings ledger** — per-position and per-MF-scheme tables with symbol/scheme, quantity, buy price, current price, value, and XIRR.
 - **Allocation mix** — asset-allocation breakdown with a top-exposure list.
-- **AI assistant ("the coach")** — chat with the portfolio loaded in your browser. Works with local providers (no key) or OpenAI-compatible endpoints configured in Settings.
-- **Terminal look & UX** — dark market-theme, compact/comfortable density, and an accent-color picker.
+- **AI assistant** — chat with the portfolio context using a configured provider.
+- **Terminal look & UX** — dark market theme, compact/comfortable density, and an accent-color picker.
 
 ## Tech
 
 - [React 18](https://react.dev) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vite.dev)
 - [Recharts](https://recharts.org) for charts
-- [SheetJS (xlsx)](https://sheetjs.com) for spreadsheet parsing
-- [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) / [JetBrains Mono](https://www.jetbrains.com/lp/mono/) for the terminal type
+- [@e965/xlsx](https://github.com/e965/sheetjs-npm-publisher) 0.20.3 for spreadsheet parsing
 
 ## Getting started
 
@@ -36,18 +35,19 @@ npm run preview  # serve the production build locally
 
 ## Data & privacy
 
-Everything lives in your browser's `localStorage` — nothing is sent to a server. The AI Assistant only makes requests when you enable a provider in Settings with an API key; otherwise it uses a local provider.
+Portfolio data and chat history stay in this browser's local storage. API keys are kept in session storage only and are cleared when the tab session ends.
+
+External requests are opt-in. Enabling **External market data** sends holding tickers or mutual-fund scheme names to Yahoo Finance (through corsproxy.io), mfapi.in, and Frankfurter for quotes, NAVs, and USD/INR conversion. Using the AI Assistant sends the portfolio digest and conversation to the provider you configure (OpenAI, Anthropic, OpenRouter, or the Ollama endpoint you enter). Finverse has no backend or telemetry service of its own.
 
 ## Project layout
 
 ```
 src/
   App.tsx            App shell, view routing, nav
-  store.ts           Data model + persistence + formatting
+  store.ts           Persistence helpers
+  valuation.ts       Shared price, value, P&L, allocation, and currency logic
   useStore.tsx       React hook over the store
-  spreadsheet.ts     SheetJS parsing into folios/holdings
+  spreadsheet.ts     Spreadsheet parsing into folios/holdings
   providers.ts       AI provider + chat helpers
-  theme.ts           Accent palettes + theme/apply()
-  types.ts           Shared types
-  views/             Overview · ImportView · AssistantView · SettingsView
+  views/             Screen components
 ```

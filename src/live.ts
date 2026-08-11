@@ -1,4 +1,13 @@
-import type { LiveQuote, Position } from './types'
+import type { FxRate, LiveQuote, Position } from './types'
+import { quoteKey } from './valuation'
+export {
+  effectivePrice as livePriceOf,
+  isLiveQuote,
+  positionPnl,
+  positionPnlPct,
+  positionValue,
+  quoteKey,
+} from './valuation'
 
 // ---------------------------------------------------------------------------
 // Indian market hours + NSE trading holidays (IST). Polling runs only while the
@@ -49,7 +58,18 @@ function istDate(date: Date = new Date()): string {
   return new Date(date.getTime() + (5 * 60 + 30) * 60 * 1000).toISOString().slice(0, 10)
 }
 
-export function marketStatusText(open: boolean, liveCount: number): string {
+export function marketStatusText(
+  open: boolean,
+  liveCount: number,
+  externalEnabled = true,
+  fxReady = true,
+): string {
+  if (!externalEnabled) {
+    return fxReady
+      ? 'External market data off · showing imported prices'
+      : 'External market data off · enable it for USD display'
+  }
+  if (!fxReady) return 'Waiting for USD/INR rate…'
   if (open && liveCount > 0) return 'Live prices · refreshed every 60s'
   if (open) return 'Market open — fetching live prices…'
   return 'Off-market hours — showing latest known prices'
@@ -58,28 +78,6 @@ export function marketStatusText(open: boolean, liveCount: number): string {
 // ---------------------------------------------------------------------------
 // Quote keys + price resolution (single source of truth for live + sheet price)
 // ---------------------------------------------------------------------------
-
-/** Stable key used for a position in the live-quotes map. */
-function quoteKey(p: Position): string {
-  return p.type === 'mutual-fund' ? (p.name || p.ticker).trim() : p.ticker.trim().toUpperCase()
-}
-
-/**
- * Effective price for a position: live quote when available, otherwise the
- * sheet's lastPrice, otherwise the buy price (only used as a last resort).
- */
-export function livePriceOf(
-  p: Position,
-  quotes: Record<string, LiveQuote>,
-): number | null {
-  const q = quotes[quoteKey(p)]
-  if (q) return q.price
-  return p.lastPrice ?? (p.invested > 0 ? p.buyPrice : null)
-}
-
-export function isLiveQuote(p: Position, quotes: Record<string, LiveQuote>): boolean {
-  return !!quotes[quoteKey(p)]
-}
 
 // ---------------------------------------------------------------------------
 // Symbol resolution: imported ticker -> Yahoo symbol
@@ -156,6 +154,26 @@ export async function fetchYahooPrice(symbol: string): Promise<YahooResult | nul
     const change = prev != null && prev !== 0 ? price - prev : null
     const pct = change != null && prev != null ? (change / prev) * 100 : null
     return { price, change, pct, at: Date.now() }
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// USD/INR conversion (portfolio imports are INR-denominated)
+// ---------------------------------------------------------------------------
+
+/** Fetch a short-lived conversion rate used only for display conversion. */
+export async function fetchUsdInrRate(): Promise<FxRate | null> {
+  try {
+    const res = await fetch('https://api.frankfurter.app/latest?from=USD&to=INR', {
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) return null
+    const json = (await res.json()) as { rates?: { INR?: number } }
+    const usdInr = json.rates?.INR
+    if (usdInr == null || !Number.isFinite(usdInr) || usdInr <= 0) return null
+    return { usdInr, at: Date.now() }
   } catch {
     return null
   }
