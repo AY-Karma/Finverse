@@ -2480,7 +2480,7 @@ body::before {
 .holdings-import { display: grid; gap: var(--sp-md); margin-bottom: var(--sp-lg); }
 .holdings-ledger { min-width: 0; }
 .table-scroll { overflow-x: auto; }
-.holdings-name { display: block; max-width: 300px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.holdings-name { display: block; max-width: 300px; margin-top: 3px; overflow: hidden; color: var(--ink-subtle); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .holdings-empty, .research-empty { display: grid; justify-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
 .folio-panel { display: grid; gap: 4px; }
 .folio-copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
@@ -2495,7 +2495,7 @@ body::before {
 .research-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-md); }
 .research-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .research-links .btn { height: auto; align-items: flex-start; flex-direction: column; gap: 2px; text-decoration: none; }
-.research-links small { color: var(--muted); font-size: 9px; font-weight: 500; letter-spacing: .04em; }
+.research-links small { color: var(--ink-subtle); font-size: 9px; font-weight: 500; letter-spacing: .04em; }
 .assistant-head-actions { display: grid; justify-items: end; gap: 8px; }
 
 @media (max-width: 900px) {

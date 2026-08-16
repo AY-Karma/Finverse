@@ -1,15 +1,22 @@
 import { useMemo, useState } from 'react'
 import { assetTypeLabel, instrumentLabel } from '../instruments'
+import { privateValue, visibleQuotes } from '../privacy'
 import { useStore } from '../useStore'
-import { effectivePrice, formatCurrency, positionPnl, positionValue } from '../valuation'
+import { computePortfolioStats, effectivePrice, formatCurrency, positionPnl, positionValue } from '../valuation'
 import { ImportView } from './ImportView'
 
 export function HoldingsView() {
-  const { folios, positions, liveQuotes, fxRate, settings, removeFolio, undoLastImport, exportPortfolio, snapshot } = useStore()
+  const { folios, positions, liveQuotes, fxRate, settings, removeFolio, undoLastImport, exportPortfolio } = useStore()
   const [query, setQuery] = useState('')
   const [importOpen, setImportOpen] = useState(folios.length === 0)
   const currency = settings.currency || 'INR'
   const rate = fxRate?.usdInr
+  const quotes = useMemo(
+    () => visibleQuotes(settings.allowExternalData, liveQuotes),
+    [settings.allowExternalData, liveQuotes],
+  )
+  const stats = useMemo(() => computePortfolioStats(positions, quotes), [positions, quotes])
+  const display = (value: string) => privateValue(value, settings.hideValues)
   const rows = useMemo(() => {
     const term = query.trim().toLocaleLowerCase()
     if (!term) return positions
@@ -24,9 +31,9 @@ export function HoldingsView() {
     </div>
 
     <div className="holdings-summary enter d1" aria-label="Portfolio summary">
-      <Summary label="Portfolio value" value={formatCurrency(snapshot.currentValue, currency, rate)} />
-      <Summary label="Invested" value={formatCurrency(snapshot.invested, currency, rate)} />
-      <Summary label="Total P&L" value={formatCurrency(snapshot.pnl, currency, rate)} tone={snapshot.pnl < 0 ? 'down' : 'up'} />
+      <Summary label="Portfolio value" value={display(formatCurrency(stats.currentValue, currency, rate))} />
+      <Summary label="Invested" value={display(formatCurrency(stats.invested, currency, rate))} />
+      <Summary label="Total P&L" value={display(formatCurrency(stats.pnl, currency, rate))} tone={settings.hideValues ? undefined : stats.pnl < 0 ? 'down' : 'up'} />
       <Summary label="Sources" value={`${folios.length} folio${folios.length === 1 ? '' : 's'}`} />
     </div>
 
@@ -46,8 +53,8 @@ export function HoldingsView() {
       <section className="panel holdings-ledger">
         <div className="panel-head"><span className="panel-title">Holdings</span><span className="section-index">{rows.length} of {positions.length}</span></div>
         {positions.length === 0 ? <div className="holdings-empty"><strong>No holdings loaded</strong><span className="hint">Import an .xlsx, .xls, or .csv file to create your first folio.</span></div> : rows.length === 0 ? <div className="holdings-empty"><strong>No matching holdings</strong><span className="hint">Try a symbol, company, sector, or folio name.</span></div> : <div className="table-scroll"><table className="table table--ledger"><thead><tr><th>Holding</th><th>Type</th><th className="num">Quantity</th><th className="num">Price</th><th className="num">Value</th><th className="num">P&L</th></tr></thead><tbody>{rows.map((position) => {
-          const pnl = positionPnl(position, liveQuotes)
-          return <tr key={position.id}><td><span className="sym">{instrumentLabel(position)}</span><span className="holdings-name">{position.name || position.sector || 'Imported holding'}</span></td><td className="muted">{assetTypeLabel(position.type)}</td><td className="num">{position.quantity.toLocaleString()}</td><td className="num">{formatCurrency(effectivePrice(position, liveQuotes) ?? 0, currency, rate)}</td><td className="num">{formatCurrency(positionValue(position, liveQuotes), currency, rate)}</td><td className={`num ${pnl != null && pnl < 0 ? 'down' : 'up'}`}>{pnl == null ? '—' : formatCurrency(pnl, currency, rate)}</td></tr>
+          const pnl = positionPnl(position, quotes)
+          return <tr key={position.id}><td><span className="sym">{instrumentLabel(position)}</span><span className="holdings-name">{position.name || position.sector || 'Imported holding'}</span></td><td className="muted">{assetTypeLabel(position.type)}</td><td className="num">{display(position.quantity.toLocaleString())}</td><td className="num">{display(formatCurrency(effectivePrice(position, quotes) ?? 0, currency, rate))}</td><td className="num">{display(formatCurrency(positionValue(position, quotes), currency, rate))}</td><td className={`num ${!settings.hideValues && pnl != null && pnl < 0 ? 'down' : !settings.hideValues ? 'up' : ''}`}>{display(pnl == null ? '—' : formatCurrency(pnl, currency, rate))}</td></tr>
         })}</tbody></table></div>}
       </section>
 
