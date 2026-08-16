@@ -4,16 +4,17 @@ import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { Overview } from './views/Overview'
 
-const ImportView = lazy(() => import('./views/ImportView').then((module) => ({ default: module.ImportView })))
+const HoldingsView = lazy(() => import('./views/HoldingsView').then((module) => ({ default: module.HoldingsView })))
+const ResearchView = lazy(() => import('./views/ResearchView').then((module) => ({ default: module.ResearchView })))
 const AssistantView = lazy(() => import('./views/AssistantView').then((module) => ({ default: module.AssistantView })))
 const SettingsView = lazy(() => import('./views/SettingsView').then((module) => ({ default: module.SettingsView })))
 const InsightsView = lazy(() => import('./views/InsightsView').then((module) => ({ default: module.InsightsView })))
 
 const NAV: { id: View; label: string; index: string }[] = [
   { id: 'overview', label: 'Overview', index: '01' },
-  { id: 'import', label: 'Portfolio', index: '02' },
+  { id: 'holdings', label: 'Holdings', index: '02' },
   { id: 'insights', label: 'Insights', index: '03' },
-  { id: 'assistant', label: 'AI Assistant', index: '04' },
+  { id: 'research', label: 'Research', index: '04' },
   { id: 'settings', label: 'Settings', index: '05' },
 ]
 
@@ -42,12 +43,12 @@ export default function App() {
           {NAV.map((item) => (
             <button
               key={item.id}
-              className={`nav-item${view === item.id ? ' nav-item--active' : ''}`}
+              className={`nav-item${view === item.id || (view === 'assistant' && item.id === 'research') ? ' nav-item--active' : ''}`}
               onClick={() => setView(item.id)}
             >
               <span className="nav-item-label">
                 {item.label}
-                {item.id === 'assistant' && quickMode && (
+                {item.id === 'research' && quickMode && (
                   <span className="nav-quick-dot" aria-label="Quick mode on" title="Quick mode is on" />
                 )}
               </span>
@@ -69,8 +70,9 @@ export default function App() {
         {view === 'overview' && <Overview onGoTo={setView} />}
         {view !== 'overview' && (
           <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
-            {view === 'import' && <ImportView />}
+            {view === 'holdings' && <HoldingsView />}
             {view === 'insights' && <InsightsView />}
+            {view === 'research' && <ResearchView onOpenAssistant={() => setView('assistant')} />}
             {view === 'assistant' && <AssistantView onGoTo={setView} />}
             {view === 'settings' && <SettingsView />}
           </Suspense>

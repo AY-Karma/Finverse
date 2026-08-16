@@ -2470,6 +2470,47 @@ body::before {
   }
 }
 
+/* ============ Holdings and research workspaces ============ */
+.holdings-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-md); margin-bottom: var(--sp-lg); }
+.holdings-stat { display: grid; gap: 8px; }
+.holdings-stat strong { font-family: var(--font-display); font-size: clamp(18px, 2vw, 26px); }
+.holdings-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); margin-bottom: var(--sp-lg); }
+.holdings-search { flex: 1 1 320px; max-width: 560px; }
+.holdings-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: var(--sp-lg); align-items: start; }
+.holdings-import { display: grid; gap: var(--sp-md); margin-bottom: var(--sp-lg); }
+.holdings-ledger { min-width: 0; }
+.table-scroll { overflow-x: auto; }
+.holdings-name { display: block; max-width: 300px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.holdings-empty, .research-empty { display: grid; justify-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
+.folio-panel { display: grid; gap: 4px; }
+.folio-copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.privacy-panel { grid-column: 1 / -1; display: grid; gap: var(--sp-lg); }
+.privacy-status-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-lg); }
+.privacy-status-list > div { display: grid; gap: 6px; padding-left: var(--sp-md); border-left: 2px solid var(--hairline); }
+.research-brief { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-xl); margin-bottom: var(--sp-lg); }
+.research-brief > div { display: grid; gap: 8px; }
+.research-brief > div:last-child { justify-items: end; text-align: right; }
+.research-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-lg); }
+.research-card { display: grid; gap: var(--sp-lg); }
+.research-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-md); }
+.research-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.research-links .btn { height: auto; align-items: flex-start; flex-direction: column; gap: 2px; text-decoration: none; }
+.research-links small { color: var(--muted); font-size: 9px; font-weight: 500; letter-spacing: .04em; }
+.assistant-head-actions { display: grid; justify-items: end; gap: 8px; }
+
+@media (max-width: 900px) {
+  .holdings-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .holdings-layout, .research-grid { grid-template-columns: 1fr; }
+  .holdings-toolbar, .research-brief { align-items: stretch; flex-direction: column; }
+  .holdings-search { max-width: none; }
+  .research-brief > div:last-child, .assistant-head-actions { justify-items: start; text-align: left; }
+}
+@media (max-width: 560px) {
+  .holdings-summary, .privacy-status-list { grid-template-columns: 1fr; }
+  .holdings-toolbar .import-actions, .holdings-toolbar .btn { width: 100%; }
+  .research-card-head { flex-direction: column; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

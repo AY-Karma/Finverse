@@ -18,6 +18,20 @@ export interface ResearchLink {
   url: string
 }
 
+/** Human-readable provenance for outbound research links. */
+export function researchSource(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '')
+    if (host === 'nseindia.com') return 'NSE India'
+    if (host === 'tradingview.com') return 'TradingView'
+    if (host === 'screener.in') return 'Screener'
+    if (host === 'google.com') return 'Google'
+    return host
+  } catch {
+    return 'External source'
+  }
+}
+
 /** Ticker → screener.in canonical slug (upper-case, dots/spaces removed). */
 function screenerSlug(symbol: string): string {
   return symbol

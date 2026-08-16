@@ -216,7 +216,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             performance, and AI-guided analysis in one command rail.
           </p>
         </div>
-        <button className="btn btn--primary" onClick={() => onGoTo('import')}>
+        <button className="btn btn--primary" onClick={() => onGoTo('holdings')}>
           Import portfolio →
         </button>
       </div>
@@ -238,7 +238,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
               : 'Import a broker export (.xlsx / .csv) with ticker, quantity, and cost to run it onto the equity scoreboard.'}
           </p>
         </div>
-        <button className="btn btn--primary" onClick={() => onGoTo('import')}>
+        <button className="btn btn--primary" onClick={() => onGoTo('holdings')}>
           Import holdings →
         </button>
       </div>
