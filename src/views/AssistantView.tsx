@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import type { ChatMessage, Currency, LiveQuote, Position } from '../types'
+import type { ChatMessage, ChartSpec, Currency, LiveQuote, Position } from '../types'
 import { chat, portfolioContext, isLocalProvider } from '../providers'
 import { renderMessage, extractCharts } from '../format'
 import { ChatChart } from '../ChatChart'
+import { instrumentLabel } from '../instruments'
 import { positionPnlPct, positionValue, formatCurrency } from '../valuation'
 import { useStore, type View } from '../useStore'
 
@@ -27,6 +28,9 @@ const WORKING_PHRASES = [
 ]
 
 const CHIP_CAP = 6
+const MAX_CHAT_MESSAGES = 100
+const MAX_CHAT_MESSAGE_CHARS = 24_000
+const MAX_CHAT_STORAGE_BYTES = 500_000
 
 // Quick mode is a promise: it must come back fast. If the model hasn't answered
 // within this window, we abort and hand over the computed snapshot instead.
@@ -76,10 +80,6 @@ function quickSummary(
   ].join('\n')
 }
 
-function labelOf(p: Position): string {
-  return p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
-}
-
 /** Follow-up chips derived from the current portfolio, so suggestions stay relevant. */
 function contextualSuggestions(
   positions: Position[],
@@ -98,8 +98,8 @@ function contextualSuggestions(
     .sort((a, b) => (a.pnlPct ?? 0) - (b.pnlPct ?? 0))[0]
 
   const out: string[] = []
-  if (top) out.push(`Go deeper on ${labelOf(top.p)}`)
-  if (worst && worst.p !== top?.p) out.push(`What is dragging ${labelOf(worst.p)}?`)
+  if (top) out.push(`Go deeper on ${instrumentLabel(top.p)}`)
+  if (worst && worst.p !== top?.p) out.push(`What is dragging ${instrumentLabel(worst.p)}?`)
   if (positions.some((p) => p.type === 'mutual-fund') && positions.length > 1)
     out.push('Compare my equity vs mutual funds')
   out.push('How concentrated is my portfolio?')
@@ -111,9 +111,56 @@ function contextualSuggestions(
 function loadChat(): ChatMessage[] {
   try {
     const raw = localStorage.getItem(CHAT_KEY)
-    return raw ? (JSON.parse(raw) as ChatMessage[]) : []
+    const parsed = raw ? JSON.parse(raw) : []
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((message): message is ChatMessage =>
+        message && typeof message === 'object' &&
+        (message.role === 'user' || message.role === 'assistant') &&
+        typeof message.content === 'string',
+      )
+      .slice(-MAX_CHAT_MESSAGES)
+      .map((message) => ({
+        ...message,
+        content: message.content.slice(0, MAX_CHAT_MESSAGE_CHARS),
+        charts: sanitizeCharts(message.charts),
+      }))
   } catch {
     return []
+  }
+}
+
+function sanitizeCharts(value: unknown): ChartSpec[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const charts = value.flatMap((candidate): ChartSpec[] => {
+    if (!candidate || typeof candidate !== 'object') return []
+    const chart = candidate as Record<string, unknown>
+    const kind = chart.kind
+    if (kind !== 'bar' && kind !== 'pie' && kind !== 'line') return []
+    if (!Array.isArray(chart.data)) return []
+    const data = chart.data.flatMap((row): ChartSpec['data'] => {
+      if (!row || typeof row !== 'object') return []
+      const item = row as Record<string, unknown>
+      return typeof item.label === 'string' && typeof item.value === 'number' && Number.isFinite(item.value)
+        ? [{ label: item.label.slice(0, 120), value: item.value }]
+        : []
+    }).slice(0, 20)
+    return data.length > 0 ? [{ kind, title: typeof chart.title === 'string' ? chart.title.slice(0, 160) : undefined, data }] : []
+  })
+  return charts.slice(0, 8)
+}
+
+function persistChat(messages: ChatMessage[]): void {
+  try {
+    const bounded = messages.slice(-MAX_CHAT_MESSAGES).map((message) => ({
+      ...message,
+      content: message.content.slice(0, MAX_CHAT_MESSAGE_CHARS),
+      charts: message.charts?.slice(0, 8),
+    }))
+    const serialized = JSON.stringify(bounded)
+    if (serialized.length <= MAX_CHAT_STORAGE_BYTES) localStorage.setItem(CHAT_KEY, serialized)
+  } catch {
+    /* Chat remains available in memory when browser storage is unavailable/full. */
   }
 }
 
@@ -132,15 +179,14 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
   const chatRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    localStorage.setItem(CHAT_KEY, JSON.stringify(messages))
+    persistChat(messages)
   }, [messages])
 
-  // Leaving the tab resets the conversation to its initial state: abort any
-  // in-flight generation and wipe the persisted history.
+  // Leaving the view only stops network work. Persisted history is cleared by
+  // the explicit Clear chat action, so navigation does not erase the conversation.
   useEffect(() => {
     return () => {
       controllerRef.current?.abort()
-      localStorage.setItem(CHAT_KEY, JSON.stringify([]))
     }
   }, [])
 
@@ -182,7 +228,7 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
     })
 
   async function sendText(text: string, opts: { quick?: boolean } = {}) {
-    const trimmed = text.trim()
+    const trimmed = text.trim().slice(0, MAX_CHAT_MESSAGE_CHARS)
     const quick = opts.quick ?? quickMode
     const local = settings.provider ? isLocalProvider(settings.provider) : false
 
@@ -223,6 +269,7 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
         liveQuotes,
         signal: controller.signal,
         quick,
+        confirmRemoteOllama: settings.confirmRemoteOllama,
       })
       setMessages([...history, { role: 'assistant', content, charts }])
       refillChips()
@@ -281,7 +328,7 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
     setMessages([])
     setInput('')
     setError(null)
-    localStorage.setItem(CHAT_KEY, JSON.stringify([]))
+    persistChat([])
   }
 
   return (
@@ -349,7 +396,7 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
                   return (
                     <Fragment key={i}>
                       <div className="msg msg--assistant">{renderMessage(extracted.text)}</div>
-                      {charts.map((c, ci) => <ChatChart key={ci} spec={c} />)}
+                       {charts.map((c, ci) => <ChatChart key={ci} spec={c} currency={settings.currency || 'INR'} />)}
                     </Fragment>
                   )
                 })()

@@ -1,9 +1,81 @@
 import * as XLSX from '@e965/xlsx'
 import type { AssetType, Position } from './types'
+import { MAX_IMPORT_FILE_BYTES } from './importLimits'
 
-export const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024
+export { MAX_IMPORT_FILE_BYTES }
 const MAX_IMPORT_ROWS = 100_000
 const MAX_IMPORT_POSITIONS = 5_000
+const MAX_IMPORT_SHEETS = 20
+const MAX_IMPORT_COLUMNS = 1_000
+const MAX_IMPORT_CELLS = 2_000_000
+const MAX_IMPORT_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+
+function preflightZip(file: ArrayBuffer): void {
+  const bytes = new Uint8Array(file)
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return
+  const view = new DataView(file)
+  const start = Math.max(0, file.byteLength - 65_557)
+  let eocd = -1
+  for (let i = file.byteLength - 22; i >= start; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocd = i
+      break
+    }
+  }
+  if (eocd < 0) throw new Error('This ZIP-based spreadsheet is malformed or unsupported.')
+  const entries = view.getUint16(eocd + 10, true)
+  const centralOffset = view.getUint32(eocd + 16, true)
+  let offset = centralOffset
+  let uncompressed = 0
+  let worksheetEntries = 0
+  const decoder = new TextDecoder()
+  for (let i = 0; i < entries; i++) {
+    if (offset + 46 > file.byteLength || view.getUint32(offset, true) !== 0x02014b50) {
+      throw new Error('This ZIP-based spreadsheet is malformed or unsupported.')
+    }
+    const compressedSize = view.getUint32(offset + 20, true)
+    const uncompressedSize = view.getUint32(offset + 24, true)
+    const nameLength = view.getUint16(offset + 28, true)
+    const extraLength = view.getUint16(offset + 30, true)
+    const commentLength = view.getUint16(offset + 32, true)
+    if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff) {
+      throw new Error('ZIP64 spreadsheets are not supported.')
+    }
+    uncompressed += uncompressedSize
+    if (uncompressed > MAX_IMPORT_UNCOMPRESSED_BYTES) {
+      throw new Error('The spreadsheet expands beyond the 50 MB safety limit.')
+    }
+    const nameStart = offset + 46
+    const name = decoder.decode(bytes.slice(nameStart, nameStart + nameLength))
+    if (/^xl\/worksheets\/sheet\d+\.xml$/i.test(name)) worksheetEntries++
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+  if (worksheetEntries > MAX_IMPORT_SHEETS) {
+    throw new Error(`Spreadsheets are limited to ${MAX_IMPORT_SHEETS} worksheets.`)
+  }
+}
+
+function validateSheetDimensions(sheetName: string, sheet: unknown, totalCells: number): number {
+  if (!sheet || typeof sheet !== 'object') return totalCells
+  const ref = (sheet as { '!ref'?: unknown })['!ref']
+  if (typeof ref !== 'string') return totalCells
+  let range: { s: { r: number; c: number }; e: { r: number; c: number } }
+  try {
+    range = XLSX.utils.decode_range(ref)
+  } catch {
+    throw new Error(`Worksheet "${sheetName}" has an invalid cell range.`)
+  }
+  const rows = range.e.r - range.s.r + 1
+  const columns = range.e.c - range.s.c + 1
+  if (rows > MAX_IMPORT_ROWS || columns > MAX_IMPORT_COLUMNS) {
+    throw new Error(`Worksheet "${sheetName}" exceeds the ${MAX_IMPORT_ROWS.toLocaleString()} row / ${MAX_IMPORT_COLUMNS.toLocaleString()} column safety limit.`)
+  }
+  const cells = rows * columns
+  if (!Number.isSafeInteger(cells) || totalCells + cells > MAX_IMPORT_CELLS) {
+    throw new Error(`Spreadsheet dimensions exceed the ${MAX_IMPORT_CELLS.toLocaleString()} cell safety limit.`)
+  }
+  return totalCells + cells
+}
 
 type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'name' | 'type'
 
@@ -435,8 +507,14 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
   if (file.byteLength > MAX_IMPORT_FILE_BYTES) {
     throw new Error('Portfolio files must be 10 MB or smaller.')
   }
+  preflightZip(file)
   const wb = XLSX.read(file, { type: 'array' })
+  if (wb.SheetNames.length > MAX_IMPORT_SHEETS) {
+    throw new Error(`Spreadsheets are limited to ${MAX_IMPORT_SHEETS} worksheets.`)
+  }
+  let totalCells = 0
   for (const sheetName of wb.SheetNames) {
+    totalCells = validateSheetDimensions(sheetName, wb.Sheets[sheetName], totalCells)
     const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], {
       header: 1,
       defval: null,
@@ -542,4 +620,22 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
   throw new Error(
     `No recognizable header found. Look for a row with a Ticker/Symbol (equity) or Scheme/Fund name (mutual funds) column plus Units / Invested / Current value. Scanned sheets:\n${sample.join('\n\n')}`,
   )
+}
+
+/** Parse outside the UI thread so large or hostile workbooks cannot freeze the dashboard. */
+export function parseSpreadsheetInWorker(file: ArrayBuffer): Promise<Position[]> {
+  if (typeof Worker === 'undefined') return Promise.resolve().then(() => parseSpreadsheet(file))
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./spreadsheet.worker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = (event: MessageEvent<{ ok: boolean; positions?: Position[]; error?: string }>) => {
+      worker.terminate()
+      if (event.data.ok && event.data.positions) resolve(event.data.positions)
+      else reject(new Error(event.data.error || 'Could not parse the spreadsheet.'))
+    }
+    worker.onerror = () => {
+      worker.terminate()
+      reject(new Error('Could not parse the spreadsheet in the background.'))
+    }
+    worker.postMessage(file, [file])
+  })
 }

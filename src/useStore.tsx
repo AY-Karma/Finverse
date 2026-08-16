@@ -8,39 +8,58 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Folio, FxRate, LiveQuote, Position, Settings } from './types'
-import { flattenFolios, loadFolios, loadSettings, saveFolios, saveSettings } from './store'
-import { MAX_IMPORT_FILE_BYTES, parseSpreadsheet } from './spreadsheet'
+import type { Folio, FxRate, LiveQuote, PortfolioSnapshot, Position, Settings } from './types'
+import { loadFolios, loadSettings, saveFolios, saveSettings } from './store'
+import { MAX_IMPORT_FILE_BYTES } from './importLimits'
+import { exportPortfolioCsv, importIdentitySummary, investmentWorkspace, type InvestmentSnapshot } from './investmentWorkspace'
+import { appendPortfolioSnapshot, loadPortfolioSnapshots } from './portfolioHistory'
+import { marketData } from './marketData'
+import type { LiveQuotesResult } from './live'
 import {
   fetchUsdInrRate,
-  fetchLiveQuotes,
   isMarketOpen,
+  MANUAL_REFRESH_COOLDOWN_MS,
   manualRefreshCheck,
   recordManualRefresh,
 } from './live'
 
-export type View = 'overview' | 'import' | 'assistant' | 'settings'
+export type View = 'overview' | 'import' | 'insights' | 'assistant' | 'settings'
 
 export type RefreshResult =
-  | { ok: true }
-  | { ok: false; reason: 'disabled' | 'cooldown' | 'limit'; retryInMs: number }
+  | { ok: true; retryInMs: number }
+  | { ok: false; reason: 'disabled' | 'cooldown' | 'failed'; retryInMs: number }
 
 const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
-const REFRESH_MS = 60_000 // live quote refresh cadence during market hours
+const REFRESH_MS = 30_000 // live quote refresh cadence during market hours (30s)
+
+export interface ImportPreview {
+  id: string
+  fileName: string
+  positions: Position[]
+  duplicateCount: number
+  unmatchedCount: number
+  createdAt: number
+}
 
 interface Store {
   folios: Folio[]
   positions: Position[]
+  /** The un-combined holdings exactly as imported (duplicates included). */
+  rawPositions: Position[]
   liveQuotes: Record<string, LiveQuote>
   fxRate: FxRate | null
-  setFolios: (f: Folio[]) => void
+  snapshot: InvestmentSnapshot
+  portfolioHistory: PortfolioSnapshot[]
   addFolio: (name: string, positions: Position[]) => void
   removeFolio: (id: string) => void
   setSettings: (s: Settings) => void
   settings: Settings
+  previewFile: (file: File) => Promise<ImportPreview>
+  commitImport: (preview: ImportPreview) => void
   uploadFile: (file: File) => Promise<void>
+  undoLastImport: () => void
+  exportPortfolio: (format: 'json' | 'csv') => void
   refreshNow: () => Promise<RefreshResult>
-  refreshFxRate: () => Promise<boolean>
   quickMode: boolean
   setQuickMode: (v: boolean) => void
 }
@@ -52,19 +71,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [settings, setSettingsState] = useState<Settings>(() => loadSettings())
   const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>({})
   const [fxRate, setFxRateState] = useState<FxRate | null>(null)
+  const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [quickMode, setQuickModeState] = useState(false)
   const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
+  const lastImportedFolioId = useRef<string | null>(null)
 
   useEffect(() => saveFolios(folios), [folios])
   useEffect(() => saveSettings(settings), [settings])
 
-  const setFolios = useCallback((f: Folio[]) => setFoliosState(f), [])
-
   const addFolio = useCallback((name: string, positions: Position[]) => {
+    const id = crypto.randomUUID()
     setFoliosState((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), name, importedAt: Date.now(), positions },
+      { id, name, importedAt: Date.now(), positions: investmentWorkspace.normalizeImport(positions) },
     ])
+    lastImportedFolioId.current = id
   }, [])
 
   const removeFolio = useCallback((id: string) => {
@@ -75,15 +96,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const setQuickMode = useCallback((v: boolean) => setQuickModeState(v), [])
 
-  const positions = useMemo(() => flattenFolios(folios), [folios])
+  const snapshot = useMemo(
+    () => investmentWorkspace.readSnapshot({ folios, quotes: liveQuotes, fxRate, history: portfolioHistory }),
+    [folios, liveQuotes, fxRate, portfolioHistory],
+  )
+  const rawPositions = snapshot.rawPositions
+  const positions = snapshot.positions
+  const positionsRef = useRef(positions)
+  positionsRef.current = positions
+  const folioRefreshKey = useMemo(
+    () => folios.map((folio) => `${folio.id}:${folio.positions.length}`).join('|'),
+    [folios],
+  )
 
   const setLiveQuotes = useCallback((q: Record<string, LiveQuote>) => {
     liveQuotesRef.current = q
     setLiveQuotesState(q)
   }, [])
 
-  const uploadFile = useCallback(
-    async (file: File) => {
+  const previewFile = useCallback(
+    async (file: File): Promise<ImportPreview> => {
       const extension = file.name.toLowerCase().split('.').pop()
       if (!extension || !['xlsx', 'xls', 'csv'].includes(extension)) {
         throw new Error('Use an .xlsx, .xls, or .csv portfolio file.')
@@ -92,56 +124,91 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         throw new Error('Portfolio files must be 10 MB or smaller.')
       }
       const buffer = await file.arrayBuffer()
-      const parsed = parseSpreadsheet(buffer)
-      addFolio(file.name || 'Portfolio', parsed)
+      const { parseSpreadsheetInWorker } = await import('./spreadsheet')
+      const parsed = await parseSpreadsheetInWorker(buffer)
+      const summary = importIdentitySummary(parsed)
+      return {
+        id: crypto.randomUUID(),
+        fileName: file.name || 'Portfolio',
+        positions: summary.normalized,
+        duplicateCount: summary.duplicateCount,
+        unmatchedCount: summary.unmatchedCount,
+        createdAt: Date.now(),
+      }
     },
-    [addFolio],
+    [],
   )
 
+  const commitImport = useCallback((preview: ImportPreview) => {
+    addFolio(preview.fileName, preview.positions)
+  }, [addFolio])
+
+  const uploadFile = useCallback(async (file: File) => {
+    const preview = await previewFile(file)
+    commitImport(preview)
+  }, [commitImport, previewFile])
+
+  const undoLastImport = useCallback(() => {
+    const id = lastImportedFolioId.current
+    if (!id) return
+    removeFolio(id)
+    lastImportedFolioId.current = null
+  }, [removeFolio])
+
+  const exportPortfolio = useCallback((format: 'json' | 'csv') => {
+    const content = format === 'json' ? JSON.stringify({ exportedAt: Date.now(), folios, positions }, null, 2) : exportPortfolioCsv(positions)
+    const blob = new Blob([content], { type: format === 'json' ? 'application/json' : 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `finverse-portfolio.${format}`
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [folios, positions])
+
   // Manual refresh: fetches last-trade prices for every holding on demand,
-  // regardless of market hours, bounded by a rate limit so the free quote
-  // relays can't be spammed. `force` bypasses the once-per-day NAV guard.
+  // regardless of market hours. The quote module deduplicates requests, bounds
+  // concurrency, and keeps the daily NAV guard in place.
   const refreshNow = useCallback(async (): Promise<RefreshResult> => {
     if (!settings.allowExternalData) {
       return { ok: false, reason: 'disabled', retryInMs: 0 }
     }
     const check = manualRefreshCheck()
     if (!check.allowed) {
-      return { ok: false, reason: check.reason ?? 'cooldown', retryInMs: check.retryInMs ?? 0 }
+      return { ok: false, reason: 'cooldown', retryInMs: check.retryInMs ?? 0 }
     }
-    recordManualRefresh()
+    let result: LiveQuotesResult
     try {
-      const { quotes } = await fetchLiveQuotes(
-        flattenFolios(folios),
-        liveQuotesRef.current,
-        { force: true },
-      )
-      setLiveQuotes(quotes)
+      result = await marketData.refreshQuotes(positions, liveQuotesRef.current)
     } catch {
-      /* keep the previous quotes on any failure */
+      return { ok: false, reason: 'failed', retryInMs: 0 }
     }
+    if (result.failed > 0 && result.updated === 0 && result.skipped === 0) {
+      return { ok: false, reason: 'failed', retryInMs: 0 }
+    }
+    setLiveQuotes(result.quotes)
+    recordManualRefresh()
     if (settings.currency === 'USD') {
       const rate = await fetchUsdInrRate()
       if (rate) setFxRateState(rate)
     }
-    return { ok: true }
-  }, [folios, settings.allowExternalData, settings.currency, setLiveQuotes])
+    return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
+  }, [positions, settings.allowExternalData, settings.currency, setLiveQuotes])
 
-  // Live-quote polling: only while the NSE market is open, only while the tab
-  // is visible, and at most once every 60s. Stops entirely off-hours/holidays.
+  // Live-quote polling: every 30s while NSE market is open; one final fetch after
+  // close to capture the official closing price; and one immediate fetch on load
+  // (even off-hours) so the board always shows the latest available price.
   useEffect(() => {
     if (!settings.allowExternalData) return
     let open = isMarketOpen()
     let inFlight = false
+    let hasFetchedAfterClose = false
 
     const refresh = async () => {
-      if (!open || inFlight || document.hidden) return
+      if (inFlight || document.hidden) return
       inFlight = true
       try {
-        const { quotes } = await fetchLiveQuotes(
-          flattenFolios(folios),
-          liveQuotesRef.current,
-        )
+        const { quotes } = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current)
         setLiveQuotes(quotes)
       } catch {
         /* keep the previous quotes on any failure */
@@ -150,37 +217,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // One immediate fetch on load — gets live price during market hours,
+    // or the previous day's close after hours.
+    void refresh()
+
     const openTimer = window.setInterval(() => {
-      open = isMarketOpen()
+      const nowOpen = isMarketOpen()
+      // Market just closed: do one final fetch to capture the official close.
+      if (open && !nowOpen && !hasFetchedAfterClose) {
+        hasFetchedAfterClose = true
+        void refresh()
+      }
+      open = nowOpen
     }, MARKET_CHECK_MS)
-    const refreshTimer = window.setInterval(refresh, REFRESH_MS)
+
+    const refreshTimer = window.setInterval(() => {
+      if (open) void refresh()
+    }, REFRESH_MS)
+
     const onVisibility = () => {
       if (!document.hidden) void refresh()
     }
     document.addEventListener('visibilitychange', onVisibility)
-
-    void refresh() // one immediate fetch on load (if the market is open)
 
     return () => {
       window.clearInterval(openTimer)
       window.clearInterval(refreshTimer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [folios, settings.allowExternalData, setLiveQuotes])
-
-  // USD display converts the INR-denominated import using a short-lived rate.
-  // The rate is intentionally kept in memory and fetched only after explicit
-  // consent to external data requests.
-  const refreshFxRate = useCallback(async (): Promise<boolean> => {
-    if (!settings.allowExternalData || settings.currency !== 'USD') {
-      setFxRateState(null)
-      return false
-    }
-    const rate = await fetchUsdInrRate()
-    if (!rate) return false
-    setFxRateState(rate)
-    return true
-  }, [settings.allowExternalData, settings.currency])
+  }, [folioRefreshKey, settings.allowExternalData, setLiveQuotes])
 
   useEffect(() => {
     if (!settings.allowExternalData || settings.currency !== 'USD') {
@@ -200,19 +265,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [settings.allowExternalData, settings.currency])
 
+  // Keep a small local performance history so the portfolio story survives
+  // between sessions without sending holdings to a remote system.
+  useEffect(() => {
+    if (snapshot.positions.length === 0 || snapshot.currentValue <= 0) return
+    // When external prices are enabled, wait for the first quote response.
+    // Recording the imported fallback first created artificial intraday cliffs.
+    if (settings.allowExternalData && snapshot.lastUpdatedAt == null) return
+    setPortfolioHistory((current) => {
+      const next = appendPortfolioSnapshot({
+        at: Date.now(),
+        value: snapshot.currentValue,
+        invested: snapshot.invested,
+        pnl: snapshot.pnl,
+        holdingCount: snapshot.positions.length,
+      }, current)
+      return next.length === current.length && next[next.length - 1]?.at === current[current.length - 1]?.at ? current : next
+    })
+  }, [settings.allowExternalData, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length])
+
   const value: Store = {
     folios,
     positions,
+    rawPositions,
     liveQuotes,
     fxRate,
-    setFolios,
+    snapshot,
+    portfolioHistory,
     addFolio,
     removeFolio,
     settings,
     setSettings,
+    previewFile,
+    commitImport,
     uploadFile,
+    undoLastImport,
+    exportPortfolio,
     refreshNow,
-    refreshFxRate,
     quickMode,
     setQuickMode,
   }
