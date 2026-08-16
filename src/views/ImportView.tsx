@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
-import { useStore } from '../useStore'
+import { useStore, type ImportPreview } from '../useStore'
 
 export function ImportView() {
-  const { uploadFile, folios, positions, removeFolio } = useStore()
+  const { previewFile, commitImport, folios, positions, removeFolio, undoLastImport, exportPortfolio } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [parsing, setParsing] = useState(false)
+  const [preview, setPreview] = useState<ImportPreview | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   async function handleFile(file: File | undefined) {
@@ -13,13 +14,19 @@ export function ImportView() {
     setError(null)
     setParsing(true)
     try {
-      await uploadFile(file)
+      setPreview(await previewFile(file))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not read file.')
     } finally {
       setParsing(false)
       if (inputRef.current) inputRef.current.value = ''
     }
+  }
+
+  function confirmImport() {
+    if (!preview) return
+    commitImport(preview)
+    setPreview(null)
   }
 
   return (
@@ -48,6 +55,11 @@ export function ImportView() {
               <button className="btn-remove" aria-label={`Remove ${folio.name}`} title="Remove folio" onClick={() => removeFolio(folio.id)}>×</button>
             </div>
           ))}
+          <div className="import-actions">
+            <button type="button" className="btn btn--secondary btn--small" onClick={() => exportPortfolio('csv')}>Export CSV</button>
+            <button type="button" className="btn btn--secondary btn--small" onClick={() => exportPortfolio('json')}>Backup JSON</button>
+            <button type="button" className="btn btn--ghost btn--small" onClick={undoLastImport}>Undo last import</button>
+          </div>
         </div>
       )}
 
@@ -73,6 +85,26 @@ export function ImportView() {
         <span id="upload-instructions" className="hint">or press Enter or Space to browse · .xlsx, .xls, .csv · 10 MB maximum</span>
       </button>
       <p id="upload-status" className="sr-only" aria-live="polite">{parsing ? 'Import in progress.' : error ?? ''}</p>
+
+      {preview && (
+        <div className="panel import-preview enter d3" role="dialog" aria-labelledby="import-preview-title">
+          <div className="panel-head">
+            <div className="panel-head-titles"><span id="import-preview-title" className="panel-title">Review import</span><span className="section-index">Nothing saved yet</span></div>
+            <button type="button" className="btn-remove" onClick={() => setPreview(null)} aria-label="Cancel import">×</button>
+          </div>
+          <p className="hint">{preview.fileName} contains {preview.positions.length} normalized holding{preview.positions.length === 1 ? '' : 's'}.</p>
+          <div className="import-quality">
+            <div><strong>{preview.duplicateCount}</strong><span>duplicate rows merged</span></div>
+            <div><strong>{preview.unmatchedCount}</strong><span>symbols needing review</span></div>
+            <div><strong>{preview.positions.filter((position) => position.type === 'mutual-fund').length}</strong><span>fund rows recognized</span></div>
+          </div>
+          <div className="import-preview-list">
+            {preview.positions.slice(0, 8).map((position) => <span key={position.id} className="tag">{position.ticker} · {position.exchange ?? 'local'} · {position.currency ?? 'INR'}</span>)}
+            {preview.positions.length > 8 && <span className="hint">+ {preview.positions.length - 8} more</span>}
+          </div>
+          <div className="import-actions"><button type="button" className="btn btn--primary" onClick={confirmImport}>Add to portfolio</button><button type="button" className="btn btn--ghost" onClick={() => setPreview(null)}>Cancel</button></div>
+        </div>
+      )}
 
       {error && <div className="panel enter d3" role="alert" style={{ borderColor: 'var(--semantic-danger)' }}><p className="hint down">{error}</p></div>}
 

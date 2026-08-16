@@ -1,20 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { computePortfolioStats, formatCurrency, formatPercent } from '../valuation'
+import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, isLiveQuote, positionPnl, positionPnlPct, positionValue, quoteKey } from '../valuation'
 import { useStore } from '../useStore'
 import type { Currency, LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
 import {
-  isLiveQuote,
   isMarketOpen,
-  livePriceOf,
   marketStatusText,
-  positionPnl,
-  positionPnlPct,
-  positionValue,
 } from '../live'
 import { marketLinks, resolveScreenerCompanyPath, screenerSectionLinks } from '../research'
 import type { ResearchLink } from '../research'
+const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
 const PIE_COLORS = [
   '#5e6ad2',
@@ -27,14 +22,7 @@ const PIE_COLORS = [
   '#9a9fd0',
 ]
 
-const TOOLTIP_STYLE = {
-  background: '#151619',
-  border: '1px solid #32343b',
-  borderRadius: 8,
-  color: '#f7f8f8',
-  fontFamily: '"JetBrains Mono", monospace',
-  fontSize: 12,
-}
+const LEDGER_PAGE_SIZE = 100
 
 type Scope = 'all' | 'equity' | 'mutual'
 type SortField = 'symbol' | 'qty' | 'buy' | 'ltp' | 'value' | 'pnl'
@@ -52,44 +40,48 @@ interface LedgerRow {
 }
 
 export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
-  const { positions, settings, setSettings, liveQuotes, fxRate, refreshNow } = useStore()
+  const { positions, rawPositions, settings, setSettings, liveQuotes, fxRate, refreshNow, snapshot } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [limitMsg, setLimitMsg] = useState<{ text: string; until?: number } | null>(null)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [refreshAvailableAt, setRefreshAvailableAt] = useState(0)
+  const [, setCooldownTick] = useState(0)
   const [researchOpen, setResearchOpen] = useState<string | null>(null)
-  const [, setNowTick] = useState(0)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [ledgerPage, setLedgerPage] = useState(0)
+  const [historyPanelReady, setHistoryPanelReady] = useState(false)
   const hideValues = settings.hideValues
 
-  // Live countdown for the manual-refresh rate-limit note.
   useEffect(() => {
-    if (!limitMsg?.until) return
-    const id = window.setInterval(() => {
-      if (limitMsg.until! <= Date.now()) setLimitMsg(null)
-      else setNowTick(Date.now())
+    if (refreshAvailableAt <= Date.now()) return
+    const timer = window.setInterval(() => {
+      if (refreshAvailableAt <= Date.now()) window.clearInterval(timer)
+      setCooldownTick(Date.now())
     }, 1000)
-    return () => window.clearInterval(id)
-  }, [limitMsg])
+    return () => window.clearInterval(timer)
+  }, [refreshAvailableAt])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setHistoryPanelReady(true), 120)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const onManualRefresh = async () => {
-    if (refreshing || positions.length === 0) return
+    if (refreshing || refreshAvailableAt > Date.now() || positions.length === 0) return
     setRefreshing(true)
+    setRefreshError(null)
     try {
-      const res = await refreshNow()
-      if (!res.ok) {
-        setLimitMsg({
-          text:
-            res.reason === 'disabled'
-              ? 'External market data is off. Enable it in Settings to refresh prices.'
-              : res.reason === 'limit'
-                ? 'Manual refresh limit reached (5 per hour).'
-                : 'Refreshing too quickly.',
-          until: res.reason === 'disabled' ? undefined : Date.now() + res.retryInMs,
-        })
-      } else {
-        setLimitMsg(null)
+      const result = await refreshNow()
+      if (!result.ok && result.reason === 'disabled') return
+      if (!result.ok) {
+        if (result.reason === 'failed') setRefreshError('No market quote was updated. Try again later.')
+        return
       }
+      setRefreshAvailableAt(Date.now() + result.retryInMs)
+    } catch {
+      /* keep the previous quotes on any failure */
     } finally {
       setRefreshing(false)
     }
@@ -99,14 +91,10 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
   const liveCount = Object.keys(live).length
   const marketOpen = isMarketOpen()
   const fxReady = currency === 'INR' || !!fxRate?.usdInr
+  const refreshCooldownSeconds = Math.max(0, Math.ceil((refreshAvailableAt - Date.now()) / 1000))
 
   const MASK = '••••••'
   const mask = (s: string) => (hideValues ? MASK : s)
-
-  const fmtCd = (ms: number) => {
-    const s = Math.max(0, Math.ceil(ms / 1000))
-    return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`
-  }
 
   const equityCount = positions.filter((p) => p.type !== 'mutual-fund').length
   const mfCount = positions.filter((p) => p.type === 'mutual-fund').length
@@ -118,6 +106,21 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
         : positions.filter((p) => (scope === 'mutual' ? p.type === 'mutual-fund' : p.type !== 'mutual-fund')),
     [positions, scope],
   )
+
+  // Raw import rows grouped per combined holding (keyed by the merged position
+  // id) so a user can expand any combined ledger row into its original entries.
+  const combinedMembers = useMemo(() => {
+    const byKey = new Map<string, Position[]>()
+    for (const raw of rawPositions) {
+      const k = quoteKey(raw)
+      const arr = byKey.get(k)
+      if (arr) arr.push(raw)
+      else byKey.set(k, [raw])
+    }
+    const map = new Map<string, Position[]>()
+    for (const p of positions) map.set(p.id, byKey.get(quoteKey(p)) ?? [])
+    return map
+  }, [positions, rawPositions])
 
   const stats = useMemo(
     () => computePortfolioStats(scopePositions, live),
@@ -172,6 +175,21 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
       return (ap - bp) * dir
     })
   }, [ledgerRows, sort])
+
+  const ledgerPageCount = Math.max(1, Math.ceil(sortedRows.length / LEDGER_PAGE_SIZE))
+  const visibleLedgerRows = useMemo(
+    () => sortedRows.slice(ledgerPage * LEDGER_PAGE_SIZE, (ledgerPage + 1) * LEDGER_PAGE_SIZE),
+    [ledgerPage, sortedRows],
+  )
+
+  useEffect(() => {
+    setLedgerPage(0)
+    setExpandedId(null)
+  }, [scope, sort])
+
+  useEffect(() => {
+    if (ledgerPage >= ledgerPageCount) setLedgerPage(ledgerPageCount - 1)
+  }, [ledgerPage, ledgerPageCount])
 
   const mfSummary = useMemo(() => {
     if (scope !== 'mutual') return null
@@ -261,16 +279,16 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
   )
 
   const Scope = () => (
-    <div className="scope-switch">
-      <button className={`scope-btn${scope === 'all' ? ' scope-btn--active' : ''}`} onClick={() => setScope('all')}>
+    <div className="scope-switch" role="group" aria-label="Portfolio scope">
+      <button type="button" className={`scope-btn${scope === 'all' ? ' scope-btn--active' : ''}`} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
         All
         <span className="scope-count">{positions.length}</span>
       </button>
-      <button className={`scope-btn${scope === 'equity' ? ' scope-btn--active' : ''}`} onClick={() => setScope('equity')}>
+      <button type="button" className={`scope-btn${scope === 'equity' ? ' scope-btn--active' : ''}`} aria-pressed={scope === 'equity'} onClick={() => setScope('equity')}>
         Equity
         <span className="scope-count">{equityCount}</span>
       </button>
-      <button className={`scope-btn${scope === 'mutual' ? ' scope-btn--active' : ''}`} onClick={() => setScope('mutual')}>
+      <button type="button" className={`scope-btn${scope === 'mutual' ? ' scope-btn--active' : ''}`} aria-pressed={scope === 'mutual'} onClick={() => setScope('mutual')}>
         Mutual Funds
         <span className="scope-count">{mfCount}</span>
       </button>
@@ -290,6 +308,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             className={`icon-btn${hideValues ? ' icon-btn--active' : ''}`}
             onClick={() => setSettings({ ...settings, hideValues: !hideValues })}
             title={hideValues ? 'Reveal values (peek mode off)' : 'Hide values (peek mode on)'}
+            aria-label={hideValues ? 'Reveal portfolio values' : 'Hide portfolio values'}
             aria-pressed={hideValues}
           >
             {hideValues ? (
@@ -307,8 +326,14 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           <button
             className={`icon-btn${refreshing ? ' icon-btn--spinning' : ''}`}
             onClick={onManualRefresh}
-            title={positions.length === 0 ? 'Import a portfolio first' : 'Refresh last-trade prices for all holdings now (5 per hour)'}
-            disabled={refreshing || positions.length === 0}
+            title={
+              positions.length === 0
+                ? 'Import a portfolio first'
+                : refreshCooldownSeconds > 0
+                  ? `Refresh available in ${refreshCooldownSeconds}s`
+                  : 'Refresh latest market prices'
+            }
+            disabled={refreshing || refreshCooldownSeconds > 0 || positions.length === 0}
             aria-label="Refresh prices now"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -316,19 +341,14 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
               <path d="M21 3v6h-6" />
             </svg>
           </button>
-          {limitMsg && (
-            <span className="manual-note">
-              {limitMsg.text}
-              {limitMsg.until && Date.now() < limitMsg.until && <> Retry in {fmtCd(limitMsg.until - Date.now())}.</>}
-            </span>
-          )}
-          <span className="market-status">
+          <span className={`market-status ${marketOpen ? 'market-open' : refreshing ? 'offline-fetch' : 'offline'}`}>
             <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} aria-hidden="true" />
-            {marketStatusText(marketOpen, liveCount, settings.allowExternalData, fxReady)}
+            {marketStatusText(marketOpen, settings.allowExternalData, fxReady, refreshing)}
             {liveCount > 0 && (
               <span className="market-status-time">· last refresh {lastRefreshTime(live)}</span>
             )}
           </span>
+          {refreshError && <span className="hint down" role="alert">{refreshError}</span>}
           <span>
             Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
             {scope === 'mutual' ? ' — mutual funds' : ''} at current market prices.
@@ -369,8 +389,21 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
         </div>
       </div>
 
+      <div className="daily-brief enter d2">
+        <div className="daily-brief-copy">
+          <span className="page-eyebrow">Daily read</span>
+          <strong>{snapshot.dailyChange == null ? 'Waiting for the market read.' : snapshot.dailyChange >= 0 ? 'Your portfolio is catching a tailwind.' : 'Your portfolio is facing a headwind.'}</strong>
+          <span className="hint">{snapshot.dailyChange == null ? 'Refresh prices to see what moved your portfolio today.' : `${snapshot.contributions.filter((item) => item.dailyChange != null).length} holdings reported a daily move. Open Insights for the full contribution story.`}</span>
+        </div>
+        <div className="daily-brief-stat">
+          <span className="score-label">Today</span>
+          <strong className={snapshot.dailyChange != null && snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? '—' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, fxRate?.usdInr)}`)}</strong>
+        </div>
+        <button type="button" className="btn btn--secondary" onClick={() => onGoTo('insights')}>Open Insights →</button>
+      </div>
+
       {/* Ticker tape */}
-      <div className="tiker-wrap enter d2">
+      <div className="tiker-wrap enter d3">
         <div className="ticker">
           <div className="ticker-track">
             {tickerItems(scopePositions, currency, hideValues, live, fxRate?.usdInr).map((t, i) => (
@@ -384,7 +417,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
       </div>
 
       {/* Panels */}
-      <div className="span-grid enter d3">
+      <div className="span-grid enter d4">
         <div className="panel panel--ledger">
           <div className="panel-head">
             <div className="panel-head-titles">
@@ -422,8 +455,16 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             </div>
           )}
           {scope === 'mutual' ? (
-            <MFLedger rows={scopePositions} currency={currency} hideValues={hideValues} live={live} usdInrRate={fxRate?.usdInr} />
+            <MFLedger
+              rows={scopePositions}
+              membersOf={combinedMembers}
+              currency={currency}
+              hideValues={hideValues}
+              live={live}
+              usdInrRate={fxRate?.usdInr}
+            />
           ) : (
+            <>
             <table className="table table--ledger">
               <thead>
                 <tr>
@@ -436,34 +477,66 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map((r) => {
+                {visibleLedgerRows.map((r) => {
                   const pnlUp = r.pnl != null && r.pnl >= 0
+                  const members = combinedMembers.get(r.id) ?? []
+                  const expandable = members.length > 1
+                  const open = expandedId === r.id
                   return (
-                    <tr key={r.id}>
-                      <td className="sym" title={r.symbol}>{mask(r.symbol)}</td>
-                      <td>{mask(fmtUnits(r.qty))}</td>
-                      <td>{mask(formatCurrency(r.buy, currency, fxRate?.usdInr))}</td>
-                      <td>
-                        {r.ltp != null && r.buy > 0 && r.ltp !== r.buy ? (
-                          <span className={`ltp ltp--${r.ltp > r.buy ? 'up' : 'down'}`}>
-                            <span className="ltp-arrow" aria-hidden="true">{r.ltp > r.buy ? '▲' : '▼'}</span>
-                            {mask(formatCurrency(r.ltp, currency, fxRate?.usdInr))}
-                          </span>
-                        ) : r.ltp != null ? (
-                          <span className="ltp ltp--flat">{mask(formatCurrency(r.ltp, currency, fxRate?.usdInr))}</span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td>{mask(formatCurrency(r.value, currency, fxRate?.usdInr))}</td>
-                      <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
-                        {r.pnl != null ? mask(`${pnlUp ? '+' : ''}${formatCurrency(r.pnl, currency, fxRate?.usdInr)}`) : '—'}
-                      </td>
-                    </tr>
+                    <Fragment key={r.id}>
+                      <tr className={open ? 'trow--open' : undefined}>
+                        <td className="sym" title={r.symbol}>
+                          <button
+                            className={`ledger-caret${open ? ' ledger-caret--open' : ''}${expandable ? '' : ' ledger-caret--muted'}`}
+                            onClick={() => setExpandedId(open ? null : r.id)}
+                            disabled={!expandable}
+                            aria-expanded={open}
+                            aria-label={expandable ? `Show the ${members.length} merged entries for ${r.symbol}` : undefined}
+                            title={expandable ? `${members.length} entries merged into this row` : undefined}
+                          >
+                            ▾
+                          </button>
+                          {mask(r.symbol)}
+                        </td>
+                        <td>{mask(fmtUnits(r.qty))}</td>
+                        <td>{mask(formatCurrency(r.buy, currency, fxRate?.usdInr))}</td>
+                        <td>
+                          {r.ltp != null && r.buy > 0 && r.ltp !== r.buy ? (
+                            <span className={`ltp ltp--${r.ltp > r.buy ? 'up' : 'down'}`}>
+                              <span className="ltp-arrow" aria-hidden="true">{r.ltp > r.buy ? '▲' : '▼'}</span>
+                              {mask(formatCurrency(r.ltp, currency, fxRate?.usdInr))}
+                            </span>
+                          ) : r.ltp != null ? (
+                            <span className="ltp ltp--flat">{mask(formatCurrency(r.ltp, currency, fxRate?.usdInr))}</span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>{mask(formatCurrency(r.value, currency, fxRate?.usdInr))}</td>
+                        <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
+                          {r.pnl != null ? mask(`${pnlUp ? '+' : ''}${formatCurrency(r.pnl, currency, fxRate?.usdInr)}`) : '—'}
+                        </td>
+                      </tr>
+                      {open && expandable && (
+                        <tr className="trow--nested">
+                          <td colSpan={6}>
+                            <LedgerMembers
+                              members={members}
+                              live={live}
+                              currency={currency}
+                              usdInrRate={fxRate?.usdInr}
+                              hideValues={hideValues}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
               </tbody>
             </table>
+            {sortedRows.length > LEDGER_PAGE_SIZE && <div className="ledger-pagination" aria-label="Ledger pages"><span>{ledgerPage * LEDGER_PAGE_SIZE + 1}–{Math.min((ledgerPage + 1) * LEDGER_PAGE_SIZE, sortedRows.length)} of {sortedRows.length}</span><div><button className="btn btn--secondary" type="button" disabled={ledgerPage === 0} onClick={() => setLedgerPage((page) => Math.max(0, page - 1))}>Previous</button><button className="btn btn--secondary" type="button" disabled={ledgerPage === ledgerPageCount - 1} onClick={() => setLedgerPage((page) => Math.min(ledgerPageCount - 1, page + 1))}>Next</button></div></div>}
+            </>
           )}
         </div>
 
@@ -475,28 +548,13 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             </div>
             <Scope />
           </div>
-          <div style={{ height: 320 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={stats.allocations}
-                  dataKey="value"
-                  nameKey="symbol"
-                  innerRadius={68}
-                  outerRadius={116}
-                  paddingAngle={2}
-                  stroke="transparent"
-                >
-                  {stats.allocations.map((_, i) => (
-                    <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                {!hideValues && (
-                  <Tooltip formatter={(v) => formatCurrency(v == null ? 0 : Number(v), currency, fxRate?.usdInr)} contentStyle={TOOLTIP_STYLE} />
-                )}
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          <AllocationMix
+            allocations={stats.allocations}
+            colors={PIE_COLORS}
+            hideValues={hideValues}
+            currency={currency}
+            usdInrRate={fxRate?.usdInr}
+          />
           <div className="alloc-list alloc-list--research">
             <div className="alloc-list-head">
               <span className="panel-title">Top holdings · research</span>
@@ -533,6 +591,60 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             )}
           </div>
         </div>
+      </div>
+
+      {historyPanelReady ? (
+        <Suspense fallback={<div className="panel history-panel-placeholder">Preparing price history…</div>}>
+          <HistoryPanel scope={scope} />
+        </Suspense>
+      ) : <div className="panel history-panel-placeholder">Preparing price history…</div>}
+    </div>
+  )
+}
+
+function AllocationMix({
+  allocations,
+  colors,
+  hideValues,
+  currency,
+  usdInrRate,
+}: {
+  allocations: { symbol: string; value: number }[]
+  colors: string[]
+  hideValues: boolean
+  currency: Currency
+  usdInrRate?: number
+}) {
+  const visible = allocations.slice(0, 7)
+  const remainder = allocations.slice(7).reduce((sum, item) => sum + item.value, 0)
+  const rows = remainder > 0 ? [...visible, { symbol: 'Other', value: remainder }] : visible
+  const total = rows.reduce((sum, item) => sum + item.value, 0)
+  let angle = 0
+  const gradient = rows.length && total > 0
+    ? `conic-gradient(${rows.map((item, index) => {
+      const next = angle + (item.value / total) * 360
+      const segment = `${colors[index % colors.length]} ${angle.toFixed(2)}deg ${next.toFixed(2)}deg`
+      angle = next
+      return segment
+    }).join(', ')})`
+    : 'var(--surface-3)'
+  const mask = (text: string) => hideValues ? '••••••' : text
+
+  return (
+    <div className="allocation-mix" aria-label="Portfolio allocation mix">
+      <div className="allocation-ring" style={{ background: gradient }} role="img" aria-label={hideValues ? 'Portfolio allocation hidden' : `Allocation across ${rows.length} holdings`}>
+        <div><span>Holdings</span><strong>{allocations.length}</strong></div>
+      </div>
+      <div className="allocation-breakdown">
+        {rows.map((item, index) => {
+          const weight = total > 0 ? (item.value / total) * 100 : 0
+          return <div key={item.symbol} className="allocation-breakdown-row">
+            <span className="legend-swatch" style={{ background: colors[index % colors.length] }} />
+            <span title={item.symbol}>{item.symbol}</span>
+            <strong>{mask(`${weight.toFixed(1)}%`)}</strong>
+            <small>{mask(formatCurrency(item.value, currency, usdInrRate))}</small>
+          </div>
+        })}
       </div>
     </div>
   )
@@ -594,18 +706,22 @@ function ResearchDrawer({ p }: { p: Position }) {
 /** Mutual-fund ledger — layout maps to the holdings export: Scheme, AMC, Folio, Units, Values, Returns, XIRR. */
 function MFLedger({
   rows,
+  membersOf,
   currency,
   hideValues,
   live,
   usdInrRate,
 }: {
   rows: ReturnType<typeof useStore>['positions']
+  membersOf: Map<string, Position[]>
   currency: Currency
   hideValues: boolean
   live: Record<string, LiveQuote>
   usdInrRate?: number | null
 }) {
   const [sort, setSort] = useState<{ field: string; dir: SortDir } | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
   const mask = (s: string) => (hideValues ? '••••••' : s)
 
   const sorted = useMemo(() => {
@@ -614,12 +730,12 @@ function MFLedger({
     return [...rows].sort((a, b) => {
       const num = (x: PositionLike) =>
         sort.field === 'value'
-          ? valueOf(x, currency, live)
+          ? valueOf(x, live)
           : sort.field === 'units'
             ? x.quantity
             : sort.field === 'invested'
               ? x.invested
-              : mfReturnPct(x, currency, live) ?? -Infinity
+              : mfReturnPct(x, live) ?? -Infinity
       switch (sort.field) {
         case 'scheme':
           return (a.name || a.ticker).localeCompare(b.name || b.ticker) * dir
@@ -628,6 +744,18 @@ function MFLedger({
       }
     })
   }, [rows, sort])
+
+  const pageCount = Math.max(1, Math.ceil(sorted.length / LEDGER_PAGE_SIZE))
+  const visibleRows = useMemo(() => sorted.slice(page * LEDGER_PAGE_SIZE, (page + 1) * LEDGER_PAGE_SIZE), [page, sorted])
+
+  useEffect(() => {
+    setPage(0)
+    setExpandedId(null)
+  }, [sort])
+
+  useEffect(() => {
+    if (page >= pageCount) setPage(pageCount - 1)
+  }, [page, pageCount])
 
   const toggle = (field: string) =>
     setSort((prev) => {
@@ -653,6 +781,7 @@ function MFLedger({
   )
 
   return (
+    <>
     <table className="table">
       <thead>
         <tr>
@@ -666,32 +795,117 @@ function MFLedger({
         </tr>
       </thead>
       <tbody>
-        {sorted.map((p) => {
-          const value = valueOf(p, currency, live)
+        {visibleRows.map((p) => {
+          const value = valueOf(p, live)
+          const members = membersOf.get(p.id) ?? []
+          const expandable = members.length > 1
+          const open = expandedId === p.id
           return (
-            <tr key={p.id}>
-              <td className="sym">
-                <span className="mf-name" data-full={p.name || p.ticker}>
-                  {mask(p.name || p.ticker)}
-                </span>
-              </td>
-              <td>{mask(fmtUnits(p.quantity))}</td>
-              <td>{mask(formatCurrency(p.invested, currency, usdInrRate))}</td>
-              <td>{mask(formatCurrency(value, currency, usdInrRate))}</td>
-              <td className={valueOf(p, currency, live) >= p.invested ? 'up' : 'down'}>
-                {mask(formatPercent(mfReturnPct(p, currency, live) ?? 0))}
-              </td>
-              <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'}>
-                {p.xirr != null ? mask(formatPercent(p.xirr)) : '—'}
-              </td>
-              <td className="muted">
-                {mask([p.amc, p.folio].filter(Boolean).join(' · ') || '—')}
-              </td>
-            </tr>
+            <Fragment key={p.id}>
+              <tr className={open ? 'trow--open' : undefined}>
+                <td className="sym">
+                  <button
+                    className={`ledger-caret${open ? ' ledger-caret--open' : ''}${expandable ? '' : ' ledger-caret--muted'}`}
+                    onClick={() => setExpandedId(open ? null : p.id)}
+                    disabled={!expandable}
+                    aria-expanded={open}
+                    aria-label={expandable ? `Show the ${members.length} merged entries for ${p.name || p.ticker}` : undefined}
+                    title={expandable ? `${members.length} entries merged into this row` : undefined}
+                  >
+                    ▾
+                  </button>
+                  <span className="mf-name" data-full={p.name || p.ticker}>
+                    {mask(p.name || p.ticker)}
+                  </span>
+                </td>
+                <td>{mask(fmtUnits(p.quantity))}</td>
+                <td>{mask(formatCurrency(p.invested, currency, usdInrRate))}</td>
+                <td>{mask(formatCurrency(value, currency, usdInrRate))}</td>
+                <td className={valueOf(p, live) >= p.invested ? 'up' : 'down'}>
+                  {mask(formatPercent(mfReturnPct(p, live) ?? 0))}
+                </td>
+                <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'}>
+                  {p.xirr != null ? mask(formatPercent(p.xirr)) : '—'}
+                </td>
+                <td className="muted">
+                  {mask([p.amc, p.folio].filter(Boolean).join(' · ') || '—')}
+                </td>
+              </tr>
+              {open && expandable && (
+                <tr className="trow--nested">
+                  <td colSpan={7}>
+                    <LedgerMembers
+                      members={members}
+                      live={live}
+                      currency={currency}
+                      usdInrRate={usdInrRate}
+                      hideValues={hideValues}
+                    />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           )
         })}
       </tbody>
     </table>
+    {sorted.length > LEDGER_PAGE_SIZE && <div className="ledger-pagination" aria-label="Mutual fund ledger pages"><span>{page * LEDGER_PAGE_SIZE + 1}–{Math.min((page + 1) * LEDGER_PAGE_SIZE, sorted.length)} of {sorted.length}</span><div><button className="btn btn--secondary" type="button" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Previous</button><button className="btn btn--secondary" type="button" disabled={page === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Next</button></div></div>}
+    </>
+  )
+}
+
+/** Inline breakdown of a combined ledger row: the original import entries
+ *  (each qty, cost basis, invested, value and P&L) that were merged. */
+function LedgerMembers({
+  members,
+  live,
+  currency,
+  usdInrRate,
+  hideValues,
+}: {
+  members: Position[]
+  live: Record<string, LiveQuote>
+  currency: Currency
+  usdInrRate?: number | null
+  hideValues: boolean
+}) {
+  const mask = (s: string) => (hideValues ? '••••••' : s)
+  const anyFolio = members.some((m) => (m.folio ?? '').trim() !== '')
+  return (
+    <div className="ledger-members">
+      <div className="ledger-members-title">Merged {members.length} entries</div>
+      <table className="table table--nested">
+        <thead>
+          <tr>
+            <th>Qty</th>
+            <th>Buy</th>
+            <th>Invested</th>
+            <th>Value</th>
+            <th>P&L</th>
+            {anyFolio && <th>Folio</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {members.map((m) => {
+            const v = positionValue(m, live)
+            const pnl = positionPnl(m, live)
+            const up = pnl != null && pnl >= 0
+            return (
+              <tr key={m.id}>
+                <td>{mask(fmtUnits(m.quantity))}</td>
+                <td>{mask(formatCurrency(m.buyPrice, currency, usdInrRate))}</td>
+                <td>{mask(formatCurrency(m.invested, currency, usdInrRate))}</td>
+                <td>{mask(formatCurrency(v, currency, usdInrRate))}</td>
+                <td className={pnl != null ? (up ? 'up' : 'down') : 'muted'}>
+                  {pnl != null ? mask(`${up ? '+' : ''}${formatCurrency(pnl, currency, usdInrRate)}`) : '—'}
+                </td>
+                {anyFolio && <td className="muted">{mask((m.folio ?? '').trim() || '—')}</td>}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -701,14 +915,14 @@ function fmtUnits(n: number): string {
   return n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
 }
 
-function valueOf(p: PositionLike, _currency: Currency, live: Record<string, LiveQuote>): number {
+function valueOf(p: PositionLike, live: Record<string, LiveQuote>): number {
   return positionValue(p, live)
 }
 
 /** General return: (current value − invested) ÷ invested × 100. */
-function mfReturnPct(p: PositionLike, currency: Currency, live: Record<string, LiveQuote>): number | null {
+function mfReturnPct(p: PositionLike, live: Record<string, LiveQuote>): number | null {
   if (p.invested <= 0) return null
-  return ((valueOf(p, currency, live) - p.invested) / p.invested) * 100
+  return ((valueOf(p, live) - p.invested) / p.invested) * 100
 }
 
 /** Latest refresh time across all live quotes, in IST. */

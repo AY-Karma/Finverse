@@ -8,6 +8,10 @@ A client-side investment portfolio dashboard with a live market-scoreboard feel.
 - **Live scoreboard** — invested, current value, P&L, and XIRR at a glance, across All / Equity / Mutual Fund scopes.
 - **Holdings ledger** — per-position and per-MF-scheme tables with symbol/scheme, quantity, buy price, current price, value, and XIRR.
 - **Allocation mix** — asset-allocation breakdown with a top-exposure list.
+- **Investment Insights** — daily contribution view, benchmark race, performance story, interactive exposure treemap, sector/type mix, concentration, and risk/drawdown analysis.
+- **Responsive Insights rendering** — chart series are bounded and downsampled, below-the-fold charts load when explored, and benchmark alignment is linear rather than repeatedly scanning the full history.
+- **Safer ingestion** — spreadsheet preview, duplicate detection, canonical instrument identity, undo for the latest import, and CSV/JSON export.
+- **Market-data seam** — quote, history, benchmark, and refresh work behind a replaceable market-data adapter.
 - **AI assistant** — chat with the portfolio context using a configured provider.
 - **Terminal look & UX** — dark market theme, compact/comfortable density, and an accent-color picker.
 
@@ -39,12 +43,20 @@ Portfolio data and chat history stay in this browser's local storage. API keys a
 
 External requests are opt-in. Enabling **External market data** sends holding tickers or mutual-fund scheme names to Yahoo Finance (through corsproxy.io), mfapi.in, and Frankfurter for quotes, NAVs, and USD/INR conversion. Using the AI Assistant sends the portfolio digest and conversation to the provider you configure (OpenAI, Anthropic, OpenRouter, or the Ollama endpoint you enter). Finverse has no backend or telemetry service of its own.
 
+Ollama defaults to `http://localhost:11434/v1`. Remote Ollama destinations must use HTTPS and require an explicit confirmation in Settings; the resolved chat endpoint is shown before sending. Imported spreadsheets are preflighted and parsed in a Web Worker with row, column, worksheet, cell, and expansion limits. Chat history remains until **Clear chat** is selected or the stored record exceeds the local safety cap.
+
+Deployments that support a `public/_headers` file receive CSP, frame, referrer, MIME-sniffing, and HSTS headers from the included deployment defaults. Confirm that your hosting provider applies `_headers`; otherwise configure the same policies at the hosting layer.
+
 ## Project layout
 
 ```
 src/
   App.tsx            App shell, view routing, nav
   store.ts           Persistence helpers
+  instruments.ts     Canonical instrument identity and normalization
+  investmentWorkspace.ts  Snapshot projections and import/export seam
+  marketData.ts      Replaceable quote/history/benchmark adapter
+  portfolioHistory.ts  Private local portfolio snapshots
   valuation.ts       Shared price, value, P&L, allocation, and currency logic
   useStore.tsx       React hook over the store
   spreadsheet.ts     Spreadsheet parsing into folios/holdings

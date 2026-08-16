@@ -7,13 +7,17 @@ const INLINE_RE =
 const CHART_BLOCK_RE = /\[chart\]([\s\S]*?)\[\/chart\]/g
 
 const CHART_VALUE_KEYS = ['value', 'volume', 'pct', 'amount', 'val'] as const
+const MAX_CHARTS = 8
+const MAX_CHART_ROWS = 20
+const MAX_CHART_LABEL_CHARS = 120
+const MAX_CHART_TITLE_CHARS = 160
 
 /** Pull chart blocks out of a reply so the surrounding text stays clean. */
 export function extractCharts(content: string): { text: string; charts: ChartSpec[] } {
   const charts: ChartSpec[] = []
   const text = content.replace(CHART_BLOCK_RE, (_m, body: string) => {
     const spec = parseChartBlock(body)
-    if (spec) {
+    if (spec && charts.length < MAX_CHARTS) {
       charts.push(spec)
       return ''
     }
@@ -29,10 +33,10 @@ function parseChartBlock(body: string): ChartSpec | null {
   const normalize = (obj: unknown): ChartSpec['data'] => {
     if (!obj || !Array.isArray((obj as { data?: unknown }).data)) return []
     const out: ChartSpec['data'] = []
-    for (const row of (obj as { data: unknown[] }).data) {
+    for (const row of (obj as { data: unknown[] }).data.slice(0, MAX_CHART_ROWS)) {
       if (!row || typeof row !== 'object') continue
       const r = row as Record<string, unknown>
-      const label = String(r.label ?? '').trim()
+      const label = String(r.label ?? '').trim().slice(0, MAX_CHART_LABEL_CHARS)
       let num: number | undefined
       for (const key of CHART_VALUE_KEYS) {
         const v = r[key]
@@ -52,7 +56,7 @@ function parseChartBlock(body: string): ChartSpec | null {
     if (data.length === 0) return null
     const o = obj as { kind?: unknown; title?: unknown }
     const kind = o.kind === 'pie' || o.kind === 'line' ? o.kind : 'bar'
-    return { kind, title: o.title != null ? String(o.title) : undefined, data }
+    return { kind, title: o.title != null ? String(o.title).slice(0, MAX_CHART_TITLE_CHARS) : undefined, data }
   }
 
   let parsed: unknown = null
@@ -82,7 +86,7 @@ function parseChartBlock(body: string): ChartSpec | null {
   while ((m = rowRe.exec(cleaned))) {
     const label = m[1].replace(/\\"/g, '"').trim()
     const num = Number(m[2])
-    if (label && Number.isFinite(num)) data.push({ label, value: num })
+    if (label && Number.isFinite(num) && data.length < MAX_CHART_ROWS) data.push({ label: label.slice(0, MAX_CHART_LABEL_CHARS), value: num })
   }
   if (data.length) {
     const k = kind === 'pie' || kind === 'line' ? kind : 'bar'

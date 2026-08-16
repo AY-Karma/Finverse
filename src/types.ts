@@ -4,6 +4,8 @@ export type ProviderId = 'openai' | 'anthropic' | 'openrouter' | 'ollama'
 
 export type Currency = 'INR' | 'USD'
 
+export type Exchange = 'NSE' | 'BSE' | 'NASDAQ' | 'NYSE' | 'LSE' | 'OTHER'
+
 export type Density = 'comfortable' | 'compact'
 export type Accent = 'indigo' | 'emerald' | 'cobalt' | 'amber'
 
@@ -24,6 +26,14 @@ export interface Position {
   source?: string
   returns?: number | null
   xirr?: number | null
+  /** Canonical identity fields filled by the investment workspace. */
+  instrumentKey?: string
+  isin?: string
+  exchange?: Exchange
+  providerSymbol?: string
+  currency?: Currency
+  sector?: string
+  industry?: string
 }
 
 export interface Folio {
@@ -38,6 +48,8 @@ export interface Settings {
   apiKey: string
   model: string
   baseUrl: string
+  /** Explicit consent is required before Ollama can send data to a remote host. */
+  confirmRemoteOllama: boolean
   currency: Currency
   allowExternalData: boolean
   density: Density
@@ -60,6 +72,17 @@ export interface LiveQuote {
   price: number
   at: number
   source: 'yahoo' | 'nav'
+  change?: number | null
+  changePct?: number | null
+}
+
+export interface PortfolioSnapshot {
+  at: number
+  value: number
+  invested: number
+  pnl: number
+  /** Number of valued positions when the snapshot was captured. */
+  holdingCount: number
 }
 
 export interface ChatMessage {
