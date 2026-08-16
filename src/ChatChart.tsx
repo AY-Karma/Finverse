@@ -4,6 +4,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -11,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { ChartSpec } from './types'
+import type { ChartSpec, Currency } from './types'
 
 const CHART_COLORS = [
   '#5e6ad2',
@@ -26,15 +28,22 @@ const CHART_COLORS = [
 
 const AXIS_STYLE = { fill: '#8a8f98', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }
 
-function fmtValue(n: number): string {
+function fmtValue(n: number, currency: Currency): string {
+  if (currency === 'USD') {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 2 }).format(n)
+  }
   const abs = Math.abs(n)
   if (abs >= 1e7) return `₹${(n / 1e7).toFixed(2)}Cr`
   if (abs >= 1e5) return `₹${(n / 1e5).toFixed(1)}L`
-  return n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
+  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 }
 
-export function ChatChart({ spec }: { spec: ChartSpec }) {
-  const data: ChartSpec['data'] = spec.data.length ? spec.data : [{ label: 'No data', value: 0 }]
+export function ChatChart({ spec, currency = 'INR' }: { spec: ChartSpec; currency?: Currency }) {
+  const bounded = spec.data
+    .filter((row) => row && typeof row.label === 'string' && Number.isFinite(row.value))
+    .slice(0, 20)
+    .map((row) => ({ label: row.label.slice(0, 120), value: row.value }))
+  const data: ChartSpec['data'] = bounded.length ? bounded : [{ label: 'No data', value: 0 }]
 
   return (
     <div className="chat-chart">
@@ -57,18 +66,29 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
                 ))}
               </Pie>
               <Tooltip
-                formatter={(v) => fmtValue(Number(v))}
+                formatter={(v) => fmtValue(Number(v), currency)}
                 contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
               />
               <Legend wrapperStyle={{ fontSize: 11, color: '#8a8f98' }} />
             </PieChart>
+          ) : spec.kind === 'line' ? (
+            <LineChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#22242a" vertical={false} />
+              <XAxis dataKey="label" tick={AXIS_STYLE} interval={0} angle={data.length > 6 ? -28 : 0} height={data.length > 6 ? 58 : 30} textAnchor={data.length > 6 ? 'end' : 'middle'} />
+              <YAxis tick={AXIS_STYLE} width={70} tickFormatter={(v: number) => fmtValue(v, currency)} />
+              <Tooltip
+                formatter={(v) => fmtValue(Number(v), currency)}
+                contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
+              />
+              <Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
           ) : (
             <BarChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#22242a" vertical={false} />
               <XAxis dataKey="label" tick={AXIS_STYLE} interval={0} angle={data.length > 6 ? -28 : 0} height={data.length > 6 ? 58 : 30} textAnchor={data.length > 6 ? 'end' : 'middle'} />
-              <YAxis tick={AXIS_STYLE} width={70} tickFormatter={(v: number) => fmtValue(v)} />
+              <YAxis tick={AXIS_STYLE} width={70} tickFormatter={(v: number) => fmtValue(v, currency)} />
               <Tooltip
-                formatter={(v) => fmtValue(Number(v))}
+                formatter={(v) => fmtValue(Number(v), currency)}
                 contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
               />
               <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={48}>

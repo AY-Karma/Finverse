@@ -4,7 +4,6 @@ export interface AccentPalette {
   primary: string
   primaryHover: string
   primaryFocus: string
-  brandSecure: string
   spark: string
 }
 
@@ -13,28 +12,24 @@ export const ACCENTS: Record<Accent, AccentPalette> = {
     primary: '#5e6ad2',
     primaryHover: '#828fff',
     primaryFocus: '#5e69d1',
-    brandSecure: '#7a7fad',
     spark: 'rgba(94, 106, 210, 0.14)',
   },
   emerald: {
     primary: '#10b981',
     primaryHover: '#34d399',
     primaryFocus: '#0ea371',
-    brandSecure: '#3fae8a',
     spark: 'rgba(16, 185, 129, 0.14)',
   },
   cobalt: {
     primary: '#3b82f6',
     primaryHover: '#60a5fa',
     primaryFocus: '#2f6cd8',
-    brandSecure: '#5f7cad',
     spark: 'rgba(59, 130, 246, 0.14)',
   },
   amber: {
     primary: '#f59e0b',
     primaryHover: '#fbbf24',
     primaryFocus: '#d97706',
-    brandSecure: '#c1904a',
     spark: 'rgba(245, 158, 11, 0.14)',
   },
 }
@@ -47,7 +42,6 @@ export function applyTheme(accent: Accent, density: 'comfortable' | 'compact'): 
   root.style.setProperty('--primary', p.primary)
   root.style.setProperty('--primary-hover', p.primaryHover)
   root.style.setProperty('--primary-focus', p.primaryFocus)
-  root.style.setProperty('--brand-secure', p.brandSecure)
   root.style.setProperty('--spark', p.spark)
   root.dataset.density = density
 }

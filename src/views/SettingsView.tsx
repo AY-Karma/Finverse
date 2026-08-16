@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { isLocalProvider, PROVIDERS } from '../providers'
+import { describeOllamaEndpoint, isLocalProvider, LOCAL_MODEL_PRESETS, PROVIDERS } from '../providers'
 import { ACCENTS, ACCENT_KEYS } from '../theme'
 import type { Accent, Density } from '../types'
 import { useStore } from '../useStore'
@@ -11,7 +11,12 @@ export function SettingsView() {
   const { settings, setSettings } = useStore()
   const update = (patch: Partial<typeof settings>) => setSettings({ ...settings, ...patch })
   const local = settings.provider ? isLocalProvider(settings.provider) : false
-  const configured = Boolean(settings.provider) && (local || Boolean(settings.apiKey))
+  const ollamaDestination = local ? describeOllamaEndpoint(settings.baseUrl) : null
+  const configured = Boolean(settings.provider) && (
+    local
+      ? Boolean(ollamaDestination && !ollamaDestination.error && (!ollamaDestination.requiresConfirmation || settings.confirmRemoteOllama))
+      : Boolean(settings.apiKey)
+  )
 
   return (
     <>
@@ -81,12 +86,17 @@ export function SettingsView() {
               <span className="field-label">External market data</span>
               <span className="hint">Allow quote, NAV, and USD/INR requests for this portfolio.</span>
             </span>
-            <input
-              id="external-data"
-              type="checkbox"
-              checked={settings.allowExternalData}
-              onChange={(e) => update({ allowExternalData: e.target.checked })}
-            />
+            <span className="switch">
+              <input
+                id="external-data"
+                type="checkbox"
+                checked={settings.allowExternalData}
+                onChange={(e) => update({ allowExternalData: e.target.checked })}
+              />
+              <span className="switch-track" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+            </span>
           </label>
           <p className="hint" style={{ marginTop: 0 }}>
             Imported values are INR. USD display uses a live USD/INR rate after you enable external data;
@@ -112,7 +122,12 @@ export function SettingsView() {
               onChange={(e) => {
                 const id = e.target.value as typeof settings.provider
                 const provider = PROVIDERS.find((item) => item.id === id)
-                update({ provider: id, model: settings.model || provider?.model || '' })
+                update({
+                  provider: id,
+                  model: settings.model || provider?.model || '',
+                  baseUrl: id === 'ollama' && !settings.baseUrl ? 'http://localhost:11434/v1' : settings.baseUrl,
+                  confirmRemoteOllama: false,
+                })
               }}
             >
               <option value="">Select a provider</option>
@@ -122,9 +137,48 @@ export function SettingsView() {
 
           {local ? (
             <>
-              <TextField id="model" label="Model" placeholder="e.g. llama3, phi3, gemma2" value={settings.model} onChange={(model) => update({ model })} />
-              <TextField id="baseurl" label="Base URL" placeholder="http://localhost:11434/v1" value={settings.baseUrl} onChange={(baseUrl) => update({ baseUrl })} />
-              <p className="hint">Only use a non-local Base URL if you intend to send your portfolio to that server.</p>
+              <TextField id="model" label="Model" placeholder="e.g. qwen2.5:1.5b, llama3.2:latest" value={settings.model} onChange={(model) => update({ model })} />
+              <div className="field">
+                <span className="field-label">Installed on this device</span>
+                <div className="model-chips">
+                  {LOCAL_MODEL_PRESETS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`model-chip${settings.model === m ? ' model-chip--active' : ''}`}
+                      aria-pressed={settings.model === m}
+                      onClick={() => update({ model: m })}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <TextField
+                id="baseurl"
+                label="Base URL"
+                placeholder="http://localhost:11434/v1"
+                value={settings.baseUrl}
+                onChange={(baseUrl) => update({ baseUrl, confirmRemoteOllama: false })}
+              />
+              {ollamaDestination && (
+                <div className="ollama-destination" role={ollamaDestination.error ? 'alert' : 'status'}>
+                  <span className="field-label">Resolved destination</span>
+                  <code>{ollamaDestination.endpoint}</code>
+                  {ollamaDestination.error && <span className="hint down">{ollamaDestination.error}</span>}
+                  {!ollamaDestination.error && ollamaDestination.requiresConfirmation && (
+                    <label className="remote-ollama-confirm">
+                      <input
+                        type="checkbox"
+                        checked={settings.confirmRemoteOllama}
+                        onChange={(e) => update({ confirmRemoteOllama: e.target.checked })}
+                      />
+                      <span>I understand this sends my portfolio and chat to this remote HTTPS server.</span>
+                    </label>
+                  )}
+                </div>
+              )}
+              <p className="hint">Localhost is the default. Remote Ollama endpoints must use HTTPS and require the confirmation above before any request is sent.</p>
             </>
           ) : (
             <>

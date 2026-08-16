@@ -1,4 +1,5 @@
 import type { Currency, LiveQuote, Position } from './types'
+import { instrumentKey } from './instruments'
 
 export interface Allocation {
   symbol: string
@@ -16,14 +17,61 @@ export interface PortfolioStats {
 
 /** Stable key shared by imports, quote fetching, and every valuation view. */
 export function quoteKey(position: Position): string {
-  return position.type === 'mutual-fund'
-    ? (position.name || position.ticker).trim()
-    : position.ticker.trim().toUpperCase()
+  return instrumentKey(position)
 }
 
 /** A live quote is preferred over the spreadsheet's most recent reported price. */
 export function effectivePrice(position: Position, quotes: Record<string, LiveQuote> = {}): number | null {
   return quotes[quoteKey(position)]?.price ?? position.lastPrice
+}
+
+/** Merge same-instrument rows (same mutual-fund scheme name or equity ticker)
+ *  so each holding is shown once. Quantities and invested amounts are summed;
+ *  cost basis becomes the weighted average (invested ÷ units); the fund XIRR is
+ *  averaged across entries by their invested weight; metadata keeps the first
+ *  non-empty value. Single rows pass through untouched. */
+export function combinePositions(positions: Position[]): Position[] {
+  const groups = new Map<string, Position[]>()
+  for (const p of positions) {
+    const key = quoteKey(p)
+    const existing = groups.get(key)
+    if (existing) existing.push(p)
+    else groups.set(key, [p])
+  }
+  const out: Position[] = []
+  for (const [, rows] of groups) {
+    if (rows.length === 1) {
+      out.push(rows[0])
+      continue
+    }
+    const quantity = rows.reduce((s, p) => s + (Number.isFinite(p.quantity) ? p.quantity : 0), 0)
+    const invested = rows.reduce((s, p) => s + (Number.isFinite(p.invested) ? p.invested : 0), 0)
+    const first = rows[0]
+    const xirrRows = rows.filter((p) => Number.isFinite(p.xirr))
+    const xirrWeight = xirrRows.reduce((s, p) => s + Math.max(0, p.invested), 0)
+    const xirr =
+      xirrWeight > 0
+        ? xirrRows.reduce((s, p) => s + p.xirr! * Math.max(0, p.invested), 0) / xirrWeight
+        : null
+    out.push({
+      id: `merged:${quoteKey(first)}`,
+      ticker: first.ticker,
+      name: rows.find((p) => (p.name ?? '').trim() !== '')?.name ?? first.name,
+      type: first.type,
+      quantity,
+      buyPrice: quantity > 0 ? invested / quantity : first.buyPrice,
+      lastPrice: rows.find((p) => p.lastPrice != null)?.lastPrice ?? first.lastPrice,
+      invested,
+      amc: (rows.find((p) => (p.amc ?? '').trim() !== '') ?? first).amc,
+      category: (rows.find((p) => (p.category ?? '').trim() !== '') ?? first).category,
+      subCategory: (rows.find((p) => (p.subCategory ?? '').trim() !== '') ?? first).subCategory,
+      folio: (rows.find((p) => (p.folio ?? '').trim() !== '') ?? first).folio,
+      source: (rows.find((p) => (p.source ?? '').trim() !== '') ?? first).source,
+      returns: rows.find((p) => p.returns != null)?.returns ?? first.returns,
+      xirr,
+    })
+  }
+  return out
 }
 
 export function isLiveQuote(position: Position, quotes: Record<string, LiveQuote>): boolean {

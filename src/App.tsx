@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { View } from './useStore'
 import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { Overview } from './views/Overview'
-import { ImportView } from './views/ImportView'
-import { AssistantView } from './views/AssistantView'
-import { SettingsView } from './views/SettingsView'
+
+const ImportView = lazy(() => import('./views/ImportView').then((module) => ({ default: module.ImportView })))
+const AssistantView = lazy(() => import('./views/AssistantView').then((module) => ({ default: module.AssistantView })))
+const SettingsView = lazy(() => import('./views/SettingsView').then((module) => ({ default: module.SettingsView })))
+const InsightsView = lazy(() => import('./views/InsightsView').then((module) => ({ default: module.InsightsView })))
 
 const NAV: { id: View; label: string; index: string }[] = [
   { id: 'overview', label: 'Overview', index: '01' },
   { id: 'import', label: 'Portfolio', index: '02' },
-  { id: 'assistant', label: 'AI Assistant', index: '03' },
-  { id: 'settings', label: 'Settings', index: '04' },
+  { id: 'insights', label: 'Insights', index: '03' },
+  { id: 'assistant', label: 'AI Assistant', index: '04' },
+  { id: 'settings', label: 'Settings', index: '05' },
 ]
 
 export default function App() {
@@ -64,9 +67,14 @@ export default function App() {
 
       <main className="main">
         {view === 'overview' && <Overview onGoTo={setView} />}
-        {view === 'import' && <ImportView />}
-        {view === 'assistant' && <AssistantView onGoTo={setView} />}
-        {view === 'settings' && <SettingsView />}
+        {view !== 'overview' && (
+          <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
+            {view === 'import' && <ImportView />}
+            {view === 'insights' && <InsightsView />}
+            {view === 'assistant' && <AssistantView onGoTo={setView} />}
+            {view === 'settings' && <SettingsView />}
+          </Suspense>
+        )}
       </main>
     </div>
   )
