@@ -38,7 +38,7 @@ export function HoldingsView() {
     </div>
 
     <div className="panel holdings-toolbar enter d2">
-      <label className="field holdings-search"><span className="sr-only">Search holdings</span><input className="input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search symbol, name, sector, or folio" /></label>
+      <label className="field holdings-search"><span className="sr-only">Search holdings</span><input aria-label="Search holdings" className="input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search symbol, name, sector, or folio" /></label>
       <div className="import-actions">
         <button className="btn btn--primary btn--small" type="button" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>Import holdings</button>
         <button className="btn btn--secondary btn--small" type="button" disabled={!positions.length} onClick={() => exportPortfolio('csv')}>Export CSV</button>
