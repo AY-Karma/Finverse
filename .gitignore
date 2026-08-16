@@ -1,6 +1,10 @@
 # Project guidance docs - kept locally, not part of commit history
-/Agent.md
+/AGENTS.md
 /Design.md
+.agents
+.docs
+/docs/
+skills-lock.json
 
 # Dependencies
 node_modules/
