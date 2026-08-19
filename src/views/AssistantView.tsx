@@ -335,13 +335,10 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
     <>
       <div className="page-head enter d0">
         <div>
-          <div className="page-eyebrow">03 · AI Assistant</div>
-          <h1 className="page-title">Call the coach</h1>
+          <div className="page-eyebrow">04 · Research · AI</div>
+          <h1 className="page-title">Ask about your portfolio</h1>
         </div>
-        <p className="page-sub">
-          The assistant reads your board and the portfolio you uploaded. Ask about a single holding or
-          the whole lineup.
-        </p>
+        <div className="assistant-head-actions"><button type="button" className="btn btn--ghost btn--small" onClick={() => onGoTo('research')}>← Back to Research</button><p className="page-sub">Your portfolio context goes only to the provider you configure.</p></div>
       </div>
 
       {positions.length === 0 && (

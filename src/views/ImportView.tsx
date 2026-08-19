@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useStore, type ImportPreview } from '../useStore'
 
-export function ImportView() {
+export function ImportView({ compact = false }: { compact?: boolean }) {
   const { previewFile, commitImport, folios, positions, removeFolio, undoLastImport, exportPortfolio } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -31,15 +31,15 @@ export function ImportView() {
 
   return (
     <>
-      <div className="page-head enter d0">
+      {!compact && <div className="page-head enter d0">
         <div>
           <div className="page-eyebrow">02 · Portfolio</div>
           <h1 className="page-title">Feed the machine</h1>
         </div>
         <p className="page-sub">Import an equity, ETF, or mutual-fund holdings export. Each accepted file becomes its own folio.</p>
-      </div>
+      </div>}
 
-      {folios.length > 0 && (
+      {!compact && folios.length > 0 && (
         <div className="panel enter d1" style={{ display: 'grid', gap: 4 }}>
           <div className="panel-head">
             <span className="panel-title">Folios on the board</span>
@@ -108,7 +108,7 @@ export function ImportView() {
 
       {error && <div className="panel enter d3" role="alert" style={{ borderColor: 'var(--semantic-danger)' }}><p className="hint down">{error}</p></div>}
 
-      <div className="panel enter d4" style={{ display: 'grid', gap: 16 }}>
+      {!compact && <div className="panel enter d4" style={{ display: 'grid', gap: 16 }}>
         <div className="panel-head"><span className="panel-title">Scout column aliases</span><span className="section-index">Auto-detected</span></div>
         <table className="table">
           <thead><tr><th>Field</th><th>Recognizes</th></tr></thead>
@@ -121,7 +121,7 @@ export function ImportView() {
             <tr><td className="sym">Mutual Funds</td><td className="muted">scheme name · units · invested value · current value · xirr</td></tr>
           </tbody>
         </table>
-      </div>
+      </div>}
     </>
   )
 }

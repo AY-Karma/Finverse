@@ -22,13 +22,22 @@ export function SettingsView() {
     <>
       <div className="page-head enter d0">
         <div>
-          <div className="page-eyebrow">04 · Settings</div>
+          <div className="page-eyebrow">05 · Settings</div>
           <h1 className="page-title">Wire the terminal</h1>
         </div>
         <p className="page-sub">Choose where portfolio data can go and how it is displayed.</p>
       </div>
 
       <div className="settings-grid">
+        <div className="panel privacy-panel enter d1">
+          <div className="panel-head"><span className="panel-title">Data & privacy</span><span className="provider-status provider-status--on" role="status"><span className="provider-status-dot" />Local-first</span></div>
+          <div className="privacy-status-list">
+            <div><strong>Portfolio and history</strong><span className="hint">Portfolio, tracked history, and saved AI chat are stored in this browser's local storage. Finverse has no account or cloud database in this version.</span></div>
+            <div><strong>Market data</strong><span className="hint">Off by default. When enabled, instrument identifiers are sent to quote, NAV, and public corporate-feed providers; quantities and cost basis stay local.</span></div>
+            <div><strong>AI requests</strong><span className="hint">Sent only when you submit a prompt to the provider configured below. The request includes portfolio context so the provider can answer.</span></div>
+            <div><strong>API credentials</strong><span className="hint">Kept in this browser tab's session storage and removed when the tab session ends.</span></div>
+          </div>
+        </div>
         <div className="panel enter d1" style={{ display: 'grid', gap: 20 }}>
           <div className="panel-head">
             <span className="panel-title">Display</span>
@@ -84,7 +93,7 @@ export function SettingsView() {
           <label className="field field--toggle" htmlFor="external-data">
             <span>
               <span className="field-label">External market data</span>
-              <span className="hint">Allow quote, NAV, and USD/INR requests for this portfolio.</span>
+              <span className="hint">Allow quote, NAV, corporate-feed, and optional media requests for this portfolio.</span>
             </span>
             <span className="switch">
               <input

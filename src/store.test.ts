@@ -21,4 +21,5 @@ describe('sanitizeFolios', () => {
     expect(result[0].positions).toHaveLength(1)
     expect(result[0].positions[0].providerSymbol).toBe('TCS.NS')
   })
+
 })

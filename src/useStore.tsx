@@ -23,7 +23,7 @@ import {
   recordManualRefresh,
 } from './live'
 
-export type View = 'overview' | 'import' | 'insights' | 'assistant' | 'settings'
+export type View = 'overview' | 'holdings' | 'insights' | 'research' | 'assistant' | 'settings'
 
 export type RefreshResult =
   | { ok: true; retryInMs: number }
