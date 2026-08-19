@@ -4,6 +4,7 @@ import { BENCHMARKS, marketData } from '../marketData'
 import { buildPortfolioBackcast, type PortfolioBackcast } from '../portfolioBackcast'
 import { downsampleSeries } from '../timeSeries'
 import { useStore } from '../useStore'
+import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 
 const COLORS = ['#5e6ad2', '#7a8cff', '#41b883', '#f2b53c', '#e77b8a', '#9a9fd0', '#5c8298', '#c185c8']
@@ -23,7 +24,7 @@ export function InsightsView() {
   const [benchmarkLoading, setBenchmarkLoading] = useState(false)
   const [benchmarkError, setBenchmarkError] = useState(false)
   const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
-  const [contributionDisplay, setContributionDisplay] = useState<'price' | 'percent'>('price')
+  const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
   const [openKpi, setOpenKpi] = useState<'top-five' | 'drawdown' | null>(null)
   const [backcast, setBackcast] = useState<PortfolioBackcast | null>(null)
   const [backcastLoading, setBackcastLoading] = useState(false)
@@ -56,15 +57,11 @@ export function InsightsView() {
     }
   }, [backcastKey, settings.allowExternalData])
 
-  const movers = useMemo(
-    () => snapshot.contributions.filter((item) => item.dailyContribution != null).map((item) => ({
-      ...item,
-      label: item.symbol.length > 14 ? `${item.symbol.slice(0, 13)}…` : item.symbol,
-      contribution: item.dailyContribution ?? 0,
-    })),
-    [snapshot.contributions],
-  )
-  const tailwinds = useMemo(() => movers.filter((item) => item.contribution >= 0).slice(0, 5), [movers])
+  const contributionColumns = useMemo(() => buildContributionColumns(snapshot.contributions.map((item) => ({
+    label: item.symbol.length > 14 ? `${item.symbol.slice(0, 13)}…` : item.symbol,
+    dailyPriceChange: item.dailyPriceChange,
+    dailyPriceChangePct: item.dailyPriceChangePct,
+  })), contributionDisplay), [contributionDisplay, snapshot.contributions])
   const exposure = useMemo(() => [...snapshot.contributions].sort((a, b) => b.value - a.value).slice(0, 16), [snapshot.contributions])
   const topFive = useMemo(() => [...snapshot.contributions].sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
   const chartHistory = useMemo(() => downsampleSeries(snapshot.history, MAX_CHART_POINTS), [snapshot.history])
@@ -73,15 +70,6 @@ export function InsightsView() {
   const analyticsStartAt = analyticsHistory[0]?.at ?? null
   const trackedAvailable = chartHistory.length >= 2
   const performanceHistory = performanceMode === 'tracked' && trackedAvailable ? chartHistory : backcastHistory
-  const detractors = useMemo(
-    () => snapshot.contributions.filter((item) => item.dailyContribution != null).sort((a, b) => (a.dailyContribution ?? 0) - (b.dailyContribution ?? 0)).slice(0, 8).map((item) => ({
-      ...item,
-      label: item.symbol.length > 14 ? `${item.symbol.slice(0, 13)}…` : item.symbol,
-      contribution: item.dailyContribution ?? 0,
-    })),
-    [snapshot.contributions],
-  )
-  const headwinds = useMemo(() => detractors.slice(0, 5), [detractors])
 
   useEffect(() => {
     if (!settings.allowExternalData || analyticsStartAt == null || !selectedBenchmark.symbol) {
@@ -167,7 +155,7 @@ export function InsightsView() {
   const mask = (value: string) => hide ? '••••••' : value
   const currency = settings.currency
   const value = (amount: number) => mask(formatCurrency(amount, currency, snapshot.fxRate?.usdInr))
-  const hasDailyData = movers.length > 0
+  const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
   const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
 
@@ -188,7 +176,7 @@ export function InsightsView() {
         <div className="insight-kpi"><span className="score-label">Data health</span><strong>{snapshot.staleQuotes === 0 ? 'Fresh' : `${snapshot.staleQuotes} stale`}</strong><span className="hint">{snapshot.lastUpdatedAt ? `Last quote ${shortDate(snapshot.lastUpdatedAt)}` : 'Imported prices only'}</span></div>
       </div>
 
-      {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail"><div><span className="score-label">Largest five holdings</span><strong>{mask(`${snapshot.topFiveWeight.toFixed(1)}% of portfolio`)}</strong></div><div className="kpi-split-list">{topFive.map((item) => <div key={item.symbol}><span>{item.symbol}</span><span className="kpi-split-bar"><i style={{ width: `${Math.max(2, item.weight / Math.max(...topFive.map((holding) => holding.weight), 1) * 100)}%` }} /></span><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div></div>}
+      {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail"><div><span className="score-label">Largest five holdings</span><strong>{mask(`${snapshot.topFiveWeight.toFixed(1)}% of portfolio`)}</strong></div><div className="kpi-split-list">{topFive.map((item) => <div key={item.symbol}><span>{item.symbol}</span><span className="kpi-split-bar"><i style={{ width: `${item.weight / Math.max(...topFive.map((holding) => holding.weight), 1) * 100}%` }} /></span><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div></div>}
       {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail"><div><span className="score-label">How this was calculated</span><strong>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong></div><p>{hasHistory && risk.worstAt && risk.worstPeakAt ? <>The reconstructed value fell from its high on <strong>{shortDate(risk.worstPeakAt)}</strong> to its lowest point on <strong>{shortDate(risk.worstAt)}</strong>. This uses today’s holdings across historical market prices and does not claim a news or event caused the move.</> : 'Historical prices are still loading for this calculation.'}</p></div>}
 
       <div className="insight-grid enter d2">
@@ -213,7 +201,7 @@ export function InsightsView() {
 
         <section className="panel insight-panel insight-panel--wide">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">What moved today?</span><span className="section-index">04 · Contribution waterfall</span></div><div className="segmented-control" aria-label="Mover display"><button type="button" className={contributionDisplay === 'price' ? 'is-active' : ''} onClick={() => setContributionDisplay('price')} aria-pressed={contributionDisplay === 'price'}>Price Δ</button><button type="button" className={contributionDisplay === 'percent' ? 'is-active' : ''} onClick={() => setContributionDisplay('percent')} aria-pressed={contributionDisplay === 'percent'}>% Δ</button></div></div>
-          {hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty">The next market refresh will show which holdings moved your portfolio.</div>}
+          {hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty">The next market refresh will show which holdings moved your portfolio.</div>}
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
@@ -233,7 +221,7 @@ export function InsightsView() {
 
 function ExposureBars({ items, hideValues, formatValue }: { items: { label: string; value: number; weight: number }[]; hideValues: boolean; formatValue: (value: number) => string }) {
   const max = Math.max(...items.map((item) => item.value), 1)
-  return <div className="exposure-bars">{items.map((item, index) => <div className="exposure-row" key={item.label}><div><span><i className="legend-swatch" style={{ background: COLORS[index % COLORS.length] }} />{item.label}</span><strong>{hideValues ? '••••' : `${item.weight.toFixed(1)}%`}</strong></div><div className="exposure-track"><span style={{ width: `${Math.max(3, item.value / max * 100)}%`, background: COLORS[index % COLORS.length] }} /></div><small>{hideValues ? '••••••' : formatValue(item.value)}</small></div>)}</div>
+  return <div className="exposure-bars">{items.map((item, index) => <div className="exposure-row" key={item.label}><div><span><i className="legend-swatch" style={{ background: COLORS[index % COLORS.length] }} />{item.label}</span><strong>{hideValues ? '••••' : `${item.weight.toFixed(1)}%`}</strong></div><div className="exposure-track"><span style={{ width: `${item.value / max * 100}%`, background: COLORS[index % COLORS.length] }} /></div><small>{hideValues ? '••••••' : formatValue(item.value)}</small></div>)}</div>
 }
 
 function AllocationMap({
@@ -273,19 +261,16 @@ function ContributionBars({
   formatPercent,
 }: {
   title: string
-  data: { label: string; contribution: number; dailyPriceChange: number | null; dailyPriceChangePct: number | null }[]
+  data: { label: string; width: number; metric: number }[]
   positive?: boolean
   display: 'price' | 'percent'
   formatValue: (amount: number) => string
   formatPercent: (amount: number) => string
 }) {
-  const values = data.length ? data : [{ label: 'No movement', contribution: 0, dailyPriceChange: null, dailyPriceChangePct: null }]
-  const max = Math.max(...values.map((item) => Math.abs(item.contribution)), 1)
+  const values = data.length ? data : [{ label: 'No movement', metric: 0, width: 4 }]
   return <div className="contribution-chart"><div className="contribution-title">{title}</div><div className="contribution-bars">{values.map((item) => {
-    const displayValue = display === 'percent'
-      ? item.dailyPriceChangePct == null ? '—' : formatPercent(item.dailyPriceChangePct)
-      : item.dailyPriceChange == null ? '—' : formatValue(item.dailyPriceChange)
-    return <div className="contribution-row" key={item.label}><div><span title={item.label}>{item.label}</span><strong className={positive ? 'up' : 'down'}>{displayValue}</strong></div><div className="contribution-track" aria-label={`${item.label}: ${displayValue}`}><span className={positive ? 'contribution-fill contribution-fill--up' : 'contribution-fill contribution-fill--down'} style={{ width: `${Math.max(4, Math.abs(item.contribution) / max * 100)}%` }} /></div></div>
+    const displayValue = display === 'percent' ? formatPercent(item.metric) : formatValue(item.metric)
+    return <div className="contribution-row" key={item.label}><div><span title={item.label}>{item.label}</span><strong className={positive ? 'up' : 'down'}>{displayValue}</strong></div><div className="contribution-track" aria-label={`${item.label}: ${displayValue}`}><span className={positive ? 'contribution-fill contribution-fill--up' : 'contribution-fill contribution-fill--down'} style={{ width: `${item.width}%` }} /></div></div>
   })}</div></div>
 }
 
@@ -298,5 +283,5 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
     { label: 'Annualized swings', value: volatility, width: Math.min(100, volatility / 30 * 100), detail: 'How much daily returns have moved', definition: 'This estimates how widely day-to-day portfolio returns vary over a year. The blue bar is scaled to 30%; higher percentages mean less predictable movement, not a guaranteed loss.', tone: 'neutral' },
     { label: 'Top-five concentration', value: concentration, width: Math.min(100, concentration), detail: 'Share held in the five largest positions', definition: 'This is the percentage of your portfolio held in its five largest positions. The blue bar fills directly to that share; a higher percentage means those holdings have more influence.', tone: 'neutral' },
   ]
-  return <div className="risk-profile"><p className="risk-summary-copy">{current < 0 ? 'Your portfolio is below its most recent high. These bars show the size of the recovery room and where concentration adds risk.' : 'Your portfolio is at its most recent high. These bars show how much past drawdowns and concentration can still matter.'}</p><div className="risk-bars">{riskRows.map((row) => <div className="risk-bar" key={row.label}><div><span className="risk-label">{row.label}<button type="button" className="risk-help" aria-label={`Explain ${row.label}`}>i<span role="tooltip">{row.definition}</span></button></span><strong className={row.tone === 'down' ? 'down' : ''}>{mask(`${row.value.toFixed(1)}%`)}</strong></div><div className="risk-track"><span className={`risk-fill risk-fill--${row.tone}`} style={{ width: `${Math.max(2, row.width)}%` }} /></div><small>{row.detail}</small></div>)}</div></div>
+  return <div className="risk-profile"><p className="risk-summary-copy">{current < 0 ? 'Your portfolio is below its most recent high. These bars show the size of the recovery room and where concentration adds risk.' : 'Your portfolio is at its most recent high. These bars show how much past drawdowns and concentration can still matter.'}</p><div className="risk-bars">{riskRows.map((row) => <div className="risk-bar" key={row.label}><div><span className="risk-label">{row.label}<button type="button" className="risk-help" aria-label={`Explain ${row.label}`}>i<span role="tooltip">{row.definition}</span></button></span><strong className={row.tone === 'down' ? 'down' : ''}>{mask(`${row.value.toFixed(1)}%`)}</strong></div><div className="risk-track"><span className={`risk-fill risk-fill--${row.tone}`} style={{ width: `${row.width}%` }} /></div><small>{row.detail}</small></div>)}</div></div>
 }

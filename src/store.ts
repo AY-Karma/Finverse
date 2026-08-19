@@ -141,6 +141,12 @@ export function loadSettings(): Settings {
     const parsed = raw ? (JSON.parse(raw) as Partial<Settings>) : {}
     const legacyApiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey : ''
     delete parsed.apiKey
+    delete (parsed as { monitorNewsApiKey?: unknown }).monitorNewsApiKey
+    try {
+      sessionStorage.removeItem('finverse:monitorNewsApiKey:session')
+    } catch {
+      /* session storage can be unavailable in privacy-restricted browsers */
+    }
     if (legacyApiKey) {
       try {
         if (!loadSessionApiKey()) sessionStorage.setItem(SESSION_API_KEY, legacyApiKey)

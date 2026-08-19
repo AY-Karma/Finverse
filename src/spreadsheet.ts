@@ -427,7 +427,9 @@ function parseEquityColumnRow(
       id: crypto.randomUUID(),
       ticker: String(ticker).trim().toUpperCase(),
       name: cols.name != null ? String(row[cols.name] ?? '').trim() : '',
-      type: cols.type != null ? inferType(row[cols.type]) : 'other',
+      // An equity-shaped header has already been detected. Broker exports
+      // commonly omit an explicit Type column, and those rows are stocks.
+      type: cols.type != null ? inferType(row[cols.type]) : 'stock',
       quantity: qtyRaw ?? 0,
       buyPrice: buyRaw ?? 0,
       lastPrice: lastRaw,
