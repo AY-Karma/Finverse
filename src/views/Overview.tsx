@@ -1,5 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, isLiveQuote, positionPnl, positionPnlPct, positionValue, quoteKey } from '../valuation'
+import { computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse, quoteKey } from '../valuation'
 import { useStore } from '../useStore'
 import type { Currency, LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
@@ -7,20 +7,8 @@ import {
   isMarketOpen,
   marketStatusText,
 } from '../live'
-import { marketLinks, resolveScreenerCompanyPath, screenerSectionLinks } from '../research'
-import type { ResearchLink } from '../research'
+import { AllocationCard } from './AllocationCard'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
-
-const PIE_COLORS = [
-  '#5e6ad2',
-  '#828fff',
-  '#7a7fad',
-  '#8a8f98',
-  '#4a5bb0',
-  '#a0a5b5',
-  '#6d78d8',
-  '#9a9fd0',
-]
 
 const LEDGER_PAGE_SIZE = 100
 
@@ -48,7 +36,6 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [refreshAvailableAt, setRefreshAvailableAt] = useState(0)
   const [, setCooldownTick] = useState(0)
-  const [researchOpen, setResearchOpen] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [ledgerPage, setLedgerPage] = useState(0)
   const [historyPanelReady, setHistoryPanelReady] = useState(false)
@@ -127,17 +114,9 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     [scopePositions, live],
   )
 
-  // Top holdings, enriched for the research list: weight, live P&L and the
-  // matching position (for type-aware deep-links).
-  const researchRows = useMemo(
-    () =>
-      stats.allocations.slice(0, 10).map((a) => {
-        const p = positions.find((x) => x.ticker === a.symbol)
-        const pnl = p ? positionPnl(p, live) : null
-        const pct = stats.currentValue > 0 ? (a.value / stats.currentValue) * 100 : 0
-        return { a, p, pnl, pct }
-      }),
-    [stats.allocations, stats.currentValue, positions, live],
+  const pulse = useMemo(
+    () => portfolioPulse(positions, live),
+    [positions, live],
   )
 
   // Hooks are all called unconditionally — no early return may happen above these.
@@ -247,11 +226,18 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
 
   const pnlUp = stats.pnl >= 0
   const eff = (p: (typeof positions)[number]) => positionPnlPct(p, live)
-  const best = scopePositions
-    .filter((p) => eff(p) != null)
-    .sort((a, b) => (eff(b)! - eff(a)!))[0]
-  const bestPct =
-    best && eff(best) != null ? eff(best) : null
+  const rankedPerformers = scopePositions
+    .map((position) => ({ position, pct: eff(position) }))
+    .filter((item): item is { position: Position; pct: number } => item.pct != null)
+    .sort((a, b) => b.pct - a.pct)
+  const best = rankedPerformers[0] ?? null
+  const worst = rankedPerformers[rankedPerformers.length - 1] ?? null
+  const dailyMove = snapshot.dailyChange
+  const dailyMoveText = dailyMove == null
+    ? '—'
+    : `${dailyMove >= 0 ? '+' : ''}${formatCurrency(dailyMove, currency, fxRate?.usdInr)}`
+  const dailyMoveDirection = dailyMove == null || dailyMove === 0 ? '' : dailyMove > 0 ? 'up' : 'down'
+  const dailyMoveArrow = dailyMove == null || hideValues ? '' : dailyMove > 0 ? '↑' : dailyMove < 0 ? '↓' : '→'
 
   const toggleSort = (field: SortField) => {
     setSort((prev) => {
@@ -299,8 +285,8 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
     <div className={hideValues ? 'peek' : undefined} style={{ display: 'contents' }}>
       <div className="page-head enter d0">
         <div>
-          <div className="page-eyebrow">Live Market Scoreboard</div>
-          <h1 className="page-title">Your Arena</h1>
+          <div className="page-eyebrow">Portfolio</div>
+          <h1 className="page-title">Overview</h1>
         </div>
         <div className="page-sub" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <Scope />
@@ -361,7 +347,18 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
         <div className="score">
           <div className="score-label">
             <span>Current Value</span>
-            <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} />
+            {dailyMove == null ? (
+              <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} />
+            ) : (
+              <span
+                className={`current-value-move${hideValues || !dailyMoveDirection ? ' current-value-move--flat' : ` ${dailyMoveDirection}`}`}
+                aria-label={hideValues ? "Today's portfolio move hidden" : `Today's portfolio move: ${dailyMoveText}`}
+                title="Today's portfolio move"
+              >
+                <span className="current-value-move-arrow" aria-hidden="true">{dailyMoveArrow}</span>
+                <span>{mask(dailyMoveText)}</span>
+              </span>
+            )}
           </div>
           <div className="score-value">{mask(formatCurrency(stats.currentValue, currency, fxRate?.usdInr))}</div>
           <div className="score-foot">Total market exposure</div>
@@ -380,11 +377,20 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             {mask(formatPercent(stats.pnlPct))} on cost
           </div>
         </div>
-        <div className="score">
-          <div className="score-label">Best Performer</div>
-          <div className="score-value sym">{mask(best ? best.ticker : '—')}</div>
-          <div className={`score-foot ${bestPct != null ? (bestPct >= 0 ? 'up' : 'down') : ''}`}>
-            {bestPct != null ? mask(`${bestPct >= 0 ? '+' : ''}${bestPct.toFixed(2)}%`) : 'Spread the field'}
+        <div className="score score--performers">
+          <div className="performer-half">
+            <div className="score-label">Best Performer</div>
+            <div className="score-value sym" title={best ? mask(best.position.ticker) : undefined}>{mask(best ? best.position.ticker : '—')}</div>
+            <div className={`score-foot ${best ? (best.pct >= 0 ? 'up' : 'down') : ''}`}>
+              {best ? mask(`${best.pct >= 0 ? '+' : ''}${best.pct.toFixed(2)}%`) : 'No priced data'}
+            </div>
+          </div>
+          <div className="performer-half">
+            <div className="score-label">Worst Performer</div>
+            <div className="score-value sym" title={worst ? mask(worst.position.ticker) : undefined}>{mask(worst ? worst.position.ticker : '—')}</div>
+            <div className={`score-foot ${worst ? (worst.pct >= 0 ? 'up' : 'down') : ''}`}>
+              {worst ? mask(`${worst.pct >= 0 ? '+' : ''}${worst.pct.toFixed(2)}%`) : 'No priced data'}
+            </div>
           </div>
         </div>
       </div>
@@ -397,7 +403,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
         </div>
         <div className="daily-brief-stat">
           <span className="score-label">Today</span>
-          <strong className={snapshot.dailyChange != null && snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? '—' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, fxRate?.usdInr)}`)}</strong>
+          <strong className={dailyMoveDirection}>{dailyMove == null ? '—' : mask(dailyMoveText)}</strong>
         </div>
         <button type="button" className="btn btn--secondary" onClick={() => onGoTo('insights')}>Open Insights →</button>
       </div>
@@ -548,48 +554,13 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
             </div>
             <Scope />
           </div>
-          <AllocationMix
+          <AllocationCard
             allocations={stats.allocations}
-            colors={PIE_COLORS}
             hideValues={hideValues}
             currency={currency}
             usdInrRate={fxRate?.usdInr}
+            pulse={pulse}
           />
-          <div className="alloc-list alloc-list--research">
-            <div className="alloc-list-head">
-              <span className="panel-title">Top holdings · research</span>
-              <span className="section-index">{stats.allocations.length} shown</span>
-            </div>
-            {researchRows.length === 0 ? (
-              <div className="muted">No valued holdings yet.</div>
-            ) : (
-              researchRows.map(({ a, p, pnl, pct }) => {
-                const open = researchOpen === a.symbol
-                const pnlUp = pnl != null && pnl >= 0
-                return (
-                  <div className="research-row" key={a.symbol}>
-                    <button
-                      className="research-main"
-                      onClick={() => setResearchOpen(open ? null : a.symbol)}
-                      aria-expanded={open}
-                    >
-                      <span className="research-sym">{mask(a.symbol)}</span>
-                      <span className="research-pct">{mask(formatPercent(pct))}</span>
-                      {pnl != null && (
-                        <span className={`research-pnl${pnlUp ? ' up' : ' down'}`}>
-                          {mask(`${pnlUp ? '+' : ''}${formatCurrency(pnl, currency, fxRate?.usdInr)}`)}
-                        </span>
-                      )}
-                      <span className={`research-chev${open ? ' research-chev--open' : ''}`} aria-hidden="true">
-                        ›
-                      </span>
-                    </button>
-                    {open && p && <ResearchDrawer p={p} />}
-                  </div>
-                )
-              })
-            )}
-          </div>
         </div>
       </div>
 
@@ -598,107 +569,6 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           <HistoryPanel scope={scope} />
         </Suspense>
       ) : <div className="panel history-panel-placeholder">Preparing price history…</div>}
-    </div>
-  )
-}
-
-function AllocationMix({
-  allocations,
-  colors,
-  hideValues,
-  currency,
-  usdInrRate,
-}: {
-  allocations: { symbol: string; value: number }[]
-  colors: string[]
-  hideValues: boolean
-  currency: Currency
-  usdInrRate?: number
-}) {
-  const visible = allocations.slice(0, 7)
-  const remainder = allocations.slice(7).reduce((sum, item) => sum + item.value, 0)
-  const rows = remainder > 0 ? [...visible, { symbol: 'Other', value: remainder }] : visible
-  const total = rows.reduce((sum, item) => sum + item.value, 0)
-  let angle = 0
-  const gradient = rows.length && total > 0
-    ? `conic-gradient(${rows.map((item, index) => {
-      const next = angle + (item.value / total) * 360
-      const segment = `${colors[index % colors.length]} ${angle.toFixed(2)}deg ${next.toFixed(2)}deg`
-      angle = next
-      return segment
-    }).join(', ')})`
-    : 'var(--surface-3)'
-  const mask = (text: string) => hideValues ? '••••••' : text
-
-  return (
-    <div className="allocation-mix" aria-label="Portfolio allocation mix">
-      <div className="allocation-ring" style={{ background: gradient }} role="img" aria-label={hideValues ? 'Portfolio allocation hidden' : `Allocation across ${rows.length} holdings`}>
-        <div><span>Holdings</span><strong>{allocations.length}</strong></div>
-      </div>
-      <div className="allocation-breakdown">
-        {rows.map((item, index) => {
-          const weight = total > 0 ? (item.value / total) * 100 : 0
-          return <div key={item.symbol} className="allocation-breakdown-row">
-            <span className="legend-swatch" style={{ background: colors[index % colors.length] }} />
-            <span title={item.symbol}>{item.symbol}</span>
-            <strong>{mask(`${weight.toFixed(1)}%`)}</strong>
-            <small>{mask(formatCurrency(item.value, currency, usdInrRate))}</small>
-          </div>
-        })}
-      </div>
-    </div>
-  )
-}
-
-/** Expandable research drawer: resolves the canonical screener.in company path
- *  on open (cached), then shows section links + secondary sources. */
-function ResearchDrawer({ p }: { p: Position }) {
-  const [links, setLinks] = useState<ResearchLink[] | null>(null)
-
-  useEffect(() => {
-    if (p.type === 'mutual-fund') return
-    let alive = true
-    setLinks(null)
-    resolveScreenerCompanyPath(p.ticker).then((base) => {
-      if (alive) setLinks(screenerSectionLinks(base))
-    })
-    return () => {
-      alive = false
-    }
-  }, [p.ticker, p.type])
-
-  const other = marketLinks(p)
-
-  return (
-    <div className="research-drawer">
-      {p.type !== 'mutual-fund' && (
-        <div className="research-group">
-          <div className="research-group-title">FOR MORE INFO</div>
-          <div className="research-links">
-            {links ? (
-              links.map((l) => (
-                <a className="research-link" key={l.label} href={l.url} target="_blank" rel="noreferrer">
-                  {l.label} ↗
-                </a>
-              ))
-            ) : (
-              <span className="muted">Locating on screener.in…</span>
-            )}
-          </div>
-        </div>
-      )}
-      {other.length > 0 && (
-        <div className="research-group">
-          <div className="research-group-title">Other sources</div>
-          <div className="research-links">
-            {other.map((l) => (
-              <a className="research-link" key={l.label} href={l.url} target="_blank" rel="noreferrer">
-                {l.label} ↗
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -40,8 +40,13 @@ function screenerSlug(symbol: string): string {
     .replace(/[^A-Z0-9]/g, '')
 }
 
-function screenerSearchUrl(query: string): string {
-  return `https://www.screener.in/search/?q=${encodeURIComponent(query)}`
+/**
+ * Screener's HTML search page (/search/?q=) was removed and now 404s, so any
+ * "search on screener" hand-off goes through Google's index instead. This never
+ * breaks, regardless of slug quirks.
+ */
+export function screenerFallbackSearchUrl(query: string): string {
+  return `https://www.google.com/search?q=${encodeURIComponent(`site:screener.in ${query.trim()}`)}`
 }
 
 /** `/company/TMCV/consolidated/` or `/company/538683/` → `/company/TMCV/`. */
@@ -122,7 +127,6 @@ export function marketLinks(position: Position): ResearchLink[] {
   if (position.type === 'mutual-fund') {
     const name = position.name || position.ticker
     return [
-      { label: 'Screener search', url: screenerSearchUrl(name) },
       { label: 'Google', url: `https://www.google.com/search?q=${encodeURIComponent(`${name} mutual fund`)}` },
     ]
   }
@@ -130,6 +134,6 @@ export function marketLinks(position: Position): ResearchLink[] {
   return [
     { label: 'NSE quote', url: `https://www.nseindia.com/get-quotes/equity?symbol=${slug}` },
     { label: 'TradingView chart', url: `https://www.tradingview.com/chart/?symbol=NSE%3A${slug}` },
-    { label: 'Screener search', url: screenerSearchUrl(position.ticker) },
+    { label: 'Screener', url: screenerFallbackSearchUrl(position.ticker) },
   ]
 }

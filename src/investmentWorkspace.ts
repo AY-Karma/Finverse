@@ -19,6 +19,7 @@ export interface SectorAllocation {
   label: string
   value: number
   weight: number
+  count: number
   type: Position['type'] | 'mixed'
 }
 
@@ -56,8 +57,18 @@ export interface InvestmentWorkspace {
   normalizeImport(positions: Position[]): Position[]
 }
 
+// Scheme categories like "Equity - Large Cap Fund" are asset-class words, not
+// sectors; letting them through is how mutual funds ended up bucketed as Equity.
+const ASSET_CLASS_LABEL = /^(equity|debt|hybrid|commodity|bond|cash|gold|silver|index|fof|arbitrage|liquid)\b/i
+
 function sectorOf(position: Position): string {
-  return position.sector || position.category || assetTypeLabel(position.type)
+  const detail = [position.sector, position.category]
+    .map((value) => value?.trim() ?? '')
+    .find((value) => value && !ASSET_CLASS_LABEL.test(value))
+  if (detail) return detail
+  // Legacy imports typed real equities as "other"; label them by what they trade as.
+  if (position.type === 'other' && (position.exchange || position.providerSymbol)) return 'Equity'
+  return assetTypeLabel(position.type)
 }
 
 function quoteChange(position: Position, quotes: Record<string, LiveQuote>): number | null {
@@ -93,17 +104,19 @@ function buildContributions(positions: Position[], quotes: Record<string, LiveQu
 }
 
 function buildSectors(contributions: Contribution[], currentValue: number): SectorAllocation[] {
-  const groups = new Map<string, { value: number; types: Set<Position['type']> }>()
+  const groups = new Map<string, { value: number; types: Set<Position['type']>; count: number }>()
   for (const item of contributions) {
-    const group = groups.get(item.sector) ?? { value: 0, types: new Set<Position['type']>() }
+    const group = groups.get(item.sector) ?? { value: 0, types: new Set<Position['type']>(), count: 0 }
     group.value += item.value
     group.types.add(item.type)
+    group.count += 1
     groups.set(item.sector, group)
   }
   return Array.from(groups, ([label, group]): SectorAllocation => ({
     label,
     value: group.value,
     weight: currentValue > 0 ? (group.value / currentValue) * 100 : 0,
+    count: group.count,
     type: group.types.size === 1 ? [...group.types][0] : 'mixed',
   })).sort((a, b) => b.value - a.value)
 }

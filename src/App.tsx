@@ -30,8 +30,13 @@ export default function App() {
 
   // Reflect theme + density across the whole app as soon as it loads or changes.
   useEffect(() => {
-    applyTheme(settings.accent, settings.density)
-  }, [settings.accent, settings.density])
+    applyTheme({
+      accent: settings.accent,
+      density: settings.density,
+      mode: settings.mode,
+      customAccent: settings.customAccent,
+    })
+  }, [settings.accent, settings.density, settings.mode, settings.customAccent])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -44,15 +49,15 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <button className="brand brand--home" type="button" onClick={() => setView('overview')} aria-label="Go to Overview">
-          <div className="brand-mark">⌁</div>
+          <div className="brand-mark">₹</div>
           <div>
             <div className="brand-name">Finverse</div>
-            <div className="brand-sub">Live · Market Scoreboard</div>
+            <div className="brand-sub">Portfolio workspace</div>
           </div>
         </button>
 
         <nav className="nav">
-          <span className="nav-label">Terminal</span>
+          <span className="nav-label">Workspace</span>
           {NAV.map((item) => (
             <button
               key={item.id}
@@ -73,7 +78,7 @@ export default function App() {
         <div className="sidebar-foot">
           <span className="hint">
             {positions.length > 0
-              ? `${positions.length} position${positions.length === 1 ? '' : 's'} in the arena`
+              ? `${positions.length} position${positions.length === 1 ? '' : 's'} tracked`
               : 'No portfolio loaded'}
           </span>
         </div>

@@ -3,7 +3,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Line,
   LineChart,
   Pie,
@@ -16,14 +15,14 @@ import {
 import type { ChartSpec, Currency } from './types'
 
 const CHART_COLORS = [
-  '#5e6ad2',
-  '#828fff',
-  '#7a7fad',
-  '#8a8f98',
-  '#4a5bb0',
-  '#a0a5b5',
-  '#6d78d8',
-  '#9a9fd0',
+  '#4e8ef7',
+  '#2fd08f',
+  '#f5b73d',
+  '#f2698c',
+  '#a78bfa',
+  '#38cfe0',
+  '#fb923c',
+  '#c084fc',
 ]
 
 const AXIS_STYLE = { fill: '#8a8f98', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }
@@ -46,60 +45,78 @@ export function ChatChart({ spec, currency = 'INR' }: { spec: ChartSpec; currenc
   const data: ChartSpec['data'] = bounded.length ? bounded : [{ label: 'No data', value: 0 }]
 
   return (
-    <div className="chat-chart">
+    <div className={`chat-chart${spec.kind === 'pie' ? ' chat-chart--pie' : ''}`}>
       {spec.title && <div className="chat-chart-title">{spec.title}</div>}
-      <div style={{ height: 240 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          {spec.kind === 'pie' ? (
-            <PieChart>
-              <Pie
-                data={data}
-                dataKey="value"
-                nameKey="label"
-                innerRadius={52}
-                outerRadius={92}
-                paddingAngle={2}
-                stroke="transparent"
-              >
-                {data.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(v) => fmtValue(Number(v), currency)}
-                contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11, color: '#8a8f98' }} />
-            </PieChart>
-          ) : spec.kind === 'line' ? (
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#22242a" vertical={false} />
-              <XAxis dataKey="label" tick={AXIS_STYLE} interval={0} angle={data.length > 6 ? -28 : 0} height={data.length > 6 ? 58 : 30} textAnchor={data.length > 6 ? 'end' : 'middle'} />
-              <YAxis tick={AXIS_STYLE} width={70} tickFormatter={(v: number) => fmtValue(v, currency)} />
-              <Tooltip
-                formatter={(v) => fmtValue(Number(v), currency)}
-                contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
-              />
-              <Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} isAnimationActive={false} />
-            </LineChart>
-          ) : (
-            <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#22242a" vertical={false} />
-              <XAxis dataKey="label" tick={AXIS_STYLE} interval={0} angle={data.length > 6 ? -28 : 0} height={data.length > 6 ? 58 : 30} textAnchor={data.length > 6 ? 'end' : 'middle'} />
-              <YAxis tick={AXIS_STYLE} width={70} tickFormatter={(v: number) => fmtValue(v, currency)} />
-              <Tooltip
-                formatter={(v) => fmtValue(Number(v), currency)}
-                contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
-              />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={48}>
-                {data.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          )}
-        </ResponsiveContainer>
-      </div>
+      {spec.kind === 'pie' ? (
+        <div className="chat-chart-pie">
+          <div className="chat-chart-pie-plot">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  nameKey="label"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius="56%"
+                  outerRadius="94%"
+                  paddingAngle={2}
+                  stroke="transparent"
+                >
+                  {data.map((_, i) => (
+                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(v) => fmtValue(Number(v), currency)}
+                  contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <ul className="chat-chart-data">
+            {data.map((row, i) => (
+              <li key={`${row.label}:${i}`}>
+                <i style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                <span className="chat-chart-data-label" title={row.label}>{row.label}</span>
+                <span className="chat-chart-data-value">{fmtValue(row.value, currency)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div style={{ height: 240 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            {spec.kind === 'line' ? (
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#22242a" vertical={false} />
+                <XAxis dataKey="label" tick={AXIS_STYLE} interval={0} angle={data.length > 6 ? -28 : 0} height={data.length > 6 ? 58 : 30} textAnchor={data.length > 6 ? 'end' : 'middle'} />
+                <YAxis tick={AXIS_STYLE} width={70} tickFormatter={(v: number) => fmtValue(v, currency)} />
+                <Tooltip
+                  formatter={(v) => fmtValue(Number(v), currency)}
+                  contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
+                />
+                <Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} isAnimationActive={false} />
+              </LineChart>
+            ) : (
+              <BarChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#22242a" vertical={false} />
+                <XAxis dataKey="label" tick={AXIS_STYLE} interval={0} angle={data.length > 6 ? -28 : 0} height={data.length > 6 ? 58 : 30} textAnchor={data.length > 6 ? 'end' : 'middle'} />
+                <YAxis tick={AXIS_STYLE} width={70} tickFormatter={(v: number) => fmtValue(v, currency)} />
+                <Tooltip
+                  formatter={(v) => fmtValue(Number(v), currency)}
+                  contentStyle={{ background: '#151619', border: '1px solid #32343b', borderRadius: 8, color: '#f7f8f8', fontSize: 12 }}
+                />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                  {data.map((_, i) => (
+                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   )
 }

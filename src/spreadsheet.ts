@@ -402,6 +402,8 @@ function inferType(v: unknown): AssetType {
   const s = String(v).toLowerCase()
   if (s.includes('mutual') || s.includes('fund') || s.includes('mf ')) return 'mutual-fund'
   if (s.includes('etf')) return 'etf'
+  // Broker exports commonly abbreviate cash-equity rows to just "EQ".
+  if (/(^|\s)(eq|equity|equities|stocks|shares?)($|\s)/.test(s)) return 'stock'
   if (s.includes('stock') || s.includes('equity') || s.includes('share')) return 'stock'
   return 'other'
 }
