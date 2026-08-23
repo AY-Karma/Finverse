@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import type { View } from './useStore'
 import { useStore } from './useStore'
 import { applyTheme } from './theme'
+import { entryRoute, pathForView } from './entryRoute'
 import { Overview } from './views/Overview'
 import { PortfolioImportDialog } from './views/PortfolioImportDialog'
 
@@ -25,15 +26,35 @@ const NAV: { id: View; label: string; index: string }[] = [
   { id: 'settings', label: 'Settings', index: '05' },
 ]
 
-export default function App() {
-  const [view, setView] = useState<View>('overview')
+export default function App({ initialView }: { initialView: View }) {
+  const [view, setView] = useState<View>(initialView)
   const [importOpen, setImportOpen] = useState(false)
   const { positions, settings, quickMode } = useStore()
 
+  const navigate = useCallback((nextView: View) => {
+    const nextPath = pathForView(nextView)
+    if (window.location.pathname !== nextPath) window.history.pushState({}, '', nextPath)
+    setView(nextView)
+  }, [])
+
   const requestPortfolioImport = () => {
-    setView('overview')
+    navigate('overview')
     setImportOpen(true)
   }
+
+  useEffect(() => {
+    const onPopState = () => {
+      const route = entryRoute(window.location.pathname, window.location.search)
+      if (route.page === 'landing') {
+        window.location.reload()
+        return
+      }
+      if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
+      setView(route.view)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
   // Reflect theme + density across the whole app as soon as it loads or changes.
   useEffect(() => {
@@ -48,7 +69,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand brand--home" type="button" onClick={() => setView('overview')} aria-label="Go to Overview">
+        <button className="brand brand--home" type="button" onClick={() => navigate('overview')} aria-label="Go to Overview">
           <div className="brand-mark">₹</div>
           <div>
             <div className="brand-name">Finverse</div>
@@ -62,7 +83,7 @@ export default function App() {
             <button
               key={item.id}
               className={`nav-item${view === item.id || (view === 'assistant' && item.id === 'research') ? ' nav-item--active' : ''}`}
-              onClick={() => setView(item.id)}
+              onClick={() => navigate(item.id)}
             >
               <span className="nav-item-label">
                 {item.label}
@@ -85,13 +106,13 @@ export default function App() {
       </aside>
 
       <main className="main">
-        {view === 'overview' && <Overview onGoTo={setView} onRequestImport={requestPortfolioImport} />}
+        {view === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
         {view !== 'overview' && (
           <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
             {view === 'holdings' && <HoldingsView onRequestImport={requestPortfolioImport} />}
             {view === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
-            {view === 'research' && <ResearchView onOpenAssistant={() => setView('assistant')} onRequestImport={requestPortfolioImport} />}
-            {view === 'assistant' && <AssistantView onGoTo={setView} onRequestImport={requestPortfolioImport} />}
+            {view === 'research' && <ResearchView onOpenAssistant={() => navigate('assistant')} onRequestImport={requestPortfolioImport} />}
+            {view === 'assistant' && <AssistantView onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
             {view === 'settings' && <SettingsView />}
           </Suspense>
         )}

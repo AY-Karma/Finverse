@@ -8,10 +8,13 @@ import './design.css'
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)
 const route = entryRoute(window.location.pathname, window.location.search)
-const loadLanding = () => import('./landing-prototype/LandingPrototype')
+if (route.page === 'workspace' && route.redirectTo) {
+  window.history.replaceState({}, '', route.redirectTo)
+}
+const loadLanding = () => import('./landing/LandingPage')
 const LandingPage = lazy(() => loadLanding().then((module) => ({ default: module.LandingPage })))
 
-if (route === 'landing') {
+if (route.page === 'landing') {
   root.render(
     <React.StrictMode>
       <ErrorBoundary>
@@ -26,7 +29,7 @@ if (route === 'landing') {
     <React.StrictMode>
       <ErrorBoundary>
         <StoreProvider>
-          <App />
+          <App initialView={route.view} />
         </StoreProvider>
       </ErrorBoundary>
     </React.StrictMode>,

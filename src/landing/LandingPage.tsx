@@ -1,14 +1,14 @@
 import { useEffect, type ReactNode } from 'react'
 import overviewScreenshot from './assets/overview-user-fullres.png'
-import './landingPrototype.css'
+import './landingPage.css'
 
 export function LandingPage() {
   useEffect(() => {
-    document.body.classList.add('landing-prototype-body')
-    return () => document.body.classList.remove('landing-prototype-body')
+    document.body.classList.add('landing-page-body')
+    return () => document.body.classList.remove('landing-page-body')
   }, [])
 
-  return <div className="landing-prototype"><LiveDesk /></div>
+  return <div className="landing-site"><LiveDesk /></div>
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -41,7 +41,7 @@ function LiveDesk() {
           <h1>Know where your portfolio stands.</h1>
           <p>Import your holdings, fetch the latest prices, and read value, P&amp;L, allocation, and today's movement in one private workspace.</p>
           <div className="lp-actions">
-            <a className="lp-button lp-button--primary" href="/?workspace=1">Open Finverse <ArrowIcon /></a>
+            <a className="lp-button lp-button--primary" href="/app">Open Finverse <ArrowIcon /></a>
             <a className="lp-text-link" href="#a-capabilities">See what it does ↓</a>
           </div>
         </div>
@@ -90,7 +90,7 @@ function LiveDesk() {
           <h2>Your holdings stay in your browser.</h2>
         </div>
         <p>Finverse has no account system, portfolio backend, or telemetry service. Market providers receive instrument identifiers only when you enable external data. Your AI provider receives context only when you send a prompt.</p>
-        <a className="lp-button lp-button--outline" href="/?workspace=1">Enter the workspace <ArrowIcon /></a>
+        <a className="lp-button lp-button--outline" href="/app">Enter the workspace <ArrowIcon /></a>
       </section>
 
       <LandingFooter label="Portfolio workspace" />
