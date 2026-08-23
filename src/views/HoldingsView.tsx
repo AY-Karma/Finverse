@@ -3,10 +3,11 @@ import { loadMarketFeed, type LoadedMarketFeed, type NewsItem } from '../marketN
 import { filterNewsEvents, pageCount, pagedEvents, sentimentForTitle, titleParts, type NewsFeedFilters } from '../monitorFeed'
 import { useStore } from '../useStore'
 import { ImportView } from './ImportView'
+import { PortfolioRequiredState } from './PortfolioRequiredState'
 
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 
-export function HoldingsView() {
+export function HoldingsView({ onRequestImport }: { onRequestImport: () => void }) {
   const { folios, positions, settings, removeFolio, undoLastImport, exportPortfolio } = useStore()
   const [feed, setFeed] = useState<LoadedMarketFeed | null>(null)
   const [loading, setLoading] = useState(false)
@@ -52,6 +53,16 @@ export function HoldingsView() {
   // A deep dive replaces the wire view entirely so the search result is unmistakable.
   const feedItems = visible(current.items).filter((item) => !activeQuery || item.origin === 'search')
 
+  if (positions.length === 0) {
+    return (
+      <PortfolioRequiredState
+        area="02 · Monitor"
+        description="Bring in your holdings to follow the market wire and see the companies in your portfolio at a glance."
+        onImport={onRequestImport}
+      />
+    )
+  }
+
   return (
     <>
       <div className="page-head enter d0">
@@ -62,63 +73,50 @@ export function HoldingsView() {
         <p className="page-sub">The Indian market wire with your holdings flagged, plus on-demand company deep dives. Overview remains the single place for portfolio value and performance.</p>
       </div>
 
-      {positions.length === 0 ? (
-        <>
-          <section className="panel holdings-empty enter d1">
-            <strong>Start with a portfolio</strong>
-            <span className="hint">Import a spreadsheet to follow the market wire and watch your stocks.</span>
-            <button className="btn btn--primary" type="button" onClick={() => setImportOpen(true)}>Import holdings</button>
-          </section>
-          {importOpen && <section className="panel holdings-import enter" aria-label="Import holdings"><ImportView compact /></section>}
-        </>
+      {!settings.allowExternalData ? (
+        <section className="panel monitor-consent enter d1">
+          <div>
+            <span className="score-label">External data is off</span>
+            <strong>Portfolio Monitor is private until you opt in.</strong>
+            <span className="hint">Enabling it fetches public market news. Quantities, values and cost basis stay in this browser.</span>
+          </div>
+          <span className="section-index">Enable in Settings</span>
+        </section>
       ) : (
         <>
-          {!settings.allowExternalData ? (
-            <section className="panel monitor-consent enter d1">
-              <div>
-                <span className="score-label">External data is off</span>
-                <strong>Portfolio Monitor is private until you opt in.</strong>
-                <span className="hint">Enabling it fetches public market news. Quantities, values and cost basis stay in this browser.</span>
-              </div>
-              <span className="section-index">Enable in Settings</span>
-            </section>
-          ) : (
-            <>
-              <MonitorStatusStrip
-                loading={loading}
-                fetchedAt={current.fetchedAt}
-                storyCount={feedItems.length}
-                onRefresh={() => setRefreshCount((count) => count + 1)}
-              />
+          <MonitorStatusStrip
+            loading={loading}
+            fetchedAt={current.fetchedAt}
+            storyCount={feedItems.length}
+            onRefresh={() => setRefreshCount((count) => count + 1)}
+          />
 
-              {current.issues.length > 0 && (
-                <div className="monitor-issues enter" role="status">
-                  {current.issues.map((issue) => <span key={`${issue.source}:${issue.message}`}>{issue.source}: {issue.message}</span>)}
-                </div>
-              )}
-
-              <NewsFeedPanel
-                events={feedItems}
-                positions={positions}
-                loading={loading}
-                activeQuery={activeQuery}
-                onSelectQuery={setActiveQuery}
-                onDismiss={dismissItem}
-              />
-            </>
+          {current.issues.length > 0 && (
+            <div className="monitor-issues enter" role="status">
+              {current.issues.map((issue) => <span key={`${issue.source}:${issue.message}`}>{issue.source}: {issue.message}</span>)}
+            </div>
           )}
 
-          <ManageHoldings
-            folios={folios}
-            hasPositions={positions.length > 0}
-            importOpen={importOpen}
-            onToggleImport={() => setImportOpen((open) => !open)}
-            onExport={exportPortfolio}
-            onUndoImport={undoLastImport}
-            onRemoveFolio={removeFolio}
+          <NewsFeedPanel
+            events={feedItems}
+            positions={positions}
+            loading={loading}
+            activeQuery={activeQuery}
+            onSelectQuery={setActiveQuery}
+            onDismiss={dismissItem}
           />
         </>
       )}
+
+      <ManageHoldings
+        folios={folios}
+        hasPositions={positions.length > 0}
+        importOpen={importOpen}
+        onToggleImport={() => setImportOpen((open) => !open)}
+        onExport={exportPortfolio}
+        onUndoImport={undoLastImport}
+        onRemoveFolio={removeFolio}
+      />
     </>
   )
 }

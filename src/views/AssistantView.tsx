@@ -6,6 +6,7 @@ import { ChatChart } from '../ChatChart'
 import { instrumentLabel } from '../instruments'
 import { positionPnlPct, positionValue, formatCurrency } from '../valuation'
 import { useStore, type View } from '../useStore'
+import { PortfolioRequiredState } from './PortfolioRequiredState'
 
 const CHAT_KEY = 'finverse:chat'
 
@@ -164,7 +165,7 @@ function persistChat(messages: ChatMessage[]): void {
   }
 }
 
-export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
+export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) => void; onRequestImport: () => void }) {
   const { positions, settings, liveQuotes, fxRate, quickMode, setQuickMode } = useStore()
   const [messages, setMessages] = useState<ChatMessage[]>(loadChat)
   const [input, setInput] = useState('')
@@ -329,6 +330,16 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
     persistChat([])
   }
 
+  if (positions.length === 0) {
+    return (
+      <PortfolioRequiredState
+        area="04 · Research · AI"
+        description="Bring in your holdings so the assistant has real portfolio context to study."
+        onImport={onRequestImport}
+      />
+    )
+  }
+
   return (
     <>
       <div className="page-head enter d0">
@@ -338,14 +349,6 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
         </div>
         <div className="assistant-head-actions"><button type="button" className="btn btn--ghost btn--small" onClick={() => onGoTo('research')}>← Back to Research</button><p className="page-sub">Your portfolio context goes only to the provider you configure.</p></div>
       </div>
-
-      {positions.length === 0 && (
-        <div className="panel enter d1">
-          <p className="hint">
-            No positions loaded — the coach has nothing to study yet. Import a sheet first.
-          </p>
-        </div>
-      )}
 
       <div className="panel enter d2">
         <div className="panel-head">

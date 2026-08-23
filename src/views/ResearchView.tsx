@@ -6,6 +6,7 @@ import { isinLogoUrl, monogramTile, resolveIsin, tickerLogoUrl } from '../logos'
 import { privateValue, visibleQuotes } from '../privacy'
 import { useStore } from '../useStore'
 import { formatCurrency, formatPercent, positionPnl, positionPnlPct, positionValue } from '../valuation'
+import { PortfolioRequiredState } from './PortfolioRequiredState'
 
 type Row = { position: Position; value: number; pnl: number | null; pnlPct: number | null }
 
@@ -21,7 +22,7 @@ function resolveOnce(ticker: string): Promise<string> {
   return pending
 }
 
-export function ResearchView({ onOpenAssistant }: { onOpenAssistant: () => void }) {
+export function ResearchView({ onOpenAssistant, onRequestImport }: { onOpenAssistant: () => void; onRequestImport: () => void }) {
   const { positions, liveQuotes, fxRate, settings } = useStore()
   const currency = settings.currency || 'INR'
   const allowExternal = settings.allowExternalData
@@ -56,6 +57,16 @@ export function ResearchView({ onOpenAssistant }: { onOpenAssistant: () => void 
     return () => { cancelled = true }
   }, [positions, allowExternal])
 
+  if (positions.length === 0) {
+    return (
+      <PortfolioRequiredState
+        area="04 · Research"
+        description="Bring in your holdings to build a private research desk with a dossier for every investment."
+        onImport={onRequestImport}
+      />
+    )
+  }
+
   return <>
     <div className="page-head enter d0">
       <div>
@@ -77,51 +88,42 @@ export function ResearchView({ onOpenAssistant }: { onOpenAssistant: () => void 
       </div>
     </section>
 
-    {rows.length === 0 ? (
-      <section className="panel research-empty enter d2">
-        <strong>Research starts with your holdings</strong>
-        <p className="hint">Import a portfolio from Holdings to build a private, portfolio-derived research list.</p>
+    <div className="research-toolbar enter d2">
+      <input
+        className="input research-search"
+        type="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={`Filter ${rows.length} holding${rows.length === 1 ? '' : 's'} by name or ticker…`}
+        aria-label="Filter research cards"
+      />
+      <span className="section-index">{visibleRows.length} shown</span>
+    </div>
+
+    {visibleRows.length === 0 ? (
+      <section className="panel research-empty enter">
+        <strong>No holding matches “{query}”</strong>
+        <p className="hint">Clear the filter to see the full list.</p>
+        <button className="btn btn--secondary btn--small" type="button" onClick={() => setQuery('')}>Clear filter</button>
       </section>
     ) : (
-      <>
-        <div className="research-toolbar enter d2">
-          <input
-            className="input research-search"
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Filter ${rows.length} holding${rows.length === 1 ? '' : 's'} by name or ticker…`}
-            aria-label="Filter research cards"
+      <section className="research-grid enter d3" aria-label="Portfolio research dossiers">
+        {visibleRows.map(({ position, value, pnl, pnlPct }) => (
+          <DossierCard
+            key={position.id}
+            position={position}
+            value={value}
+            pnl={pnl}
+            pnlPct={pnlPct}
+            currency={currency}
+            fxUsdInr={fxRate?.usdInr}
+            hideValues={settings.hideValues}
+            mode={settings.mode}
+            screenerPath={paths[position.ticker.replace(/\.(NS|NSE|BSE)$/, '').toUpperCase()]}
+            showLogos={allowExternal}
           />
-          <span className="section-index">{visibleRows.length} shown</span>
-        </div>
-
-        {visibleRows.length === 0 ? (
-          <section className="panel research-empty enter">
-            <strong>No holding matches “{query}”</strong>
-            <p className="hint">Clear the filter to see the full list.</p>
-            <button className="btn btn--secondary btn--small" type="button" onClick={() => setQuery('')}>Clear filter</button>
-          </section>
-        ) : (
-          <section className="research-grid enter d3" aria-label="Portfolio research dossiers">
-            {visibleRows.map(({ position, value, pnl, pnlPct }) => (
-              <DossierCard
-                key={position.id}
-                position={position}
-                value={value}
-                pnl={pnl}
-                pnlPct={pnlPct}
-                currency={currency}
-                fxUsdInr={fxRate?.usdInr}
-                hideValues={settings.hideValues}
-                mode={settings.mode}
-                screenerPath={paths[position.ticker.replace(/\.(NS|NSE|BSE)$/, '').toUpperCase()]}
-                showLogos={allowExternal}
-              />
-            ))}
-          </section>
-        )}
-      </>
+        ))}
+      </section>
     )}
   </>
 }

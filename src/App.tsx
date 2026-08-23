@@ -3,6 +3,7 @@ import type { View } from './useStore'
 import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { Overview } from './views/Overview'
+import { PortfolioImportDialog } from './views/PortfolioImportDialog'
 
 const loadHoldingsView = () => import('./views/HoldingsView')
 const loadResearchView = () => import('./views/ResearchView')
@@ -26,7 +27,13 @@ const NAV: { id: View; label: string; index: string }[] = [
 
 export default function App() {
   const [view, setView] = useState<View>('overview')
+  const [importOpen, setImportOpen] = useState(false)
   const { positions, settings, quickMode } = useStore()
+
+  const requestPortfolioImport = () => {
+    setView('overview')
+    setImportOpen(true)
+  }
 
   // Reflect theme + density across the whole app as soon as it loads or changes.
   useEffect(() => {
@@ -78,17 +85,18 @@ export default function App() {
       </aside>
 
       <main className="main">
-        {view === 'overview' && <Overview onGoTo={setView} />}
+        {view === 'overview' && <Overview onGoTo={setView} onRequestImport={requestPortfolioImport} />}
         {view !== 'overview' && (
           <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
-            {view === 'holdings' && <HoldingsView />}
-            {view === 'insights' && <InsightsView />}
-            {view === 'research' && <ResearchView onOpenAssistant={() => setView('assistant')} />}
-            {view === 'assistant' && <AssistantView onGoTo={setView} />}
+            {view === 'holdings' && <HoldingsView onRequestImport={requestPortfolioImport} />}
+            {view === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
+            {view === 'research' && <ResearchView onOpenAssistant={() => setView('assistant')} onRequestImport={requestPortfolioImport} />}
+            {view === 'assistant' && <AssistantView onGoTo={setView} onRequestImport={requestPortfolioImport} />}
             {view === 'settings' && <SettingsView />}
           </Suspense>
         )}
       </main>
+      <PortfolioImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   )
 }

@@ -1,16 +1,34 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { StoreProvider } from './useStore'
 import { ErrorBoundary } from './ErrorBoundary'
+import { entryRoute } from './entryRoute'
 import './design.css'
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <StoreProvider>
-        <App />
-      </StoreProvider>
-    </ErrorBoundary>
-  </React.StrictMode>,
-)
+const root = ReactDOM.createRoot(document.getElementById('root')!)
+const route = entryRoute(window.location.pathname, window.location.search)
+const loadLanding = () => import('./landing-prototype/LandingPrototype')
+const LandingPage = lazy(() => loadLanding().then((module) => ({ default: module.LandingPage })))
+
+if (route === 'landing') {
+  root.render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <Suspense fallback={null}>
+          <LandingPage />
+        </Suspense>
+      </ErrorBoundary>
+    </React.StrictMode>,
+  )
+} else {
+  root.render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <StoreProvider>
+          <App />
+        </StoreProvider>
+      </ErrorBoundary>
+    </React.StrictMode>,
+  )
+}
