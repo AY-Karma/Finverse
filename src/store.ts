@@ -33,11 +33,16 @@ function sanitizePosition(value: unknown): Position | null {
 
   const optionalNumber = (key: string) => persistedNumber(value[key])
   const optionalText = (key: string) => persistedText(value[key]) || undefined
+  const providerSymbol = optionalText('providerSymbol')
+  const exchange = value.exchange === 'NSE' || value.exchange === 'BSE' || value.exchange === 'NASDAQ' || value.exchange === 'NYSE' || value.exchange === 'LSE' || value.exchange === 'OTHER' ? value.exchange : undefined
+  // Older equity imports had no recognizable Type column and were stored as "other";
+  // a listed instrument on a real venue is a stock. Heals previously saved folios.
+  const effectiveType = type === 'other' && (Boolean(providerSymbol) || (exchange != null && exchange !== 'OTHER')) ? 'stock' : type
   return normalizePosition({
     id: persistedText(value.id),
     ticker: persistedText(value.ticker),
     name: persistedText(value.name),
-    type,
+    type: effectiveType,
     quantity,
     buyPrice,
     lastPrice: optionalNumber('lastPrice'),
@@ -51,8 +56,8 @@ function sanitizePosition(value: unknown): Position | null {
     xirr: optionalNumber('xirr'),
     instrumentKey: optionalText('instrumentKey'),
     isin: optionalText('isin'),
-    exchange: value.exchange === 'NSE' || value.exchange === 'BSE' || value.exchange === 'NASDAQ' || value.exchange === 'NYSE' || value.exchange === 'LSE' || value.exchange === 'OTHER' ? value.exchange : undefined,
-    providerSymbol: optionalText('providerSymbol'),
+    exchange,
+    providerSymbol,
     currency: value.currency === 'USD' ? 'USD' : value.currency === 'INR' ? 'INR' : undefined,
     sector: optionalText('sector'),
     industry: optionalText('industry'),
@@ -134,7 +139,7 @@ function loadSessionApiKey(): string {
 export function loadSettings(): Settings {
   const defaults: Settings = {
     provider: '', apiKey: '', model: '', baseUrl: 'http://localhost:11434/v1', confirmRemoteOllama: false, currency: 'INR', allowExternalData: false,
-    density: 'comfortable', accent: 'indigo', hideValues: false,
+    density: 'comfortable', accent: 'indigo', mode: 'dark', hideValues: false,
   }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
@@ -158,7 +163,9 @@ export function loadSettings(): Settings {
     const provider = parsed.provider === 'openai' || parsed.provider === 'anthropic' || parsed.provider === 'openrouter' || parsed.provider === 'ollama' ? parsed.provider : defaults.provider
     const currency = parsed.currency === 'USD' ? 'USD' : defaults.currency
     const density = parsed.density === 'compact' ? 'compact' : defaults.density
-    const accent = parsed.accent === 'emerald' || parsed.accent === 'cobalt' || parsed.accent === 'amber' ? parsed.accent : defaults.accent
+    const accent = parsed.accent === 'emerald' || parsed.accent === 'cobalt' || parsed.accent === 'amber' || parsed.accent === 'custom' ? parsed.accent : defaults.accent
+    const mode = parsed.mode === 'light' ? 'light' as const : defaults.mode
+    const customAccent = typeof parsed.customAccent === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.customAccent) ? parsed.customAccent.toLowerCase() : undefined
     return {
       ...defaults,
       ...parsed,
@@ -166,6 +173,8 @@ export function loadSettings(): Settings {
       currency,
       density,
       accent,
+      ...(customAccent ? { customAccent } : {}),
+      mode,
       apiKey: loadSessionApiKey() || legacyApiKey,
       model: typeof parsed.model === 'string' ? parsed.model.slice(0, MAX_PERSISTED_TEXT) : defaults.model,
       baseUrl: typeof parsed.baseUrl === 'string' && parsed.baseUrl.trim() ? parsed.baseUrl.slice(0, MAX_PERSISTED_TEXT) : defaults.baseUrl,

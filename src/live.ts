@@ -278,8 +278,8 @@ export interface LiveQuotesResult {
   skipped: number
 }
 
-const QUOTE_REQUEST_CONCURRENCY = 4
-const QUOTE_REQUEST_GAP_MS = 100
+const QUOTE_REQUEST_CONCURRENCY = 2
+const QUOTE_REQUEST_GAP_MS = 750
 
 export async function fetchLiveQuotes(
   positions: Position[],

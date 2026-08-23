@@ -1,4 +1,4 @@
-import type { HoldingMonitorEvent } from './holdingMonitor'
+import type { NewsItem } from './marketNews'
 
 export type NewsSentiment = 'positive' | 'negative' | 'neutral'
 export type NewsSort = 'latest' | 'company'
@@ -19,25 +19,29 @@ export function sentimentForTitle(title: string): NewsSentiment {
   return 'neutral'
 }
 
-/** Filters and orders the in-memory feed only. No extra holding data leaves the browser. */
-export function filterNewsEvents(events: HoldingMonitorEvent[], filters: NewsFeedFilters): HoldingMonitorEvent[] {
+/** Filters and orders the in-memory feed only. No holding data leaves the browser. */
+export function filterNewsEvents(events: NewsItem[], filters: NewsFeedFilters): NewsItem[] {
   const query = filters.query.trim().toLocaleLowerCase()
   return [...events]
     .filter((event) => {
-      if (filters.ticker !== 'all' && event.ticker !== filters.ticker) return false
+      if (filters.ticker !== 'all' && !event.matches.includes(filters.ticker)) return false
       if (filters.sentiment !== 'all' && sentimentForTitle(event.title) !== filters.sentiment) return false
-      return !query || `${event.ticker} ${event.title} ${event.source}`.toLocaleLowerCase().includes(query)
+      return !query || `${event.matches.join(' ')} ${event.title} ${event.source}`.toLocaleLowerCase().includes(query)
     })
-    .sort((left, right) => filters.sort === 'company'
-      ? left.ticker.localeCompare(right.ticker) || right.title.localeCompare(left.title)
-      : (right.publishedAt ?? 0) - (left.publishedAt ?? 0))
+    .sort((left, right) => {
+      if (filters.sort === 'company') {
+        const companyOrder = (left.matches[0] ?? '').localeCompare(right.matches[0] ?? '')
+        if (companyOrder !== 0) return companyOrder
+      }
+      return (right.publishedAt ?? 0) - (left.publishedAt ?? 0)
+    })
 }
 
 export function pageCount(itemCount: number, pageSize: number): number {
   return Math.max(1, Math.ceil(itemCount / pageSize))
 }
 
-export function pagedEvents(events: HoldingMonitorEvent[], page: number, pageSize: number): HoldingMonitorEvent[] {
+export function pagedEvents(events: NewsItem[], page: number, pageSize: number): NewsItem[] {
   const offset = (page - 1) * pageSize
   return events.slice(offset, offset + pageSize)
 }

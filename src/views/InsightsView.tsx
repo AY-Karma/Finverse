@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
+import type { SectorAllocation } from '../investmentWorkspace'
 import { buildPortfolioBackcast, type PortfolioBackcast } from '../portfolioBackcast'
 import { downsampleSeries } from '../timeSeries'
 import { useStore } from '../useStore'
+import { assetTypeLabel } from '../instruments'
 import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 
-const COLORS = ['#5e6ad2', '#7a8cff', '#41b883', '#f2b53c', '#e77b8a', '#9a9fd0', '#5c8298', '#c185c8']
+// Same muted family as the overview allocation card so charts read as one system.
+const EXPO_PALETTE = ['#7c89e8', '#5fae9b', '#d0a35c', '#c97b84', '#6aa9c9', '#a685c9', '#96b862', '#8a93a6']
 const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short' })
 const MAX_CHART_POINTS = 180
+const INITIAL_BACKCAST_DAYS = 366
+const BACKCAST_PAGE_DAYS = 366
+const MAX_BACKCAST_DAYS = 3 * 366
 
 type BenchmarkPoint = { ts: number; portfolio: number; benchmark?: number }
 function shortDate(value: number): string {
@@ -28,6 +34,7 @@ export function InsightsView() {
   const [openKpi, setOpenKpi] = useState<'top-five' | 'drawdown' | null>(null)
   const [backcast, setBackcast] = useState<PortfolioBackcast | null>(null)
   const [backcastLoading, setBackcastLoading] = useState(false)
+  const [backcastDays, setBackcastDays] = useState(INITIAL_BACKCAST_DAYS)
   const [performanceMode, setPerformanceMode] = useState<'backcast' | 'tracked'>('backcast')
   const backcastKey = useMemo(
     () => snapshot.positions.map((position) => `${position.id}:${position.quantity}:${position.buyPrice}`).join('|'),
@@ -37,11 +44,12 @@ export function InsightsView() {
   useEffect(() => {
     if (!settings.allowExternalData || snapshot.positions.length === 0) {
       setBackcast(null)
+      setBackcastDays(INITIAL_BACKCAST_DAYS)
       return
     }
     let alive = true
     setBackcastLoading(true)
-    void buildPortfolioBackcast(snapshot.positions, snapshot.quotes, marketData).then((result) => {
+    void buildPortfolioBackcast(snapshot.positions, snapshot.quotes, marketData, backcastDays).then((result) => {
       if (alive) {
         setBackcast(result)
         setBackcastLoading(false)
@@ -55,7 +63,12 @@ export function InsightsView() {
     return () => {
       alive = false
     }
-  }, [backcastKey, settings.allowExternalData])
+  }, [backcastDays, backcastKey, settings.allowExternalData])
+
+  const requestMoreBackcast = () => {
+    if (backcastLoading || backcastDays >= MAX_BACKCAST_DAYS) return
+    setBackcastDays((current) => Math.min(MAX_BACKCAST_DAYS, current + BACKCAST_PAGE_DAYS))
+  }
 
   const contributionColumns = useMemo(() => buildContributionColumns(snapshot.contributions.map((item) => ({
     label: item.symbol.length > 14 ? `${item.symbol.slice(0, 13)}…` : item.symbol,
@@ -181,10 +194,43 @@ export function InsightsView() {
 
       <div className="insight-grid enter d2">
         <section className="panel insight-panel insight-panel--wide">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Benchmark race</span><span className="section-index">01 · Portfolio vs {selectedBenchmark.label}</span></div><label className="benchmark-picker"><span className="sr-only">Benchmark comparison</span><select aria-label="Benchmark comparison" value={benchmarkId} onChange={(event) => setBenchmarkId(event.target.value)}>{(['India', 'Global'] as const).map((region) => <optgroup key={region} label={region}>{BENCHMARKS.filter((item) => item.region === region).map((item) => <option key={item.id} value={item.id}>{item.label}{item.unavailableReason ? ' — unavailable' : ''}</option>)}</optgroup>)}</select></label></div>
-          <span className="hint">{selectedBenchmark.unavailableReason ?? (benchmarkError ? `Could not load ${selectedBenchmark.label} history` : benchmarkLoading || backcastLoading ? 'Building the one-year comparison…' : backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : 'Historical market data is unavailable')}</span>
+          <div className="panel-head">
+            <div className="panel-head-titles">
+              <span className="panel-title">Benchmark race</span>
+              <details className="benchmark-menu">
+                <summary aria-label={`Portfolio compared with ${selectedBenchmark.label}. Choose a benchmark`}>
+                  <span>01 · Portfolio vs</span>
+                  <strong>{selectedBenchmark.label}</strong>
+                  <i aria-hidden="true" />
+                </summary>
+                <div className="benchmark-menu-popover">
+                  {(['India', 'Global'] as const).map((region) => (
+                    <div className="benchmark-menu-group" key={region}>
+                      <span>{region}</span>
+                      {BENCHMARKS.filter((item) => item.region === region).map((item) => (
+                        <button
+                          type="button"
+                          className={item.id === benchmarkId ? 'is-selected' : ''}
+                          aria-current={item.id === benchmarkId ? 'true' : undefined}
+                          key={item.id}
+                          onClick={(event) => {
+                            setBenchmarkId(item.id)
+                            event.currentTarget.closest('details')?.removeAttribute('open')
+                          }}
+                        >
+                          <span>{item.label}</span>
+                          <small>{item.unavailableReason ? 'Unavailable' : item.id === benchmarkId ? 'Selected' : ''}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
+          </div>
+          <span className="hint">{selectedBenchmark.unavailableReason ?? (benchmarkError ? `Could not load ${selectedBenchmark.label} history` : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : 'Historical market data is unavailable')}</span>
           <div className="insight-chart">
-            {benchmarkSeries.length >= 2 ? <InteractiveTrendChart rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))} lines={[{ key: 'portfolio', label: 'Portfolio', color: '#5e6ad2' }, { key: 'benchmark', label: selectedBenchmark.label, color: '#f2b53c' }]} valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)} yAxisLabel="Return (%)" includeZero /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (settings.allowExternalData ? 'Building your comparison' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
+            {benchmarkSeries.length >= 2 ? <InteractiveTrendChart rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))} lines={[{ key: 'portfolio', label: 'Portfolio', color: '#5e6ad2' }, { key: 'benchmark', label: selectedBenchmark.label, color: '#f2b53c' }]} valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)} yAxisLabel="Return (%)" includeZero onReachStart={backcast ? requestMoreBackcast : undefined} /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (settings.allowExternalData ? 'Building your comparison' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
           </div>
         </section>
 
@@ -193,10 +239,9 @@ export function InsightsView() {
           <AllocationMap items={exposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} hideValues={hide} formatValue={value} />
         </section>
 
-        <section className="panel insight-panel">
+        <section className="panel insight-panel insight-panel--exposure">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Exposure mix</span><span className="section-index">03 · Sectors / type</span></div></div>
-          <ExposureBars items={snapshot.sectors.slice(0, 8)} hideValues={hide} formatValue={value} />
-          <div className="insight-legend">{snapshot.sectors.slice(0, 6).map((sector, index) => <div key={sector.label}><span className="legend-swatch" style={{ background: COLORS[index % COLORS.length] }} /><span>{sector.label}</span><strong>{mask(`${sector.weight.toFixed(1)}%`)}</strong></div>)}</div>
+          <ExposureMix items={snapshot.sectors.slice(0, 10)} hideValues={hide} formatValue={value} />
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
@@ -205,23 +250,74 @@ export function InsightsView() {
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Risk and drawdown</span><span className="section-index">05 · Portfolio resilience</span></div><span className="hint">One-year current-holdings backcast{backcast ? ` · ${backcast.coveragePct.toFixed(0)}% coverage` : ''}</span></div>
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · Lower is safer</span></div><span className="hint">Uses today's quantities with past prices{backcast ? ` · ${backcast.coveragePct.toFixed(0)}% price coverage` : ''}</span></div>
           {hasHistory ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} /> : <div className="chart-empty">Historical prices are loading to build your risk profile.</div>}
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Performance story</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio values' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
           <div className="history-method-note"><div><strong>Backcast · available now</strong><span>Applies today’s quantities to real historical closes. Useful immediately, but it cannot know past trades or cash flows.</span></div><div><strong>Tracked · {trackedAvailable ? 'available' : 'collecting'}</strong><span>Saves one verified portfolio value per market day on this device, building an observed record of the portfolio from now on.</span></div></div>
-          <div className="insight-chart insight-chart--small">{performanceHistory.length >= 2 ? <InteractiveTrendChart rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))} lines={[{ key: 'value', label: 'Portfolio value', color: '#41b883' }, { key: 'invested', label: 'Invested capital', color: '#f2b53c', dashed: true }]} valueFormatter={value} yAxisLabel="Value" /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{backcastLoading ? 'Building your one-year history' : 'Historical prices are unavailable'}</strong><span>{backcastLoading ? 'Current holdings are being matched with real historical closes.' : 'Enable external market data or use tracked snapshots as they accumulate.'}</span></div>}</div>
+          <div className="insight-chart insight-chart--small">{performanceHistory.length >= 2 ? <InteractiveTrendChart rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))} lines={[{ key: 'value', label: 'Portfolio value', color: '#41b883' }, { key: 'invested', label: 'Invested capital', color: '#f2b53c', dashed: true }]} valueFormatter={value} yAxisLabel="Value" onReachStart={performanceMode === 'backcast' && backcast ? requestMoreBackcast : undefined} /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{backcastLoading ? 'Building your historical series' : 'Historical prices are unavailable'}</strong><span>{backcastLoading ? 'Current holdings are being matched with real historical closes.' : 'Enable external market data or use tracked snapshots as they accumulate.'}</span></div>}</div>
         </section>
       </div>
     </div>
   )
 }
 
-function ExposureBars({ items, hideValues, formatValue }: { items: { label: string; value: number; weight: number }[]; hideValues: boolean; formatValue: (value: number) => string }) {
+/** Exposure mix: one proportional ribbon plus interactive sector tiles. Both
+ *  surfaces share a single hover state, so pointing at a tile lights its ribbon
+ *  segment and vice versa — no separate legend repeating the same rows. */
+function ExposureMix({ items, hideValues, formatValue }: { items: SectorAllocation[]; hideValues: boolean; formatValue: (value: number) => string }) {
+  const [active, setActive] = useState<number | null>(null)
+  const mask = (text: string) => (hideValues ? '••••••' : text)
+  if (items.length === 0 || items.every((item) => item.value <= 0)) {
+    return <div className="expo-empty muted">No valued exposure yet.</div>
+  }
   const max = Math.max(...items.map((item) => item.value), 1)
-  return <div className="exposure-bars">{items.map((item, index) => <div className="exposure-row" key={item.label}><div><span><i className="legend-swatch" style={{ background: COLORS[index % COLORS.length] }} />{item.label}</span><strong>{hideValues ? '••••' : `${item.weight.toFixed(1)}%`}</strong></div><div className="exposure-track"><span style={{ width: `${item.value / max * 100}%`, background: COLORS[index % COLORS.length] }} /></div><small>{hideValues ? '••••••' : formatValue(item.value)}</small></div>)}</div>
+
+  return (
+    <div className="expo-mix" aria-label="Exposure mix by sector and type">
+      <div className="expo-ribbon" aria-hidden="true">
+        {items.map((sector, index) => (
+          <i
+            key={sector.label}
+            className={`expo-seg${active === index ? ' is-active' : active != null ? ' is-dim' : ''}`}
+            style={{ flexGrow: Math.max(sector.value, 1), background: EXPO_PALETTE[index % EXPO_PALETTE.length] }}
+            onMouseEnter={() => setActive(index)}
+            onMouseLeave={() => setActive(null)}
+          />
+        ))}
+      </div>
+      <div className="expo-grid">
+        {items.map((sector, index) => {
+          const color = EXPO_PALETTE[index % EXPO_PALETTE.length]
+          const type = sector.type === 'mixed' ? 'Mixed' : assetTypeLabel(sector.type)
+          return (
+            <button
+              key={sector.label}
+              type="button"
+              className={`expo-tile${active === index ? ' is-active' : active != null ? ' is-dim' : ''}`}
+              onMouseEnter={() => setActive(index)}
+              onMouseLeave={() => setActive(null)}
+              onFocus={() => setActive(index)}
+              onBlur={() => setActive(null)}
+              aria-pressed={active === index}
+              aria-label={`${sector.label}: ${hideValues ? 'weight hidden' : `${sector.weight.toFixed(1)}%`}, ${hideValues ? 'value hidden' : formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
+            >
+              <span className="expo-tile-head">
+                <i className="legend-swatch" style={{ background: color }} />
+                <span className="expo-name" title={sector.label}>{sector.label}</span>
+                <span className="expo-type">{type}</span>
+              </span>
+              <strong className="expo-weight">{mask(`${sector.weight.toFixed(1)}%`)}</strong>
+              <span className="expo-meta">{mask(formatValue(sector.value))} · {sector.count} {sector.count === 1 ? 'position' : 'positions'}</span>
+              <span className="expo-tile-track"><i style={{ width: `${(sector.value / max) * 100}%`, background: color }} /></span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 function AllocationMap({
@@ -274,14 +370,144 @@ function ContributionBars({
   })}</div></div>
 }
 
+type RiskStatus = 'lower' | 'watch' | 'high'
+
+function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus {
+  if (value >= highAt) return 'high'
+  if (value >= watchAt) return 'watch'
+  return 'lower'
+}
+
 function RiskProfile({ current, worst, volatility, concentration, hideValues }: { current: number; worst: number; volatility: number; concentration: number; hideValues: boolean }) {
+  const [openDefinition, setOpenDefinition] = useState<string | null>(null)
   const mask = (text: string) => hideValues ? '••••' : text
-  const drawdownScale = Math.max(Math.abs(worst), 1)
   const riskRows = [
-    { label: 'Distance from peak', value: Math.abs(current), width: Math.abs(current) / drawdownScale * 100, detail: current < 0 ? 'Below the latest portfolio high' : 'At the latest portfolio high', definition: 'This is the percentage the latest saved value sits below its most recent saved high. The red bar is your current recovery distance; 0% means you are at that high.', tone: 'down' },
-    { label: 'Worst observed pullback', value: Math.abs(worst), width: 100, detail: 'Largest fall in the reconstructed history', definition: 'This is the biggest peak-to-trough percentage decline in the current-holdings backcast. The red bar uses that maximum as its full width, so a larger percentage means a deeper historical fall.', tone: 'down' },
-    { label: 'Annualized swings', value: volatility, width: Math.min(100, volatility / 30 * 100), detail: 'How much daily returns have moved', definition: 'This estimates how widely day-to-day portfolio returns vary over a year. The blue bar is scaled to 30%; higher percentages mean less predictable movement, not a guaranteed loss.', tone: 'neutral' },
-    { label: 'Top-five concentration', value: concentration, width: Math.min(100, concentration), detail: 'Share held in the five largest positions', definition: 'This is the percentage of your portfolio held in its five largest positions. The blue bar fills directly to that share; a higher percentage means those holdings have more influence.', tone: 'neutral' },
-  ]
-  return <div className="risk-profile"><p className="risk-summary-copy">{current < 0 ? 'Your portfolio is below its most recent high. These bars show the size of the recovery room and where concentration adds risk.' : 'Your portfolio is at its most recent high. These bars show how much past drawdowns and concentration can still matter.'}</p><div className="risk-bars">{riskRows.map((row) => <div className="risk-bar" key={row.label}><div><span className="risk-label">{row.label}<button type="button" className="risk-help" aria-label={`Explain ${row.label}`}>i<span role="tooltip">{row.definition}</span></button></span><strong className={row.tone === 'down' ? 'down' : ''}>{mask(`${row.value.toFixed(1)}%`)}</strong></div><div className="risk-track"><span className={`risk-fill risk-fill--${row.tone}`} style={{ width: `${row.width}%` }} /></div><small>{row.detail}</small></div>)}</div></div>
+    {
+      id: 'below-high',
+      label: 'Below latest high',
+      value: Math.abs(current),
+      description: 'How far the latest portfolio value sits below its latest high.',
+      scaleMax: 30,
+      watchAt: 10,
+      highAt: 20,
+      formula: 'Value = (latest high - latest value) ÷ latest high × 100.',
+      definition: 'The app compares the latest reconstructed portfolio value with the highest value reached before it. A value of 0% means the portfolio is at that high. The bar uses a fixed 0% to 30% scale, and values above 30% fill the bar.',
+    },
+    {
+      id: 'largest-drop',
+      label: 'Largest past drop',
+      value: Math.abs(worst),
+      description: 'The biggest fall from a high to a later low in this history.',
+      scaleMax: 30,
+      watchAt: 10,
+      highAt: 20,
+      formula: 'Value = largest (earlier high - later low) ÷ earlier high × 100.',
+      definition: 'The app checks every reconstructed day against the highest value reached before it, then keeps the largest fall. The bar uses a fixed 0% to 30% scale, so it no longer appears full just because it is the worst fall in this portfolio.',
+    },
+    {
+      id: 'yearly-movement',
+      label: 'Yearly ups and downs',
+      value: volatility,
+      description: 'An estimate of how widely portfolio returns vary over a year.',
+      scaleMax: 40,
+      watchAt: 15,
+      highAt: 25,
+      formula: 'Value = daily return standard deviation × √252 × 100.',
+      definition: 'The app calculates each day-to-day percentage return, finds their sample standard deviation, and annualizes it using 252 trading days. The bar uses a fixed 0% to 40% scale. This measures variation, not the chance of losing money.',
+    },
+    {
+      id: 'top-five-share',
+      label: 'Held in 5 largest positions',
+      value: concentration,
+      description: 'How much of the portfolio depends on its five biggest holdings.',
+      scaleMax: 100,
+      watchAt: 50,
+      highAt: 75,
+      formula: 'Value = five largest position values ÷ total portfolio value × 100.',
+      definition: 'The app sorts positions by current value, adds the largest five, and divides that total by the full portfolio value. The bar is a direct 0% to 100% scale. If the portfolio has five or fewer positions, this value will be 100%.',
+    },
+  ].map((row) => ({
+    ...row,
+    width: Math.min(100, (row.value / row.scaleMax) * 100),
+    status: riskStatus(row.value, row.watchAt, row.highAt),
+  }))
+
+  return (
+    <div className="risk-profile">
+      <div className="risk-read-guide">
+        <div>
+          <strong>How to read these bars</strong>
+          <span>A longer bar means more risk on that row. Each row has its own fixed scale, printed below it.</span>
+        </div>
+        <div className="risk-guide-key" aria-label="Risk range key">
+          <span className="risk-guide-key--lower">Lower concern</span>
+          <span className="risk-guide-key--watch">Watch</span>
+          <span className="risk-guide-key--high">High concern</span>
+        </div>
+        <small>These ranges are a Finverse screening guide, not a personal recommendation. Your goal, time horizon, and tolerance for loss still matter.</small>
+      </div>
+
+      <div className="risk-bars">
+        {riskRows.map((row) => {
+          const tooltipId = `risk-definition-${row.id}`
+          const isOpen = openDefinition === row.id
+          const fillPercent = Math.min(100, (row.value / row.scaleMax) * 100)
+          const statusLabel = row.status === 'lower' ? 'Lower concern' : row.status === 'watch' ? 'Watch' : 'High concern'
+          const displayedStatus = hideValues ? 'hidden' : row.status
+          return (
+            <article className={`risk-bar risk-bar--${displayedStatus}`} key={row.id}>
+              <div className="risk-bar-head">
+                <div>
+                  <span className="risk-label">
+                    {row.label}
+                    <button
+                      type="button"
+                      className="risk-help"
+                      aria-label={`Explain how ${row.label} is calculated and rated`}
+                      aria-expanded={isOpen}
+                      aria-controls={tooltipId}
+                      onClick={() => setOpenDefinition(isOpen ? null : row.id)}
+                    >
+                      i
+                      <span id={tooltipId} role="tooltip" className="risk-help-popover">
+                        <strong>Calculation</strong>
+                        {row.formula}
+                        <strong>How to read it</strong>
+                        {row.definition}
+                      </span>
+                    </button>
+                  </span>
+                  <span className="risk-description">{row.description}</span>
+                </div>
+                <div className="risk-reading">
+                  <strong>{mask(`${row.value.toFixed(1)}%`)}</strong>
+                  <span className={`risk-status risk-status--${displayedStatus}`}>{hideValues ? 'Hidden' : statusLabel}</span>
+                </div>
+              </div>
+
+              <div className="risk-track" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${row.value.toFixed(1)}%, ${statusLabel}`}>
+                <span className={`risk-fill risk-fill--${displayedStatus}`} style={{ width: hideValues ? 0 : `${row.width}%` }} />
+              </div>
+
+              <div
+                className="risk-ranges"
+                style={{ gridTemplateColumns: `${row.watchAt}fr ${row.highAt - row.watchAt}fr ${row.scaleMax - row.highAt}fr` }}
+                aria-label={`Lower concern below ${row.watchAt}%, watch from ${row.watchAt}% to ${row.highAt}%, high concern above ${row.highAt}%`}
+              >
+                <span className="risk-range--lower">Lower<br />Under {row.watchAt}%</span>
+                <span className="risk-range--watch">Watch<br />{row.watchAt} to under {row.highAt}%</span>
+                <span className="risk-range--high">High<br />{row.highAt}%+</span>
+              </div>
+
+              <p className="risk-bar-calculation">
+                <strong>Bar length</strong>{' '}
+                {hideValues ? 'Hidden in peek mode.' : `${row.value.toFixed(1)}% ÷ ${row.scaleMax}% scale = ${fillPercent.toFixed(0)}% of the bar${row.value > row.scaleMax ? ', capped at 100%' : ''}.`}
+              </p>
+              <p className="risk-formula"><strong>Value calculation</strong>{' '}{row.formula}</p>
+            </article>
+          )
+        })}
+      </div>
+    </div>
+  )
 }

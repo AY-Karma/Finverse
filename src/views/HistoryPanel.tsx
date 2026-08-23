@@ -1,22 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ReferenceDot,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import { resolveYahooSymbol } from '../live'
 import type { HistoryPoint } from '../live'
 import { instrumentLabel } from '../instruments'
 import { marketData } from '../marketData'
-import { downsampleSeries } from '../timeSeries'
 import type { Position } from '../types'
 import { useStore } from '../useStore'
+import { InteractiveTrendChart } from './InteractiveTrendChart'
 
 export type ScopeFilter = 'all' | 'equity' | 'mutual'
 
@@ -28,31 +17,13 @@ const RANGES: { label: string; days: number }[] = [
   { label: '2Y', days: 731 },
 ]
 
-const MAX_POINTS = 160
-
 const LINE_COLOR = '#5e6ad2'
 const PURCHASE_DOT = '#f2b53c'
-const AXIS_STYLE = { fill: '#8a8f98', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }
-const TOOLTIP_STYLE = {
-  background: '#151619',
-  border: '1px solid #32343b',
-  borderRadius: 8,
-  color: '#f7f8f8',
-  fontFamily: '"JetBrains Mono", monospace',
-  fontSize: 12,
-}
-
-
 
 function fmtY(v: number): string {
   return Math.abs(v) >= 1000
     ? v.toLocaleString('en-IN', { maximumFractionDigits: 0 })
     : v.toFixed(2)
-}
-
-function fmtX(ts: number): string {
-  const d = new Date(ts)
-  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
 }
 
 function fmtDay(ts: number): string {
@@ -167,10 +138,9 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
 
   const chartData = useMemo(
     () =>
-      downsampleSeries(points, MAX_POINTS).map((p) => ({
-        ts: +new Date(`${p.date}T00:00:00`),
+      points.map((p) => ({
+        at: +new Date(`${p.date}T00:00:00`),
         close: p.close,
-        date: p.date,
       })),
     [points],
   )
@@ -300,51 +270,22 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                 <div className="history-chart-wrap">
                   <div className="history-chart" style={{ opacity: loading ? 0.4 : 1, transition: 'opacity 0.15s ease' }}>
                     {points.length >= 2 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#22242a" vertical={false} />
-                          <XAxis
-                            dataKey="ts"
-                            type="number"
-                            domain={['dataMin', 'dataMax']}
-                            tick={AXIS_STYLE}
-                            tickFormatter={(ts) => fmtX(Number(ts))}
-                            minTickGap={56}
-                          />
-                          <YAxis tick={AXIS_STYLE} width={62} tickFormatter={fmtY} domain={['auto', 'auto']} />
-                          <Tooltip
-                            formatter={(v) => fmtY(Number(v))}
-                            labelFormatter={(l) => fmtDay(Number(l))}
-                            contentStyle={TOOLTIP_STYLE}
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="close"
-                            stroke={LINE_COLOR}
-                            strokeWidth={1.8}
-                            dot={false}
-                            isAnimationActive={false}
-                          />
-                          {purchase && purchase.pinned && (
-                            <>
-                              <ReferenceLine
-                                x={+new Date(`${purchase.date}T00:00:00`)}
-                                stroke="#8a8f98"
-                                strokeDasharray="4 4"
-                                strokeOpacity={0.55}
-                              />
-                              <ReferenceDot
-                                x={+new Date(`${purchase.date}T00:00:00`)}
-                                y={purchase.close}
-                                r={5}
-                                fill={PURCHASE_DOT}
-                                stroke="#0e0f11"
-                                strokeWidth={1.5}
-                              />
-                            </>
-                          )}
-                        </LineChart>
-                      </ResponsiveContainer>
+                      <InteractiveTrendChart
+                        key={`${holding?.id ?? query.label}-${rangeDays}`}
+                        rows={chartData}
+                        lines={[{ key: 'close', label: 'Close', color: LINE_COLOR }]}
+                        valueFormatter={fmtY}
+                        yAxisLabel="Price"
+                        showArea={false}
+                        appearance="minimal"
+                        markers={purchase && purchase.pinned ? [{
+                          at: +new Date(`${purchase.date}T00:00:00`),
+                          value: purchase.close,
+                          color: PURCHASE_DOT,
+                          label: `Bought ${new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short' }).format(new Date(`${purchase.date}T00:00:00`))}`,
+                          comparable: true,
+                        }] : undefined}
+                      />
                     ) : (
                       <p className="hint muted history-empty">Not enough data in this range yet.</p>
                     )}

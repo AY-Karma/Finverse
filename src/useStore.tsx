@@ -30,7 +30,7 @@ export type RefreshResult =
   | { ok: false; reason: 'disabled' | 'cooldown' | 'failed'; retryInMs: number }
 
 const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
-const REFRESH_MS = 30_000 // live quote refresh cadence during market hours (30s)
+const REFRESH_MS = 5 * 60_000 // live quote refresh cadence during market hours (5m)
 
 export interface ImportPreview {
   id: string

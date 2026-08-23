@@ -7,7 +7,7 @@ import { positionValue } from './valuation'
 const DAY_MS = 24 * 60 * 60 * 1000
 const MAX_HOLDINGS = 40
 const HISTORY_CONCURRENCY = 4
-const MAX_POINTS = 260
+const MAX_POINTS = 780
 
 export interface PortfolioBackcastPoint {
   at: number
