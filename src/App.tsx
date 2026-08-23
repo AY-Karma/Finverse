@@ -38,13 +38,6 @@ export default function App() {
     })
   }, [settings.accent, settings.density, settings.mode, settings.customAccent])
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void Promise.all([loadHoldingsView(), loadResearchView(), loadAssistantView(), loadSettingsView(), loadInsightsView()])
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [])
-
   return (
     <div className="app-shell">
       <aside className="sidebar">

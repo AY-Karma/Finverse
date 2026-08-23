@@ -108,20 +108,6 @@ export async function resolveScreenerCompanyPath(symbol: string): Promise<string
   }
 }
 
-/** The 7 screener links for a resolved base path (About + Financials + hash anchors). */
-export function screenerSectionLinks(basePath: string): ResearchLink[] {
-  const base = `https://www.screener.in${basePath.replace(/\/$/, '')}`
-  return [
-    { label: 'About', url: `${base}/` },
-    { label: 'Financials', url: `${base}/consolidated/` },
-    { label: 'Quarterly results', url: `${base}/#quarters` },
-    { label: 'Ratios', url: `${base}/#ratios` },
-    { label: 'Shareholding', url: `${base}/#shareholding` },
-    { label: 'Peers', url: `${base}/#peers` },
-    { label: 'Price history', url: `${base}/#chart` },
-  ]
-}
-
 /** Secondary sources + a screener search fallback for unresolved symbols. */
 export function marketLinks(position: Position): ResearchLink[] {
   if (position.type === 'mutual-fund') {

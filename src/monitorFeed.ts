@@ -1,7 +1,7 @@
 import type { NewsItem } from './marketNews'
 
 export type NewsSentiment = 'positive' | 'negative' | 'neutral'
-export type NewsSort = 'latest' | 'company'
+type NewsSort = 'latest' | 'company'
 
 export interface NewsFeedFilters {
   query: string

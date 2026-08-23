@@ -7,7 +7,7 @@ import type { Position } from '../types'
 import { useStore } from '../useStore'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 
-export type ScopeFilter = 'all' | 'equity' | 'mutual'
+type ScopeFilter = 'all' | 'equity' | 'mutual'
 
 const RANGES: { label: string; days: number }[] = [
   { label: '1M', days: 31 },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { investmentWorkspace } from './investmentWorkspace'
+import { exportPortfolioCsv, investmentWorkspace } from './investmentWorkspace'
 import { sanitizeFolios } from './store'
 
 describe('exposure buckets', () => {
@@ -30,5 +30,24 @@ describe('exposure buckets', () => {
     expect(funds?.count).toBe(1)
     expect(funds?.type).toBe('mutual-fund')
     expect(snapshot.sectors.some((sector) => sector.label.startsWith('Equity -'))).toBe(false)
+  })
+})
+
+describe('portfolio CSV export', () => {
+  it('neutralizes spreadsheet formulas in imported text fields', () => {
+    const csv = exportPortfolioCsv([{
+      id: 'formula-row',
+      ticker: 'SAFE',
+      name: '=HYPERLINK("https://example.test","Open")',
+      type: 'stock',
+      quantity: 1,
+      buyPrice: 100,
+      lastPrice: 110,
+      invested: 100,
+      sector: '\n=SUM(1+1)',
+    }])
+
+    expect(csv).toContain('"\'=HYPERLINK(""https://example.test"",""Open"")"')
+    expect(csv).toContain('"\'\n=SUM(1+1)"')
   })
 })

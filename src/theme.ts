@@ -1,6 +1,6 @@
 import type { Accent, Density, Mode } from './types'
 
-export interface AccentPalette {
+interface AccentPalette {
   primary: string
   primaryHover: string
   primaryFocus: string
@@ -118,7 +118,7 @@ export function deriveAccentPalette(primaryHex: string): AccentPalette | null {
   }
 }
 
-export interface ThemeSpec {
+interface ThemeSpec {
   accent: Accent
   density: Density
   mode: Mode

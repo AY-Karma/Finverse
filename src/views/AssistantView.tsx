@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatMessage, ChartSpec, Currency, LiveQuote, Position } from '../types'
 import { chat, portfolioContext, isLocalProvider } from '../providers'
 import { renderMessage, extractCharts } from '../format'
@@ -214,11 +214,9 @@ export function AssistantView({ onGoTo }: { onGoTo: (v: View) => void }) {
 
   const status = WORKING_PHRASES[statusIdx]
 
-  const context = portfolioContext(
-    positions,
-    settings.currency || 'INR',
-    liveQuotes,
-    fxRate?.usdInr,
+  const context = useMemo(
+    () => portfolioContext(positions, settings.currency || 'INR', liveQuotes, fxRate?.usdInr),
+    [positions, settings.currency, liveQuotes, fxRate?.usdInr],
   )
 
   const refillChips = () =>

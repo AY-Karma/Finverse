@@ -13,12 +13,12 @@ export interface NewsItem {
   origin: 'wire' | 'search'
 }
 
-export interface MonitorIssue {
+interface MonitorIssue {
   source: string
   message: string
 }
 
-export interface NewsFetch {
+interface NewsFetch {
   items: NewsItem[]
   issues: MonitorIssue[]
 }
@@ -36,7 +36,7 @@ export interface LoadedMarketFeed extends NewsFetch {
   fetchedAt: number
 }
 
-export const WIRE_SOURCES = [
+const WIRE_SOURCES = [
   { name: 'Economic Times Markets', url: 'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms' },
   { name: 'Business Standard Markets', url: 'https://www.business-standard.com/rss/markets-106.rss' },
 ] as const
@@ -247,7 +247,7 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
   return { fetchWire, fetchCompanyNews }
 }
 
-export const marketNewsAdapter = createMarketNewsAdapter()
+const marketNewsAdapter = createMarketNewsAdapter()
 
 /** Wire always loads; the optional query layers a company deep-dive on top. Both failures surface as issues. */
 export async function loadMarketFeed(

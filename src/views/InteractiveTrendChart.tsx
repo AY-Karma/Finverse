@@ -12,16 +12,16 @@ const DAY_FORMATTER = new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 
 const MONTH_FORMATTER = new Intl.DateTimeFormat('en-IN', { month: 'short', year: '2-digit' })
 const TIME_FORMATTER = new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit' })
 
-export type TrendRow = { at: number } & Record<string, number | undefined>
+type TrendRow = { at: number } & Record<string, number | undefined>
 
-export interface TrendLine {
+interface TrendLine {
   key: string
   label: string
   color: string
   dashed?: boolean
 }
 
-export interface TrendMarker {
+interface TrendMarker {
   at: number
   value: number
   color: string

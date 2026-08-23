@@ -107,10 +107,6 @@ export function loadFolios(): Folio[] {
   return []
 }
 
-export function flattenFolios(folios: Folio[]): Position[] {
-  return folios.flatMap((folio) => folio.positions)
-}
-
 /** Persist preferences only. Provider credentials are isolated to the current tab. */
 export function saveSettings(settings: Settings): void {
   const persisted: Partial<Settings> = { ...settings }

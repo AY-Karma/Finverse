@@ -2,7 +2,7 @@ import type { Folio, FxRate, LiveQuote, PortfolioSnapshot, Position } from './ty
 import { assetTypeLabel, instrumentKey, instrumentLabel, normalizePosition } from './instruments'
 import { combinePositions, computePortfolioStats, positionPnl, positionValue, quoteKey } from './valuation'
 
-export interface Contribution {
+interface Contribution {
   symbol: string
   type: Position['type']
   value: number
@@ -43,14 +43,14 @@ export interface InvestmentSnapshot {
   history: PortfolioSnapshot[]
 }
 
-export interface WorkspaceInput {
+interface WorkspaceInput {
   folios: Folio[]
   quotes: Record<string, LiveQuote>
   fxRate: FxRate | null
   history?: PortfolioSnapshot[]
 }
 
-export interface InvestmentWorkspace {
+interface InvestmentWorkspace {
   /** One read seam for all dashboard projections and visual tools. */
   readSnapshot(input: WorkspaceInput): InvestmentSnapshot
   /** Normalize imported positions at the storage seam. */
@@ -181,6 +181,10 @@ export function exportPortfolioCsv(positions: Position[]): string {
     instrumentLabel(position), position.name, assetTypeLabel(position.type), position.exchange ?? '', position.isin ?? '',
     position.quantity, position.buyPrice, position.lastPrice ?? '', position.invested, position.sector ?? position.category ?? '',
   ]
-  const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`
+  const escape = (value: string | number) => {
+    const text = String(value)
+    const safe = typeof value === 'string' && /^[=+\-@\t\r\n]/.test(text) ? `'${text}` : text
+    return `"${safe.replace(/"/g, '""')}"`
+  }
   return [headers, ...positions.map(cells)].map((row) => row.map(escape).join(',')).join('\n')
 }

@@ -9,7 +9,7 @@ const MAX_HOLDINGS = 40
 const HISTORY_CONCURRENCY = 4
 const MAX_POINTS = 780
 
-export interface PortfolioBackcastPoint {
+interface PortfolioBackcastPoint {
   at: number
   value: number
   invested: number

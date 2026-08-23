@@ -1,8 +1,6 @@
 import * as XLSX from '@e965/xlsx'
 import type { AssetType, Position } from './types'
 import { MAX_IMPORT_FILE_BYTES } from './importLimits'
-
-export { MAX_IMPORT_FILE_BYTES }
 const MAX_IMPORT_ROWS = 100_000
 const MAX_IMPORT_POSITIONS = 5_000
 const MAX_IMPORT_SHEETS = 20
@@ -624,22 +622,4 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
   throw new Error(
     `No recognizable header found. Look for a row with a Ticker/Symbol (equity) or Scheme/Fund name (mutual funds) column plus Units / Invested / Current value. Scanned sheets:\n${sample.join('\n\n')}`,
   )
-}
-
-/** Parse outside the UI thread so large or hostile workbooks cannot freeze the dashboard. */
-export function parseSpreadsheetInWorker(file: ArrayBuffer): Promise<Position[]> {
-  if (typeof Worker === 'undefined') return Promise.resolve().then(() => parseSpreadsheet(file))
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./spreadsheet.worker.ts', import.meta.url), { type: 'module' })
-    worker.onmessage = (event: MessageEvent<{ ok: boolean; positions?: Position[]; error?: string }>) => {
-      worker.terminate()
-      if (event.data.ok && event.data.positions) resolve(event.data.positions)
-      else reject(new Error(event.data.error || 'Could not parse the spreadsheet.'))
-    }
-    worker.onerror = () => {
-      worker.terminate()
-      reject(new Error('Could not parse the spreadsheet in the background.'))
-    }
-    worker.postMessage(file, [file])
-  })
 }

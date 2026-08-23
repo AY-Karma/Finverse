@@ -16,7 +16,7 @@ export interface MarketDataAdapter {
   quote(symbol: string): Promise<{ price: number; change: number | null; pct: number | null; at: number } | null>
 }
 
-export interface BenchmarkDefinition {
+interface BenchmarkDefinition {
   id: string
   label: string
   symbol: string | null

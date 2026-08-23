@@ -25,7 +25,7 @@ import {
 
 export type View = 'overview' | 'holdings' | 'insights' | 'research' | 'assistant' | 'settings'
 
-export type RefreshResult =
+type RefreshResult =
   | { ok: true; retryInMs: number }
   | { ok: false; reason: 'disabled' | 'cooldown' | 'failed'; retryInMs: number }
 
@@ -56,7 +56,6 @@ interface Store {
   settings: Settings
   previewFile: (file: File) => Promise<ImportPreview>
   commitImport: (preview: ImportPreview) => void
-  uploadFile: (file: File) => Promise<void>
   undoLastImport: () => void
   exportPortfolio: (format: 'json' | 'csv') => void
   refreshNow: () => Promise<RefreshResult>
@@ -124,7 +123,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         throw new Error('Portfolio files must be 10 MB or smaller.')
       }
       const buffer = await file.arrayBuffer()
-      const { parseSpreadsheetInWorker } = await import('./spreadsheet')
+      const { parseSpreadsheetInWorker } = await import('./spreadsheetClient')
       const parsed = await parseSpreadsheetInWorker(buffer)
       const summary = importIdentitySummary(parsed)
       return {
@@ -142,11 +141,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const commitImport = useCallback((preview: ImportPreview) => {
     addFolio(preview.fileName, preview.positions)
   }, [addFolio])
-
-  const uploadFile = useCallback(async (file: File) => {
-    const preview = await previewFile(file)
-    commitImport(preview)
-  }, [commitImport, previewFile])
 
   const undoLastImport = useCallback(() => {
     const id = lastImportedFolioId.current
@@ -298,7 +292,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setSettings,
     previewFile,
     commitImport,
-    uploadFile,
     undoLastImport,
     exportPortfolio,
     refreshNow,

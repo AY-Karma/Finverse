@@ -1,6 +1,6 @@
-export const DEFAULT_VISIBLE_POINTS = 180
+const DEFAULT_VISIBLE_POINTS = 180
 
-export interface ChartViewport {
+interface ChartViewport {
   start: number
   count: number
 }
@@ -27,4 +27,3 @@ export function shiftViewportStart(
 ): number {
   return clampViewportStart(start + (Number.isFinite(deltaPoints) ? deltaPoints : 0), rowCount, visibleCount)
 }
-

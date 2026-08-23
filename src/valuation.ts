@@ -7,7 +7,7 @@ export interface Allocation {
   type: Position['type']
 }
 
-export interface PortfolioStats {
+interface PortfolioStats {
   invested: number
   currentValue: number
   pnl: number

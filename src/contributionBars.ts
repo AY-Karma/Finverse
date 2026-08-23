@@ -1,17 +1,17 @@
 export type ContributionDisplay = 'price' | 'percent'
 
-export interface ContributionBarInput {
+interface ContributionBarInput {
   label: string
   dailyPriceChange: number | null
   dailyPriceChangePct: number | null
 }
 
-export interface ContributionBarItem extends ContributionBarInput {
+interface ContributionBarItem extends ContributionBarInput {
   metric: number
   width: number
 }
 
-export interface ContributionColumns {
+interface ContributionColumns {
   tailwinds: ContributionBarItem[]
   headwinds: ContributionBarItem[]
 }

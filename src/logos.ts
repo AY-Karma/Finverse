@@ -31,7 +31,7 @@ export function tickerLogoUrl(ticker: string, exchange?: string): string | null 
   return `${EODHD_BASE}/${exchangeCode}/${base}.png`
 }
 
-export function normalizeTicker(ticker: string): string {
+function normalizeTicker(ticker: string): string {
   return ticker.trim().toUpperCase().replace(/\.(NS|NSE|BO|BSE)$/, '')
 }
 
