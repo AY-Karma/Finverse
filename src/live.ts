@@ -69,11 +69,11 @@ export function marketStatusText(
       ? 'External market data off · showing imported prices'
       : 'External market data off · enable it for USD display'
   }
+  if (open && isRefreshing) return 'Live Market - fetching latest data'
+  if (!open && isRefreshing) return 'Off-market hours - fetching latest data'
   if (!fxReady) return 'Waiting for USD/INR rate…'
-  if (open && isRefreshing) return 'Live Market - fetching latest prices'
   if (open) return 'Live Market - showing latest prices'
-  if (!open && isRefreshing) return 'Off-market hours — fetching latest prices'
-  return 'Off-market hours — showing latest known prices'
+  return 'Off-market hours - showing latest known prices'
 }
 
 // ---------------------------------------------------------------------------

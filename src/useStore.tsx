@@ -50,6 +50,7 @@ interface Store {
   fxRate: FxRate | null
   snapshot: InvestmentSnapshot
   portfolioHistory: PortfolioSnapshot[]
+  marketDataRefreshing: boolean
   addFolio: (name: string, positions: Position[]) => void
   removeFolio: (id: string) => void
   setSettings: (s: Settings) => void
@@ -72,6 +73,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [fxRate, setFxRateState] = useState<FxRate | null>(null)
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [quickMode, setQuickModeState] = useState(false)
+  const [marketDataRefreshing, setMarketDataRefreshing] = useState(false)
   const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
   const lastImportedFolioId = useRef<string | null>(null)
 
@@ -193,21 +195,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // close to capture the official closing price; and one immediate fetch on load
   // (even off-hours) so the board always shows the latest available price.
   useEffect(() => {
-    if (!settings.allowExternalData) return
+    if (!settings.allowExternalData) {
+      setMarketDataRefreshing(false)
+      return
+    }
     let open = isMarketOpen()
     let inFlight = false
     let hasFetchedAfterClose = false
+    let active = true
 
     const refresh = async () => {
       if (inFlight || document.hidden) return
       inFlight = true
+      if (active) setMarketDataRefreshing(true)
       try {
         const { quotes } = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current)
-        setLiveQuotes(quotes)
+        if (active) setLiveQuotes(quotes)
       } catch {
         /* keep the previous quotes on any failure */
       } finally {
         inFlight = false
+        if (active) setMarketDataRefreshing(false)
       }
     }
 
@@ -235,6 +243,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
+      active = false
       window.clearInterval(openTimer)
       window.clearInterval(refreshTimer)
       document.removeEventListener('visibilitychange', onVisibility)
@@ -286,6 +295,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     fxRate,
     snapshot,
     portfolioHistory,
+    marketDataRefreshing,
     addFolio,
     removeFolio,
     settings,

@@ -28,7 +28,7 @@ interface LedgerRow {
 }
 
 export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
-  const { positions, rawPositions, settings, setSettings, liveQuotes, fxRate, refreshNow, snapshot } = useStore()
+  const { positions, rawPositions, settings, setSettings, liveQuotes, fxRate, refreshNow, snapshot, marketDataRefreshing } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
@@ -76,6 +76,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
 
   const live = settings.allowExternalData ? liveQuotes : {}
   const liveCount = Object.keys(live).length
+  const fetchingMarketData = refreshing || marketDataRefreshing
   const marketOpen = isMarketOpen()
   const fxReady = currency === 'INR' || !!fxRate?.usdInr
   const refreshCooldownSeconds = Math.max(0, Math.ceil((refreshAvailableAt - Date.now()) / 1000))
@@ -327,9 +328,13 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
               <path d="M21 3v6h-6" />
             </svg>
           </button>
-          <span className={`market-status ${marketOpen ? 'market-open' : refreshing ? 'offline-fetch' : 'offline'}`}>
-            <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} aria-hidden="true" />
-            {marketStatusText(marketOpen, settings.allowExternalData, fxReady, refreshing)}
+          <span
+            className={`market-status ${marketOpen ? 'market-open' : fetchingMarketData ? 'offline-fetch' : 'offline'}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span className={`live-dot${fetchingMarketData ? ' live-dot--fetching' : liveCount > 0 ? '' : ' live-dot--loading'}`} aria-hidden="true" />
+            {marketStatusText(marketOpen, settings.allowExternalData, fxReady, fetchingMarketData)}
             {liveCount > 0 && (
               <span className="market-status-time">· last refresh {lastRefreshTime(live)}</span>
             )}
@@ -348,7 +353,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
           <div className="score-label">
             <span>Current Value</span>
             {dailyMove == null ? (
-              <span className={`live-dot${liveCount > 0 ? '' : ' live-dot--loading'}`} />
+              <span className={`live-dot${fetchingMarketData ? ' live-dot--fetching' : liveCount > 0 ? '' : ' live-dot--loading'}`} />
             ) : (
               <span
                 className={`current-value-move${hideValues || !dailyMoveDirection ? ' current-value-move--flat' : ` ${dailyMoveDirection}`}`}
