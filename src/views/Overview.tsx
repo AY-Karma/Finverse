@@ -27,7 +27,7 @@ interface LedgerRow {
   pnl: number | null
 }
 
-export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
+export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => void; onRequestImport: () => void }) {
   const { positions, rawPositions, settings, setSettings, liveQuotes, fxRate, refreshNow, snapshot, marketDataRefreshing } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
@@ -185,18 +185,15 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
 
   if (positions.length === 0) {
     return (
-      <div className="enter" style={{ display: 'grid', gap: 28, justifyItems: 'center', padding: '12vh 24px', textAlign: 'center' }}>
+      <div className="overview-empty enter">
         <div>
-          <div className="page-eyebrow">Finverse — Live Market Scoreboard</div>
-          <h1 className="page-title" style={{ textTransform: 'none', maxWidth: 720 }}>
-            Step into the arena.
-          </h1>
-          <p className="page-sub" style={{ textAlign: 'center', maxWidth: 560, margin: '0 auto', marginTop: 12 }}>
-            Upload your holdings and Finverse turns a spreadsheet into a live scoreboard — allocation,
-            performance, and AI-guided analysis in one command rail.
+          <div className="page-eyebrow">Finverse · Portfolio workspace</div>
+          <h1 className="page-title">See your portfolio clearly.</h1>
+          <p className="page-sub">
+            Bring in your latest holdings file to see value, allocation, performance, and the market around your investments.
           </p>
         </div>
-        <button className="btn btn--primary" onClick={() => onGoTo('holdings')}>
+        <button className="btn btn--primary" type="button" onClick={onRequestImport}>
           Import portfolio →
         </button>
       </div>
@@ -218,7 +215,7 @@ export function Overview({ onGoTo }: { onGoTo: (v: View) => void }) {
               : 'Import a broker export (.xlsx / .csv) with ticker, quantity, and cost to run it onto the equity scoreboard.'}
           </p>
         </div>
-        <button className="btn btn--primary" onClick={() => onGoTo('holdings')}>
+        <button className="btn btn--primary" type="button" onClick={onRequestImport}>
           Import holdings →
         </button>
       </div>

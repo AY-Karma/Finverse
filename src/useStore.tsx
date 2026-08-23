@@ -73,7 +73,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [fxRate, setFxRateState] = useState<FxRate | null>(null)
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [quickMode, setQuickModeState] = useState(false)
-  const [marketDataRefreshing, setMarketDataRefreshing] = useState(false)
+  const [marketDataRefreshing, setMarketDataRefreshing] = useState(settings.allowExternalData)
   const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
   const lastImportedFolioId = useRef<string | null>(null)
 

@@ -1,13 +1,25 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
+import { IMPORT_SOURCES } from '../importSources'
 import { useStore, type ImportPreview } from '../useStore'
 
-export function ImportView({ compact = false }: { compact?: boolean }) {
+interface ImportViewProps {
+  compact?: boolean
+  initialStep?: 'dropzone' | 'sources'
+  onImported?: () => void
+}
+
+export function ImportView({ compact = false, initialStep = 'dropzone', onImported }: ImportViewProps) {
   const { previewFile, commitImport, folios, positions, removeFolio, undoLastImport, exportPortfolio } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [parsing, setParsing] = useState(false)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const id = useId()
+  const inputId = `${id}-portfolio-file`
+  const instructionsId = `${id}-upload-instructions`
+  const statusId = `${id}-upload-status`
+  const previewTitleId = `${id}-import-preview-title`
 
   async function handleFile(file: File | undefined) {
     if (!file || parsing) return
@@ -27,6 +39,7 @@ export function ImportView({ compact = false }: { compact?: boolean }) {
     if (!preview) return
     commitImport(preview)
     setPreview(null)
+    onImported?.()
   }
 
   return (
@@ -65,31 +78,67 @@ export function ImportView({ compact = false }: { compact?: boolean }) {
 
       <input
         ref={inputRef}
-        id="portfolio-file"
+        id={inputId}
         className="sr-only"
         type="file"
         accept=".xlsx,.xls,.csv"
         onChange={(e) => void handleFile(e.target.files?.[0])}
       />
-      <button
-        type="button"
-        className={`dropzone enter d2${dragOver ? ' dropzone--over' : ''}`}
-        disabled={parsing}
-        aria-describedby="upload-instructions upload-status"
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFile(e.dataTransfer.files?.[0]) }}
-        onClick={() => inputRef.current?.click()}
-      >
-        <span className="drop-title">{parsing ? 'Reading your sheet…' : 'Drop your sheet in the pit'}</span>
-        <span id="upload-instructions" className="hint">or press Enter or Space to browse · .xlsx, .xls, .csv · 10 MB maximum</span>
-      </button>
-      <p id="upload-status" className="sr-only" aria-live="polite">{parsing ? 'Import in progress.' : error ?? ''}</p>
+      {initialStep === 'sources' ? (
+        <div className="import-source-grid">
+          {IMPORT_SOURCES.map((source) => (
+            <a
+              className="import-source-card"
+              href={source.url}
+              key={source.id}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span className={`import-source-mark import-source-mark--${source.id}`} aria-hidden="true">{source.mark}</span>
+              <strong>{source.name}</strong>
+              <small>{source.description}</small>
+              <span className="import-source-action">Open official site ↗</span>
+            </a>
+          ))}
+          <button
+            type="button"
+            className={`import-source-card import-source-card--local${dragOver ? ' import-source-card--over' : ''}`}
+            disabled={parsing}
+            aria-describedby={`${instructionsId} ${statusId}`}
+            onDragOver={(event) => { event.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFile(event.dataTransfer.files?.[0]) }}
+            onClick={() => inputRef.current?.click()}
+          >
+            <span className="import-source-mark import-source-mark--local" aria-hidden="true">XLS</span>
+            <strong>{parsing ? 'Reading file…' : 'Local files'}</strong>
+            <small id={instructionsId}>Drop or choose .xlsx, .xls, or .csv</small>
+            <span className="import-source-action">10 MB maximum</span>
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={`dropzone enter d2${dragOver ? ' dropzone--over' : ''}`}
+          disabled={parsing}
+          aria-describedby={`${instructionsId} ${statusId}`}
+          onDragOver={(event) => { event.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFile(event.dataTransfer.files?.[0]) }}
+          onClick={() => inputRef.current?.click()}
+        >
+          <span className="drop-title">{parsing ? 'Reading your sheet…' : 'Drop your sheet in the pit'}</span>
+          <span id={instructionsId} className="hint">or press Enter or Space to browse · .xlsx, .xls, .csv · 10 MB maximum</span>
+        </button>
+      )}
+      <p id={statusId} className="sr-only" aria-live="polite">
+        {parsing ? 'Import in progress.' : error ?? (preview ? `${preview.positions.length} holdings ready for review.` : '')}
+      </p>
 
       {preview && (
-        <div className="panel import-preview enter d3" role="dialog" aria-labelledby="import-preview-title">
+        <section className="panel import-preview enter d3" aria-labelledby={previewTitleId}>
           <div className="panel-head">
-            <div className="panel-head-titles"><span id="import-preview-title" className="panel-title">Review import</span><span className="section-index">Nothing saved yet</span></div>
+            <div className="panel-head-titles"><span id={previewTitleId} className="panel-title">Review import</span><span className="section-index">Nothing saved yet</span></div>
             <button type="button" className="btn-remove" onClick={() => setPreview(null)} aria-label="Cancel import">×</button>
           </div>
           <p className="hint">{preview.fileName} contains {preview.positions.length} normalized holding{preview.positions.length === 1 ? '' : 's'}.</p>
@@ -103,7 +152,7 @@ export function ImportView({ compact = false }: { compact?: boolean }) {
             {preview.positions.length > 8 && <span className="hint">+ {preview.positions.length - 8} more</span>}
           </div>
           <div className="import-actions"><button type="button" className="btn btn--primary" onClick={confirmImport}>Add to portfolio</button><button type="button" className="btn btn--ghost" onClick={() => setPreview(null)}>Cancel</button></div>
-        </div>
+        </section>
       )}
 
       {error && <div className="panel enter d3" role="alert" style={{ borderColor: 'var(--semantic-danger)' }}><p className="hint down">{error}</p></div>}

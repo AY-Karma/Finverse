@@ -8,6 +8,7 @@ import { useStore } from '../useStore'
 import { assetTypeLabel } from '../instruments'
 import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
+import { PortfolioRequiredState } from './PortfolioRequiredState'
 
 // Same muted family as the overview allocation card so charts read as one system.
 const EXPO_PALETTE = ['#7c89e8', '#5fae9b', '#d0a35c', '#c97b84', '#6aa9c9', '#a685c9', '#96b862', '#8a93a6']
@@ -22,7 +23,7 @@ function shortDate(value: number): string {
   return SHORT_DATE_FORMATTER.format(new Date(value))
 }
 
-export function InsightsView() {
+export function InsightsView({ onRequestImport }: { onRequestImport: () => void }) {
   const { snapshot, settings } = useStore()
   const [benchmarkId, setBenchmarkId] = useState('nifty-50')
   const selectedBenchmark = BENCHMARKS.find((item) => item.id === benchmarkId) ?? BENCHMARKS[0]
@@ -161,7 +162,13 @@ export function InsightsView() {
   }, [analyticsHistory])
 
   if (snapshot.positions.length === 0) {
-    return <div className="empty-panel"><span className="page-eyebrow">03 · Intelligence</span><h1 className="page-title">Your investment story starts with an import.</h1><p className="page-sub">Once holdings are loaded, this space turns prices into contribution, allocation, performance, and risk views.</p></div>
+    return (
+      <PortfolioRequiredState
+        area="03 · Insights"
+        description="Bring in your holdings to turn market prices into contribution, allocation, performance, and risk views."
+        onImport={onRequestImport}
+      />
+    )
   }
 
   const hide = settings.hideValues

@@ -601,25 +601,7 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
     }
     if (positions.length > 0) return positions
   }
-  // Help the user fix the sheet: name the sheets we looked at and dump rows.
-  const sample = wb.SheetNames.map((name) => {
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], {
-      header: 1,
-      defval: null,
-      raw: true,
-    })
-    const preview = rows
-      .filter((r) => r.length > 1 && r.some((c) => c != null && String(c).trim() !== ''))
-      .slice(0, 4)
-      .map((r) =>
-        r
-          .map((c) => (c == null ? '' : String(c).trim()).slice(0, 18))
-          .slice(0, 10)
-          .join(' │ '),
-      )
-    return `${name}:\n  ${preview.join('\n  ') || '(empty)'}`
-  })
   throw new Error(
-    `No recognizable header found. Look for a row with a Ticker/Symbol (equity) or Scheme/Fund name (mutual funds) column plus Units / Invested / Current value. Scanned sheets:\n${sample.join('\n\n')}`,
+    'No recognizable holdings header found. Use Ticker or Symbol with Quantity and Buy Price for equities, or Scheme Name with Units and Invested Value for mutual funds.',
   )
 }
