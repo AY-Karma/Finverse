@@ -6,6 +6,7 @@ import type { View } from '../useStore'
 import {
   isMarketOpen,
   marketStatusText,
+  quoteRefreshIssueText,
 } from '../live'
 import { AllocationCard } from './AllocationCard'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
@@ -28,7 +29,7 @@ interface LedgerRow {
 }
 
 export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => void; onRequestImport: () => void }) {
-  const { positions, rawPositions, settings, setSettings, liveQuotes, fxRate, refreshNow, snapshot, marketDataRefreshing } = useStore()
+  const { positions, rawPositions, settings, setSettings, liveQuotes, fxRate, refreshNow, snapshot, marketDataRefreshing, marketDataResult } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
@@ -80,6 +81,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
   const marketOpen = isMarketOpen()
   const fxReady = currency === 'INR' || !!fxRate?.usdInr
   const refreshCooldownSeconds = Math.max(0, Math.ceil((refreshAvailableAt - Date.now()) / 1000))
+  const marketDataIssue = quoteRefreshIssueText(marketDataResult)
 
   const MASK = '••••••'
   const mask = (s: string) => (hideValues ? MASK : s)
@@ -333,10 +335,11 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
             <span className={`live-dot${fetchingMarketData ? ' live-dot--fetching' : liveCount > 0 ? '' : ' live-dot--loading'}`} aria-hidden="true" />
             {marketStatusText(marketOpen, settings.allowExternalData, fxReady, fetchingMarketData)}
             {liveCount > 0 && (
-              <span className="market-status-time">· last refresh {lastRefreshTime(live)}</span>
+              <span className="market-status-time">· {quoteSourceLabel(live)} as of {lastRefreshTime(live)}</span>
             )}
           </span>
           {refreshError && <span className="hint down" role="alert">{refreshError}</span>}
+          {!refreshError && marketDataIssue && <span className="hint down" role="status">{marketDataIssue}</span>}
           <span>
             Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
             {scope === 'mutual' ? ' — mutual funds' : ''} at current market prices.
@@ -797,18 +800,28 @@ function mfReturnPct(p: PositionLike, live: Record<string, LiveQuote>): number |
   return ((valueOf(p, live) - p.invested) / p.invested) * 100
 }
 
-/** Latest refresh time across all live quotes, in IST. */
+/** Latest provider market time across all quotes, in IST. */
 function lastRefreshTime(live: Record<string, LiveQuote>): string {
   const ats = Object.values(live).map((q) => q.at)
   if (ats.length === 0) return '—'
   const max = Math.max(...ats)
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
   }).format(new Date(max))
+}
+
+function quoteSourceLabel(live: Record<string, LiveQuote>): string {
+  const sources = new Set(Object.values(live).map((quote) => quote.source))
+  if (sources.size !== 1) return 'mixed-source prices'
+  if (sources.has('nse-close')) return 'official NSE close'
+  if (sources.has('nav')) return 'latest NAV'
+  return 'best-effort quotes'
 }
 
 interface TickerCellData {

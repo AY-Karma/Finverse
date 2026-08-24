@@ -74,8 +74,11 @@ export interface ChartSpec {
 
 export interface LiveQuote {
   price: number
+  /** Provider market time for this price, not the time Finverse fetched it. */
   at: number
-  source: 'yahoo' | 'nav'
+  /** Time Finverse fetched the quote. Used for request throttling only. */
+  fetchedAt?: number
+  source: 'yahoo' | 'nse-close' | 'nav'
   change?: number | null
   changePct?: number | null
 }
