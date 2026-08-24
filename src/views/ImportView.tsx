@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react'
 import { IMPORT_SOURCES } from '../importSources'
+import { MAX_IMPORT_FILES } from '../importLimits'
 import { useStore, type ImportPreview } from '../useStore'
 
 interface ImportViewProps {
@@ -13,7 +14,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [parsing, setParsing] = useState(false)
-  const [preview, setPreview] = useState<ImportPreview | null>(null)
+  const [previews, setPreviews] = useState<ImportPreview[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const id = useId()
   const inputId = `${id}-portfolio-file`
@@ -21,14 +22,31 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
   const statusId = `${id}-upload-status`
   const previewTitleId = `${id}-import-preview-title`
 
-  async function handleFile(file: File | undefined) {
-    if (!file || parsing) return
+  async function handleFiles(selectedFiles: FileList | readonly File[] | null | undefined) {
+    const files = Array.from(selectedFiles ?? [])
+    if (files.length === 0 || parsing) return
     setError(null)
+    setPreviews([])
+    if (files.length > MAX_IMPORT_FILES) {
+      setError(`Choose ${MAX_IMPORT_FILES} or fewer files at once.`)
+      if (inputRef.current) inputRef.current.value = ''
+      return
+    }
     setParsing(true)
+    const parsed: ImportPreview[] = []
+    const failures: string[] = []
     try {
-      setPreview(await previewFile(file))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not read file.')
+      // Keep peak memory bounded when several 10 MB spreadsheets are selected.
+      for (const file of files) {
+        try {
+          parsed.push(await previewFile(file))
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : 'Could not read file.'
+          failures.push(`${file.name}: ${message}`)
+        }
+      }
+      setPreviews(parsed)
+      if (failures.length > 0) setError(failures.join(' '))
     } finally {
       setParsing(false)
       if (inputRef.current) inputRef.current.value = ''
@@ -36,11 +54,14 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
   }
 
   function confirmImport() {
-    if (!preview) return
-    commitImport(preview)
-    setPreview(null)
+    if (previews.length === 0) return
+    for (const preview of previews) commitImport(preview)
+    setPreviews([])
     onImported?.()
   }
+
+  const previewPositions = previews.flatMap((preview) => preview.positions)
+  const previewFileLabel = `${previews.length} file${previews.length === 1 ? '' : 's'}`
 
   return (
     <>
@@ -82,7 +103,8 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
         className="sr-only"
         type="file"
         accept=".xlsx,.xls,.csv"
-        onChange={(e) => void handleFile(e.target.files?.[0])}
+        multiple
+        onChange={(event) => void handleFiles(event.target.files)}
       />
       {initialStep === 'sources' ? (
         <div className="import-source-grid">
@@ -107,13 +129,13 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
             aria-describedby={`${instructionsId} ${statusId}`}
             onDragOver={(event) => { event.preventDefault(); setDragOver(true) }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFile(event.dataTransfer.files?.[0]) }}
+            onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFiles(event.dataTransfer.files) }}
             onClick={() => inputRef.current?.click()}
           >
             <span className="import-source-mark import-source-mark--local" aria-hidden="true">XLS</span>
-            <strong>{parsing ? 'Reading file…' : 'Local files'}</strong>
-            <small id={instructionsId}>Drop or choose .xlsx, .xls, or .csv</small>
-            <span className="import-source-action">10 MB maximum</span>
+            <strong>{parsing ? 'Reading files…' : 'Local files'}</strong>
+            <small id={instructionsId}>Drop or choose one or more .xlsx, .xls, or .csv files</small>
+            <span className="import-source-action">Up to {MAX_IMPORT_FILES} files · 10 MB each</span>
           </button>
         </div>
       ) : (
@@ -124,34 +146,45 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
           aria-describedby={`${instructionsId} ${statusId}`}
           onDragOver={(event) => { event.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFile(event.dataTransfer.files?.[0]) }}
+          onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFiles(event.dataTransfer.files) }}
           onClick={() => inputRef.current?.click()}
         >
-          <span className="drop-title">{parsing ? 'Reading your sheet…' : 'Drop your sheet in the pit'}</span>
-          <span id={instructionsId} className="hint">or press Enter or Space to browse · .xlsx, .xls, .csv · 10 MB maximum</span>
+          <span className="drop-title">{parsing ? 'Reading your sheets…' : 'Drop your sheets in the pit'}</span>
+          <span id={instructionsId} className="hint">or press Enter or Space to browse · select up to {MAX_IMPORT_FILES} files · 10 MB each</span>
         </button>
       )}
       <p id={statusId} className="sr-only" aria-live="polite">
-        {parsing ? 'Import in progress.' : error ?? (preview ? `${preview.positions.length} holdings ready for review.` : '')}
+        {parsing ? 'Import in progress.' : error ?? (previews.length > 0 ? `${previewFileLabel} with ${previewPositions.length} holdings ready for review.` : '')}
       </p>
 
-      {preview && (
+      {previews.length > 0 && (
         <section className="panel import-preview enter d3" aria-labelledby={previewTitleId}>
           <div className="panel-head">
-            <div className="panel-head-titles"><span id={previewTitleId} className="panel-title">Review import</span><span className="section-index">Nothing saved yet</span></div>
-            <button type="button" className="btn-remove" onClick={() => setPreview(null)} aria-label="Cancel import">×</button>
+            <div className="panel-head-titles"><span id={previewTitleId} className="panel-title">Review import{previews.length === 1 ? '' : 's'}</span><span className="section-index">Nothing saved yet</span></div>
+            <button type="button" className="btn-remove" onClick={() => setPreviews([])} aria-label="Cancel import">×</button>
           </div>
-          <p className="hint">{preview.fileName} contains {preview.positions.length} normalized holding{preview.positions.length === 1 ? '' : 's'}.</p>
+          <p className="hint">
+            {previews.length === 1
+              ? `${previews[0].fileName} contains ${previewPositions.length} normalized holding${previewPositions.length === 1 ? '' : 's'}.`
+              : `${previewFileLabel} contain ${previewPositions.length} normalized holdings. Each file will become its own folio.`}
+          </p>
+          {previews.length > 1 && (
+            <div className="import-preview-list">
+              {previews.map((preview) => (
+                <span key={preview.id} className="tag">{preview.fileName} · {preview.positions.length} holding{preview.positions.length === 1 ? '' : 's'}</span>
+              ))}
+            </div>
+          )}
           <div className="import-quality">
-            <div><strong>{preview.duplicateCount}</strong><span>duplicate rows merged</span></div>
-            <div><strong>{preview.unmatchedCount}</strong><span>symbols needing review</span></div>
-            <div><strong>{preview.positions.filter((position) => position.type === 'mutual-fund').length}</strong><span>fund rows recognized</span></div>
+            <div><strong>{previews.reduce((total, preview) => total + preview.duplicateCount, 0)}</strong><span>duplicate rows merged</span></div>
+            <div><strong>{previews.reduce((total, preview) => total + preview.unmatchedCount, 0)}</strong><span>symbols needing review</span></div>
+            <div><strong>{previewPositions.filter((position) => position.type === 'mutual-fund').length}</strong><span>fund rows recognized</span></div>
           </div>
           <div className="import-preview-list">
-            {preview.positions.slice(0, 8).map((position) => <span key={position.id} className="tag">{position.ticker} · {position.exchange ?? 'local'} · {position.currency ?? 'INR'}</span>)}
-            {preview.positions.length > 8 && <span className="hint">+ {preview.positions.length - 8} more</span>}
+            {previewPositions.slice(0, 8).map((position, index) => <span key={`${position.id}-${index}`} className="tag">{position.ticker} · {position.exchange ?? 'local'} · {position.currency ?? 'INR'}</span>)}
+            {previewPositions.length > 8 && <span className="hint">+ {previewPositions.length - 8} more</span>}
           </div>
-          <div className="import-actions"><button type="button" className="btn btn--primary" onClick={confirmImport}>Add to portfolio</button><button type="button" className="btn btn--ghost" onClick={() => setPreview(null)}>Cancel</button></div>
+          <div className="import-actions"><button type="button" className="btn btn--primary" onClick={confirmImport}>{previews.length === 1 ? 'Add to portfolio' : `Add ${previews.length} folios`}</button><button type="button" className="btn btn--ghost" onClick={() => setPreviews([])}>Cancel</button></div>
         </section>
       )}
 
