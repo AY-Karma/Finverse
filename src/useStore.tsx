@@ -31,6 +31,7 @@ type RefreshResult =
 
 const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
 const REFRESH_MS = 5 * 60_000 // live quote refresh cadence during market hours (5m)
+const FX_REFRESH_MS = 6 * 60 * 60_000 // Frankfurter publishes daily reference rates
 
 export interface ImportPreview {
   id: string
@@ -51,6 +52,7 @@ interface Store {
   snapshot: InvestmentSnapshot
   portfolioHistory: PortfolioSnapshot[]
   marketDataRefreshing: boolean
+  marketDataResult: LiveQuotesResult | null
   addFolio: (name: string, positions: Position[]) => void
   removeFolio: (id: string) => void
   setSettings: (s: Settings) => void
@@ -74,6 +76,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [quickMode, setQuickModeState] = useState(false)
   const [marketDataRefreshing, setMarketDataRefreshing] = useState(settings.allowExternalData)
+  const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
   const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
   const lastImportedFolioId = useRef<string | null>(null)
 
@@ -177,8 +180,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try {
       result = await marketData.refreshQuotes(positions, liveQuotesRef.current)
     } catch {
+      setMarketDataResult({ quotes: liveQuotesRef.current, updated: 0, failed: positions.length, skipped: 0 })
       return { ok: false, reason: 'failed', retryInMs: 0 }
     }
+    setMarketDataResult(result)
     if (result.failed > 0 && result.updated === 0 && result.skipped === 0) {
       return { ok: false, reason: 'failed', retryInMs: 0 }
     }
@@ -197,6 +202,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!settings.allowExternalData) {
       setMarketDataRefreshing(false)
+      setMarketDataResult(null)
       return
     }
     let open = isMarketOpen()
@@ -209,10 +215,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       inFlight = true
       if (active) setMarketDataRefreshing(true)
       try {
-        const { quotes } = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current)
-        if (active) setLiveQuotes(quotes)
+        const result = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current)
+        if (active) {
+          setLiveQuotes(result.quotes)
+          setMarketDataResult(result)
+        }
       } catch {
-        /* keep the previous quotes on any failure */
+        if (active) {
+          setMarketDataResult({
+            quotes: liveQuotesRef.current,
+            updated: 0,
+            failed: positionsRef.current.length,
+            skipped: 0,
+          })
+        }
       } finally {
         inFlight = false
         if (active) setMarketDataRefreshing(false)
@@ -261,7 +277,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && rate) setFxRateState(rate)
     }
     void refresh()
-    const timer = window.setInterval(refresh, 15 * 60 * 1000)
+    const timer = window.setInterval(refresh, FX_REFRESH_MS)
     return () => {
       active = false
       window.clearInterval(timer)
@@ -296,6 +312,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     snapshot,
     portfolioHistory,
     marketDataRefreshing,
+    marketDataResult,
     addFolio,
     removeFolio,
     settings,

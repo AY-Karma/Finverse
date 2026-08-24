@@ -1,5 +1,13 @@
 import type { FxRate, LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
+import {
+  MAX_MARKET_SYMBOLS,
+  isMarketSymbol,
+  type EquityQuoteSource,
+  type HistoryPayload,
+  type MarketQuotePayload,
+  type QuotesPayload,
+} from './marketDataProtocol'
 
 // ---------------------------------------------------------------------------
 // Indian market hours + NSE trading holidays (IST). Polling runs only while the
@@ -47,9 +55,7 @@ export function isMarketOpen(date: Date = new Date()): boolean {
   if (minutes < MARKET_OPEN_MIN || minutes >= MARKET_CLOSE_MIN) return false
   const calendarDate = ist.toISOString().slice(0, 10)
   const holidays = NSE_HOLIDAYS_BY_YEAR[calendarDate.slice(0, 4)]
-  // Fail closed when this client does not have a maintained holiday calendar
-  // for the requested year.
-  if (!holidays || holidays.has(calendarDate)) return false
+  if (holidays?.has(calendarDate)) return false
   return true
 }
 
@@ -69,11 +75,11 @@ export function marketStatusText(
       ? 'External market data off · showing imported prices'
       : 'External market data off · enable it for USD display'
   }
-  if (open && isRefreshing) return 'Live Market - fetching latest data'
-  if (!open && isRefreshing) return 'Off-market hours - fetching latest data'
+  if (open && isRefreshing) return 'Market open - fetching latest available data'
+  if (!open && isRefreshing) return 'Market closed - fetching latest available data'
   if (!fxReady) return 'Waiting for USD/INR rate…'
-  if (open) return 'Live Market - showing latest prices'
-  return 'Off-market hours - showing latest known prices'
+  if (open) return 'Market open - showing latest available prices'
+  return 'Market closed - showing latest available prices'
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +141,8 @@ export function resolveYahooSymbolCandidates(position: Position): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Yahoo Finance fetch (via the CORS relay; NSE data is ~15-20 min delayed)
+// Equity quotes. The same-origin server endpoint batches and validates symbols,
+// then normalizes provider timestamps before anything reaches portfolio state.
 // ---------------------------------------------------------------------------
 
 interface YahooResult {
@@ -143,37 +150,56 @@ interface YahooResult {
   change: number | null
   pct: number | null
   at: number
+  fetchedAt: number
+  source: EquityQuoteSource
+}
+
+function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number): YahooResult | null {
+  const at = Date.parse(payload.marketTime)
+  if (
+    !Number.isFinite(payload.price) ||
+    payload.price <= 0 ||
+    !Number.isFinite(at) ||
+    (payload.source !== 'yahoo' && payload.source !== 'nse-close')
+  ) return null
+  return {
+    price: payload.price,
+    change: payload.change,
+    pct: payload.changePct,
+    at,
+    fetchedAt,
+    source: payload.source,
+  }
+}
+
+async function fetchYahooPrices(symbols: string[]): Promise<Map<string, YahooResult>> {
+  const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
+  const quotes = new Map<string, YahooResult>()
+  for (let start = 0; start < unique.length; start += MAX_MARKET_SYMBOLS) {
+    const batch = unique.slice(start, start + MAX_MARKET_SYMBOLS)
+    const params = new URLSearchParams({ symbols: batch.join(',') })
+    try {
+      const response = await fetch(`/api/quotes?${params}`, {
+        signal: AbortSignal.timeout(12000),
+      })
+      if (!response.ok) continue
+      const payload = (await response.json()) as QuotesPayload
+      const fetchedAt = Date.parse(payload.fetchedAt)
+      if (!Number.isFinite(fetchedAt)) continue
+      for (const item of payload.quotes ?? []) {
+        const quote = quoteFromPayload(item, fetchedAt)
+        if (quote && batch.includes(item.symbol)) quotes.set(item.symbol, quote)
+      }
+    } catch {
+      continue
+    }
+  }
+  return quotes
 }
 
 export async function fetchYahooPrice(symbol: string): Promise<YahooResult | null> {
-  const url =
-    'https://corsproxy.io/?url=' +
-    encodeURIComponent(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`,
-    )
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(12000) })
-    if (!res.ok) return null
-    const json = (await res.json()) as {
-      chart?: {
-        result?: {
-          meta?: {
-            regularMarketPrice?: number
-            chartPreviousClose?: number
-          }
-        }[]
-      }
-    }
-    const meta = json.chart?.result?.[0]?.meta
-    const price = meta?.regularMarketPrice
-    if (!meta || price == null) return null
-    const prev = meta.chartPreviousClose
-    const change = prev != null && prev !== 0 ? price - prev : null
-    const pct = change != null && prev != null ? (change / prev) * 100 : null
-    return { price, change, pct, at: Date.now() }
-  } catch {
-    return null
-  }
+  const normalized = symbol.toUpperCase()
+  return (await fetchYahooPrices([normalized])).get(normalized) ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -187,10 +213,11 @@ export async function fetchUsdInrRate(): Promise<FxRate | null> {
       signal: AbortSignal.timeout(10000),
     })
     if (!res.ok) return null
-    const json = (await res.json()) as { rates?: { INR?: number } }
+    const json = (await res.json()) as { date?: string; rates?: { INR?: number } }
     const usdInr = json.rates?.INR
     if (usdInr == null || !Number.isFinite(usdInr) || usdInr <= 0) return null
-    return { usdInr, at: Date.now() }
+    const publishedAt = json.date ? Date.parse(`${json.date}T00:00:00Z`) : Number.NaN
+    return { usdInr, at: Number.isFinite(publishedAt) ? publishedAt : Date.now() }
   } catch {
     return null
   }
@@ -257,10 +284,21 @@ async function fetchNavByName(schemeName: string): Promise<LiveQuote | null> {
       signal: AbortSignal.timeout(10000),
     })
     if (!navRes.ok) return null
-    const data = (await navRes.json()) as { data?: { nav?: string }[] }
-    const nav = Number(data?.data?.[0]?.nav)
+    const data = (await navRes.json()) as { data?: { date?: string; nav?: string }[] }
+    const latest = data?.data?.[0]
+    const nav = Number(latest?.nav)
     if (!Number.isFinite(nav) || nav <= 0) return null
-    return { price: nav, at: Date.now(), source: 'nav' }
+    const [day, month, year] = latest?.date?.split('-') ?? []
+    const navAt = day && month && year
+      ? Date.parse(`${year}-${month}-${day}T00:00:00+05:30`)
+      : Number.NaN
+    const fetchedAt = Date.now()
+    return {
+      price: nav,
+      at: Number.isFinite(navAt) ? navAt : fetchedAt,
+      fetchedAt,
+      source: 'nav',
+    }
   } catch {
     return null
   }
@@ -278,8 +316,16 @@ export interface LiveQuotesResult {
   skipped: number
 }
 
-const QUOTE_REQUEST_CONCURRENCY = 2
-const QUOTE_REQUEST_GAP_MS = 750
+export function quoteRefreshIssueText(result: LiveQuotesResult | null): string | null {
+  if (!result || result.failed === 0) return null
+  if (result.updated > 0) {
+    return `${result.failed} quote${result.failed === 1 ? '' : 's'} retained from previous or imported values.`
+  }
+  return 'Latest quotes could not be reached. Showing previous or imported prices.'
+}
+
+const NAV_REQUEST_CONCURRENCY = 2
+const NAV_REQUEST_GAP_MS = 750
 
 export async function fetchLiveQuotes(
   positions: Position[],
@@ -289,40 +335,68 @@ export async function fetchLiveQuotes(
   const today = istDate()
 
   // combinePositions normally makes this unique already, but keeping the
-  // network module defensive avoids duplicate relay calls for raw callers.
+  // network module defensive avoids duplicate provider calls for raw callers.
   const unique = Array.from(new Map(positions.map((p) => [quoteKey(p), p])).values())
   type Outcome = { key: string; quote?: LiveQuote; status: 'updated' | 'failed' | 'skipped' }
-
-  const fetchOne = async (p: Position): Promise<Outcome> => {
-    const key = quoteKey(p)
-    if (p.type === 'mutual-fund') {
-      const existing = prev[key]
-      if (existing && existing.source === 'nav' && istDate(new Date(existing.at)) === today) {
-        return { key, status: 'skipped' } // already fetched today's NAV
-      }
-      const nav = await fetchNavByName(p.name || p.ticker)
-      return nav ? { key, quote: nav, status: 'updated' } : { key, status: 'failed' }
-    }
-
-    const symbol = resolveYahooSymbol(p)
-    if (!symbol) return { key, status: 'skipped' }
-    const quote = await fetchYahooPrice(symbol)
-    // Keep the previous quote on failure so the board never flashes stale->blank.
-    return quote
-      ? { key, quote: { price: quote.price, at: quote.at, source: 'yahoo', change: quote.change, changePct: quote.pct }, status: 'updated' }
-      : { key, status: 'failed' }
-  }
-
-  let next = 0
   const outcomes: Outcome[] = []
-  const worker = async () => {
-    while (next < unique.length) {
-      const p = unique[next++]
-      outcomes.push(await fetchOne(p))
-      await delay(QUOTE_REQUEST_GAP_MS)
+
+  const equities = unique.flatMap((position) => {
+    if (position.type === 'mutual-fund') return []
+    const candidates = resolveYahooSymbolCandidates(position)
+    return candidates.length > 0 ? [{ position, candidates }] : []
+  })
+  const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]))
+  const retrySymbols = equities.flatMap(({ candidates }) =>
+    !primaryQuotes.has(candidates[0]) && candidates[1] ? [candidates[1]] : [],
+  )
+  const retryQuotes = await fetchYahooPrices(retrySymbols)
+  for (const { position, candidates } of equities) {
+    const key = quoteKey(position)
+    const quote = primaryQuotes.get(candidates[0]) ?? retryQuotes.get(candidates[1])
+    outcomes.push(quote
+      ? {
+          key,
+          quote: {
+            price: quote.price,
+            at: quote.at,
+            fetchedAt: quote.fetchedAt,
+            source: quote.source,
+            change: quote.change,
+            changePct: quote.pct,
+          },
+          status: 'updated',
+        }
+      : { key, status: 'failed' })
+  }
+  for (const position of unique) {
+    if (position.type !== 'mutual-fund' && !resolveYahooSymbol(position)) {
+      outcomes.push({ key: quoteKey(position), status: 'skipped' })
     }
   }
-  await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, unique.length) }, () => worker()))
+
+  const funds = unique.filter((position) => position.type === 'mutual-fund')
+  let nextFund = 0
+  const worker = async () => {
+    while (nextFund < funds.length) {
+      const position = funds[nextFund++]
+      const key = quoteKey(position)
+      const existing = prev[key]
+      if (
+        existing &&
+        existing.source === 'nav' &&
+        istDate(new Date(existing.fetchedAt ?? existing.at)) === today
+      ) {
+        outcomes.push({ key, status: 'skipped' })
+      } else {
+        const nav = await fetchNavByName(position.name || position.ticker)
+        outcomes.push(nav
+          ? { key, quote: nav, status: 'updated' }
+          : { key, status: 'failed' })
+      }
+      await delay(NAV_REQUEST_GAP_MS)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(NAV_REQUEST_CONCURRENCY, funds.length) }, () => worker()))
 
   for (const outcome of outcomes) {
     if (outcome.quote) quotes[outcome.key] = outcome.quote
@@ -341,7 +415,7 @@ function delay(ms: number): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // Historical price series (daily) for the price-history chart: equities use
-// Yahoo's chart endpoint (same CORS relay as live quotes), mutual funds use
+// the constrained same-origin history endpoint, mutual funds use
 // mfapi.in's NAV history. Daily data only changes once a day, so each
 // symbol+range result is cached for 24h and reused across visits.
 // ---------------------------------------------------------------------------
@@ -380,7 +454,7 @@ function writeHistoryCache(key: string, points: HistoryPoint[]): void {
   }
 }
 
-/** Daily close series for an equity/ETF Yahoo symbol, via the CORS relay. */
+/** Daily close series for an equity/ETF market symbol. */
 export function fetchHistory(
   symbol: string,
   from: Date,
@@ -402,36 +476,18 @@ export function fetchHistory(
 }
 
 async function fetchHistoryUncached(symbol: string, from: Date, to: Date, key: string): Promise<HistoryPoint[]> {
-
-  const url =
-    'https://corsproxy.io/?url=' +
-    encodeURIComponent(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-        `?period1=${Math.floor(from.getTime() / 1000)}&period2=${Math.floor(to.getTime() / 1000)}&interval=1d`,
-    )
+  const params = new URLSearchParams({
+    symbol,
+    from: istDate(from),
+    to: istDate(to),
+  })
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(12000) })
+    const res = await fetch(`/api/history?${params}`, { signal: AbortSignal.timeout(12000) })
     if (!res.ok) return []
-    const json = (await res.json()) as {
-      chart?: {
-        result?: {
-          timestamp?: number[]
-          indicators?: { quote?: { close?: (number | null)[] }[] }
-        }[]
-      }
-    }
-    const timestamps = json.chart?.result?.[0]?.timestamp
-    const closes = json.chart?.result?.[0]?.indicators?.quote?.[0]?.close
-    if (!Array.isArray(timestamps) || !Array.isArray(closes)) return []
-    const points: HistoryPoint[] = []
-    for (let i = 0; i < timestamps.length; i++) {
-      const close = closes[i]
-      if (close == null || !Number.isFinite(close) || close <= 0) continue
-      points.push({
-        date: new Date(timestamps[i] * 1000).toISOString().slice(0, 10),
-        close,
-      })
-    }
+    const json = (await res.json()) as HistoryPayload
+    const points = (json.points ?? []).filter(
+      (point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.close) && point.close > 0,
+    )
     writeHistoryCache(key, points)
     return points
   } catch {
