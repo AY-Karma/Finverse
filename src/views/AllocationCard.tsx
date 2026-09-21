@@ -183,7 +183,10 @@ export function AllocationCard({
           <section className="alloc-section">
             <header className="alloc-section-head">
               <span className="alloc-label">Breadth</span>
-              <strong className="alloc-figure">{priced > 0 ? `${winShare}% of priced holdings in profit` : '—'}</strong>
+              <strong className="alloc-figure">
+                <span className="alloc-figure-wide">{priced > 0 ? `${winShare}% of priced holdings in profit` : '—'}</span>
+                <span className="alloc-figure-compact">{priced > 0 ? `${winShare}% in profit` : '—'}</span>
+              </strong>
             </header>
             <p className="alloc-description">Compares each priced holding's current value with the amount invested.</p>
             <div className="alloc-bar" aria-hidden="true">
@@ -195,7 +198,7 @@ export function AllocationCard({
               <span className="alloc-key-block alloc-key-block--up">
                 <span className="alloc-key-name"><i className="alloc-dot up" />In profit</span>
                 <strong><span className="alloc-metric-value">{p.up}</span> position{p.up === 1 ? '' : 's'}</strong>
-                <small>{p.avgWinPct != null ? <>Average gain <span className="alloc-metric-value">{mask(`+${p.avgWinPct.toFixed(1)}%`)}</span></> : 'No winning positions'}</small>
+                <small>{p.avgWinPct != null ? <><span className="alloc-detail-label">Average gain </span><span className="alloc-metric-value">{mask(`+${p.avgWinPct.toFixed(1)}%`)}</span></> : 'No winning positions'}</small>
               </span>
               {p.flat > 0 && (
                 <span className="alloc-key-block alloc-key-block--flat">
@@ -207,7 +210,7 @@ export function AllocationCard({
               <span className="alloc-key-block alloc-key-block--down">
                 <span className="alloc-key-name"><i className="alloc-dot down" />In loss</span>
                 <strong><span className="alloc-metric-value">{p.down}</span> position{p.down === 1 ? '' : 's'}</strong>
-                <small>{p.avgLossPct != null ? <>Average loss <span className="alloc-metric-value">{mask(`${p.avgLossPct.toFixed(1)}%`)}</span></> : 'No losing positions'}</small>
+                <small>{p.avgLossPct != null ? <><span className="alloc-detail-label">Average loss </span><span className="alloc-metric-value">{mask(`${p.avgLossPct.toFixed(1)}%`)}</span></> : 'No losing positions'}</small>
               </span>
             </div>
             {(p.best || p.worst) && (
@@ -251,13 +254,16 @@ export function AllocationCard({
           <section className="alloc-section">
             <header className="alloc-section-head">
               <span className="alloc-label">Weight bands</span>
-              <strong className="alloc-figure">{p.bands.heavy} position{p.bands.heavy === 1 ? '' : 's'} at 10%+</strong>
+              <strong className="alloc-figure">
+                <span className="alloc-figure-wide">{p.bands.heavy} position{p.bands.heavy === 1 ? '' : 's'} at 10%+</span>
+                <span className="alloc-figure-compact">{p.bands.heavy} at 10%+</span>
+              </strong>
             </header>
             <p className="alloc-description">Groups positions by the share of total portfolio value each one represents.</p>
             <div className="alloc-bar" aria-hidden="true">
               <BandSegments weights={[p.bandWeight.heavy, p.bandWeight.mid, p.bandWeight.light]} />
             </div>
-            <div className="alloc-keys alloc-keys--three">
+            <div className="alloc-keys alloc-keys--three alloc-keys--bands">
               <span className="alloc-key-block">
                 <span className="alloc-key-name"><i className="alloc-dot band-heavy" />10% or more</span>
                 <strong>{p.bands.heavy} position{p.bands.heavy === 1 ? '' : 's'}</strong>
@@ -275,6 +281,12 @@ export function AllocationCard({
               </span>
             </div>
             <p className="alloc-member-note">{p.bands.heavy > 0 ? <><strong>Large positions</strong> {heavyMembers}. Together they make up {mask(`${p.bandWeight.heavy.toFixed(0)}%`)} of the portfolio.</> : 'No position accounts for 10% or more of the portfolio.'}</p>
+            {p.bands.heavy > 0 && (
+              <details className="alloc-member-details">
+                <summary>See large positions</summary>
+                <p>{heavyMembers}</p>
+              </details>
+            )}
           </section>
         </div>
       </section>
