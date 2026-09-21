@@ -1938,6 +1938,17 @@ body {
     gap: 10px;
     font-size: 11px;
   }
+  .alloc-edge-notes--holdings {
+    display: grid;
+    gap: 6px;
+    line-height: 1.45;
+  }
+  .alloc-edge-notes--holdings > span {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+  .alloc-edge-notes--holdings > span:last-child { text-align: left; }
   .alloc-member-note { display: none; }
   .alloc-member-details {
     display: block;
