@@ -117,6 +117,7 @@ export function InteractiveTrendChart({
   appearance = 'default',
 }: InteractiveTrendChartProps) {
   const chartId = useId().replace(/:/g, '')
+  const chartRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const panRef = useRef<PanState | null>(null)
   const suppressClickRef = useRef(false)
@@ -127,16 +128,18 @@ export function InteractiveTrendChart({
   const [chartSize, setChartSize] = useState({ width: FALLBACK_WIDTH, height: FALLBACK_HEIGHT })
 
   useLayoutEffect(() => {
+    const chart = chartRef.current
     const svg = svgRef.current
-    if (!svg) return
+    if (!chart || !svg) return
     const updateSize = () => {
       const bounds = svg.getBoundingClientRect()
-      const width = Math.max(280, Math.round(bounds.width))
+      const width = Math.max(1, Math.round(chart.clientWidth))
       const height = Math.max(220, Math.round(bounds.height))
       setChartSize((current) => current.width === width && current.height === height ? current : { width, height })
     }
     updateSize()
     const observer = new ResizeObserver(updateSize)
+    observer.observe(chart)
     observer.observe(svg)
     window.addEventListener('resize', updateSize)
     return () => {
@@ -344,7 +347,7 @@ export function InteractiveTrendChart({
     setHoveredIndex(index)
   }
 
-  return <div className={`interactive-trend-chart interactive-trend-chart--${appearance}${isPanning ? ' is-panning' : ''}${comparison && comparison.targetIndex == null ? ' is-selecting-comparison' : ''}`}>
+  return <div ref={chartRef} className={`interactive-trend-chart interactive-trend-chart--${appearance}${isPanning ? ' is-panning' : ''}${comparison && comparison.targetIndex == null ? ' is-selecting-comparison' : ''}`}>
     <div className="interactive-trend-toolbar">
       <div className="interactive-trend-context">
         <span className="interactive-trend-unit">{yAxisLabel}</span>
@@ -380,6 +383,7 @@ export function InteractiveTrendChart({
     </div>
     <svg
       ref={svgRef}
+      style={{ width: `${chartWidth}px` }}
       viewBox={`0 0 ${chartWidth} ${chartHeight}`}
       preserveAspectRatio="none"
       role="img"
