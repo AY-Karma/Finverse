@@ -60,6 +60,7 @@ interface Store {
   previewFile: (file: File) => Promise<ImportPreview>
   commitImport: (preview: ImportPreview) => void
   undoLastImport: () => void
+  undoImportFolioId: string | null
   exportPortfolio: (format: 'json' | 'csv') => void
   refreshNow: () => Promise<RefreshResult>
   quickMode: boolean
@@ -94,6 +95,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const removeFolio = useCallback((id: string) => {
     setFoliosState((prev) => prev.filter((f) => f.id !== id))
+    if (lastImportedFolioId.current === id) lastImportedFolioId.current = null
   }, [])
 
   const setSettings = useCallback((s: Settings) => setSettingsState(s), [])
@@ -151,7 +153,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const id = lastImportedFolioId.current
     if (!id) return
     removeFolio(id)
-    lastImportedFolioId.current = null
   }, [removeFolio])
 
   const exportPortfolio = useCallback((format: 'json' | 'csv') => {
@@ -320,6 +321,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     previewFile,
     commitImport,
     undoLastImport,
+    undoImportFolioId: folios.some((folio) => folio.id === lastImportedFolioId.current) ? lastImportedFolioId.current : null,
     exportPortfolio,
     refreshNow,
     quickMode,

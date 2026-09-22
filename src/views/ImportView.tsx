@@ -2,6 +2,7 @@ import { useId, useRef, useState } from 'react'
 import { IMPORT_SOURCES } from '../importSources'
 import { MAX_IMPORT_FILES } from '../importLimits'
 import { useStore, type ImportPreview } from '../useStore'
+import { UndoImportButton } from './UndoImportButton'
 
 interface ImportViewProps {
   compact?: boolean
@@ -10,7 +11,7 @@ interface ImportViewProps {
 }
 
 export function ImportView({ compact = false, initialStep = 'dropzone', onImported }: ImportViewProps) {
-  const { previewFile, commitImport, folios, positions, removeFolio, undoLastImport, exportPortfolio } = useStore()
+  const { previewFile, commitImport, folios, positions, removeFolio, undoLastImport, undoImportFolioId, exportPortfolio } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [parsing, setParsing] = useState(false)
@@ -92,7 +93,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
           <div className="import-actions">
             <button type="button" className="btn btn--secondary btn--small" onClick={() => exportPortfolio('csv')}>Export CSV</button>
             <button type="button" className="btn btn--secondary btn--small" onClick={() => exportPortfolio('json')}>Backup JSON</button>
-            <button type="button" className="btn btn--ghost btn--small" onClick={undoLastImport}>Undo last import</button>
+            <UndoImportButton targetId={undoImportFolioId} onConfirm={undoLastImport} />
           </div>
         </div>
       )}
@@ -149,8 +150,8 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
           onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFiles(event.dataTransfer.files) }}
           onClick={() => inputRef.current?.click()}
         >
-          <span className="drop-title">{parsing ? 'Reading your sheets…' : 'Drop your sheets in the pit'}</span>
-          <span id={instructionsId} className="hint">or press Enter or Space to browse · select up to {MAX_IMPORT_FILES} files · 10 MB each</span>
+          <span className="drop-title">{parsing ? 'Reading files…' : compact ? 'Add holdings files' : 'Drop your sheets in the pit'}</span>
+          <span id={instructionsId} className="hint">{compact ? 'Choose or drop .xlsx, .xls, or .csv' : 'or press Enter or Space to browse'} · up to {MAX_IMPORT_FILES} files, 10 MB each</span>
         </button>
       )}
       <p id={statusId} className="sr-only" aria-live="polite">
