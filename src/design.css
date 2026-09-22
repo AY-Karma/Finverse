@@ -3392,6 +3392,8 @@ body {
   letter-spacing: 0.01em;
 }
 .panel--ledger { overflow-x: auto; }
+.ledger-mobile-sort,
+.ledger-mobile-list { display: none; }
 .mf-name {
   display: inline-block;
   max-width: 240px;
@@ -4149,6 +4151,95 @@ body {
   .monitor-feed-actions { justify-content: flex-start; }
 }
 @media (max-width: 768px) {
+  .panel--ledger { padding: 0; overflow-x: hidden; }
+  .panel--ledger .panel-head { padding: 18px 18px 14px; margin-bottom: 0; }
+  .panel--ledger .panel-head .scope-switch { margin-left: 0; }
+  .panel--ledger > .table { display: none; }
+  .panel--ledger .mf-summary { margin: 0 16px 12px; }
+  .ledger-mobile-sort {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    color: var(--ink-subtle);
+    font-size: 12px;
+  }
+  .ledger-mobile-sort select {
+    max-width: 65%;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--ink);
+    font: inherit;
+  }
+  .ledger-mobile-list { display: block; }
+  .ledger-mobile-item + .ledger-mobile-item { border-top: 1px solid var(--hairline-strong); }
+  .ledger-mobile-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    min-height: 82px;
+    padding: 16px 18px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+  }
+  .ledger-mobile-row[aria-expanded='true'] { background: var(--surface-2); }
+  .ledger-mobile-row:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: -2px; }
+  .ledger-mobile-primary { display: grid; min-width: 0; gap: 8px; }
+  .ledger-mobile-primary--right { text-align: right; }
+  .ledger-mobile-name,
+  .ledger-mobile-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15px;
+    font-weight: 550;
+    letter-spacing: 0.01em;
+  }
+  .ledger-mobile-name { color: var(--ink); }
+  .ledger-mobile-value { font-variant-numeric: tabular-nums; }
+  .ledger-mobile-secondary {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-subtle);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ledger-mobile-secondary.up { color: var(--semantic-success); }
+  .ledger-mobile-secondary.down { color: var(--semantic-danger); }
+  .ledger-mobile-chevron { display: inline-block; margin-left: 7px; color: var(--ink-subtle); }
+  .ledger-mobile-row[aria-expanded='true'] .ledger-mobile-chevron { transform: rotate(180deg); }
+  .ledger-mobile-detail {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding: 16px 18px 20px;
+    border-top: 1px solid var(--hairline);
+    background: var(--surface-2);
+  }
+  .ledger-mobile-detail > div:not(.ledger-members) { display: grid; gap: 5px; min-width: 0; }
+  .ledger-mobile-detail .ledger-mobile-detail-wide { grid-column: 1 / -1; }
+  .ledger-mobile-detail > div:not(.ledger-members) > span { color: var(--ink-subtle); font-size: 11px; }
+  .ledger-mobile-detail strong { overflow-wrap: anywhere; color: var(--ink); font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; }
+  .ledger-mobile-detail .ledger-members { grid-column: 1 / -1; padding: 10px 0 0; border-top: 1px solid var(--hairline-strong); }
+  .ledger-mobile-detail .table--nested thead { display: none; }
+  .ledger-mobile-detail .table--nested,
+  .ledger-mobile-detail .table--nested tbody { display: block; }
+  .ledger-mobile-detail .table--nested tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px 0; border-top: 1px solid var(--hairline); }
+  .ledger-mobile-detail .table--nested td { display: grid; gap: 4px; padding: 0; }
+  .ledger-mobile-detail .table--nested td::before { content: attr(data-label); color: var(--ink-subtle); font-size: 11px; }
+  .panel--ledger .ledger-pagination { padding: 12px 18px; border-top: 1px solid var(--hairline); }
   .portfolio-import-card { padding: 24px; }
   .import-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .daily-brief { grid-template-columns: minmax(0, 1fr) auto; }

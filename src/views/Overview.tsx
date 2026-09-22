@@ -476,6 +476,35 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
             />
           ) : (
             <>
+            <div className="ledger-mobile-sort">
+              <label htmlFor="equity-ledger-sort">Sort holdings</label>
+              <select
+                id="equity-ledger-sort"
+                value={sort ? `${sort.field}-${sort.dir}` : 'default'}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (value === 'default') setSort(null)
+                  else {
+                    const [field, dir] = value.split('-') as [SortField, SortDir]
+                    setSort({ field, dir })
+                  }
+                }}
+              >
+                <option value="default">Import order</option>
+                <option value="symbol-asc">Symbol A–Z</option>
+                <option value="symbol-desc">Symbol Z–A</option>
+                <option value="qty-desc">Quantity: high to low</option>
+                <option value="qty-asc">Quantity: low to high</option>
+                <option value="buy-desc">Buy: high to low</option>
+                <option value="buy-asc">Buy: low to high</option>
+                <option value="ltp-desc">Last trade: high to low</option>
+                <option value="ltp-asc">Last trade: low to high</option>
+                <option value="value-desc">Value: high to low</option>
+                <option value="value-asc">Value: low to high</option>
+                <option value="pnl-desc">P&L: high to low</option>
+                <option value="pnl-asc">P&L: low to high</option>
+              </select>
+            </div>
             <table className="table table--ledger">
               <thead>
                 <tr>
@@ -546,6 +575,38 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
                 })}
               </tbody>
             </table>
+            <div className="ledger-mobile-list">
+              {visibleLedgerRows.map((row) => {
+                const members = combinedMembers.get(row.id) ?? []
+                const open = expandedId === row.id
+                const pnlUp = row.pnl != null && row.pnl >= 0
+                return (
+                  <div className="ledger-mobile-item" key={row.id}>
+                    <button className="ledger-mobile-row" type="button" onClick={() => setExpandedId(open ? null : row.id)} aria-expanded={open}>
+                      <span className="ledger-mobile-primary">
+                        <span className="ledger-mobile-name">{mask(row.symbol)}</span>
+                        <span className="ledger-mobile-secondary">Qty {mask(fmtUnits(row.qty))} · Avg {mask(formatCurrency(row.buy, currency, fxRate?.usdInr))}</span>
+                      </span>
+                      <span className="ledger-mobile-primary ledger-mobile-primary--right">
+                        <span className="ledger-mobile-value">{mask(formatCurrency(row.value, currency, fxRate?.usdInr))}</span>
+                        <span className={`ledger-mobile-secondary ${row.pnl == null ? '' : pnlUp ? 'up' : 'down'}`}>
+                          {row.pnl == null ? 'P&L unavailable' : mask(`${pnlUp ? '+' : ''}${formatCurrency(row.pnl, currency, fxRate?.usdInr)}`)}
+                          <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
+                        </span>
+                      </span>
+                    </button>
+                    {open && (
+                      <div className="ledger-mobile-detail">
+                        <div><span>Last trade</span><strong>{row.ltp == null ? '—' : mask(formatCurrency(row.ltp, currency, fxRate?.usdInr))}</strong></div>
+                        <div><span>Buy price</span><strong>{mask(formatCurrency(row.buy, currency, fxRate?.usdInr))}</strong></div>
+                        <div><span>Quantity</span><strong>{mask(fmtUnits(row.qty))}</strong></div>
+                        {members.length > 1 && <LedgerMembers members={members} live={live} currency={currency} usdInrRate={fxRate?.usdInr} hideValues={hideValues} />}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
             {sortedRows.length > LEDGER_PAGE_SIZE && <div className="ledger-pagination" aria-label="Ledger pages"><span>{ledgerPage * LEDGER_PAGE_SIZE + 1}–{Math.min((ledgerPage + 1) * LEDGER_PAGE_SIZE, sortedRows.length)} of {sortedRows.length}</span><div><button className="btn btn--secondary" type="button" disabled={ledgerPage === 0} onClick={() => setLedgerPage((page) => Math.max(0, page - 1))}>Previous</button><button className="btn btn--secondary" type="button" disabled={ledgerPage === ledgerPageCount - 1} onClick={() => setLedgerPage((page) => Math.min(ledgerPageCount - 1, page + 1))}>Next</button></div></div>}
             </>
           )}
@@ -610,6 +671,8 @@ function MFLedger({
             ? x.quantity
             : sort.field === 'invested'
               ? x.invested
+              : sort.field === 'xirr'
+                ? x.xirr ?? -Infinity
               : mfReturnPct(x, live) ?? -Infinity
       switch (sort.field) {
         case 'scheme':
@@ -657,6 +720,35 @@ function MFLedger({
 
   return (
     <>
+    <div className="ledger-mobile-sort">
+      <label htmlFor="mutual-ledger-sort">Sort funds</label>
+      <select
+        id="mutual-ledger-sort"
+        value={sort ? `${sort.field}-${sort.dir}` : 'default'}
+        onChange={(event) => {
+          const value = event.target.value
+          if (value === 'default') setSort(null)
+          else {
+            const [field, dir] = value.split('-') as [string, SortDir]
+            setSort({ field, dir })
+          }
+        }}
+      >
+        <option value="default">Import order</option>
+        <option value="scheme-asc">Scheme A–Z</option>
+        <option value="scheme-desc">Scheme Z–A</option>
+        <option value="units-desc">Units: high to low</option>
+        <option value="units-asc">Units: low to high</option>
+        <option value="invested-desc">Invested: high to low</option>
+        <option value="invested-asc">Invested: low to high</option>
+        <option value="value-desc">Value: high to low</option>
+        <option value="value-asc">Value: low to high</option>
+        <option value="returns-desc">Returns: high to low</option>
+        <option value="returns-asc">Returns: low to high</option>
+        <option value="xirr-desc">XIRR: high to low</option>
+        <option value="xirr-asc">XIRR: low to high</option>
+      </select>
+    </div>
     <table className="table">
       <thead>
         <tr>
@@ -724,6 +816,41 @@ function MFLedger({
         })}
       </tbody>
     </table>
+    <div className="ledger-mobile-list">
+      {visibleRows.map((fund) => {
+        const value = valueOf(fund, live)
+        const returns = mfReturnPct(fund, live)
+        const members = membersOf.get(fund.id) ?? []
+        const open = expandedId === fund.id
+        return (
+          <div className="ledger-mobile-item" key={fund.id}>
+            <button className="ledger-mobile-row" type="button" onClick={() => setExpandedId(open ? null : fund.id)} aria-expanded={open}>
+              <span className="ledger-mobile-primary">
+                <span className="ledger-mobile-name">{mask(fund.name || fund.ticker)}</span>
+                <span className="ledger-mobile-secondary">{mask(fmtUnits(fund.quantity))} units{!hideValues && fund.amc ? ` · ${fund.amc}` : ''}</span>
+              </span>
+              <span className="ledger-mobile-primary ledger-mobile-primary--right">
+                <span className="ledger-mobile-value">{mask(formatCurrency(value, currency, usdInrRate))}</span>
+                <span className={`ledger-mobile-secondary ${returns == null ? '' : returns >= 0 ? 'up' : 'down'}`}>
+                  {returns == null ? 'Return unavailable' : mask(formatPercent(returns))}
+                  <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
+                </span>
+              </span>
+            </button>
+            {open && (
+              <div className="ledger-mobile-detail">
+                <div className="ledger-mobile-detail-wide"><span>Scheme</span><strong>{mask(fund.name || fund.ticker)}</strong></div>
+                <div><span>Invested</span><strong>{mask(formatCurrency(fund.invested, currency, usdInrRate))}</strong></div>
+                <div><span>XIRR</span><strong>{fund.xirr == null ? '—' : mask(formatPercent(fund.xirr))}</strong></div>
+                {fund.amc && <div className="ledger-mobile-detail-wide"><span>AMC</span><strong>{mask(fund.amc)}</strong></div>}
+                {fund.folio && <div><span>Folio</span><strong>{mask(fund.folio)}</strong></div>}
+                {members.length > 1 && <LedgerMembers members={members} live={live} currency={currency} usdInrRate={usdInrRate} hideValues={hideValues} />}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
     {sorted.length > LEDGER_PAGE_SIZE && <div className="ledger-pagination" aria-label="Mutual fund ledger pages"><span>{page * LEDGER_PAGE_SIZE + 1}–{Math.min((page + 1) * LEDGER_PAGE_SIZE, sorted.length)} of {sorted.length}</span><div><button className="btn btn--secondary" type="button" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Previous</button><button className="btn btn--secondary" type="button" disabled={page === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Next</button></div></div>}
     </>
   )
@@ -767,14 +894,14 @@ function LedgerMembers({
             const up = pnl != null && pnl >= 0
             return (
               <tr key={m.id}>
-                <td>{mask(fmtUnits(m.quantity))}</td>
-                <td>{mask(formatCurrency(m.buyPrice, currency, usdInrRate))}</td>
-                <td>{mask(formatCurrency(m.invested, currency, usdInrRate))}</td>
-                <td>{mask(formatCurrency(v, currency, usdInrRate))}</td>
-                <td className={pnl != null ? (up ? 'up' : 'down') : 'muted'}>
+                <td data-label="Qty">{mask(fmtUnits(m.quantity))}</td>
+                <td data-label="Buy">{mask(formatCurrency(m.buyPrice, currency, usdInrRate))}</td>
+                <td data-label="Invested">{mask(formatCurrency(m.invested, currency, usdInrRate))}</td>
+                <td data-label="Value">{mask(formatCurrency(v, currency, usdInrRate))}</td>
+                <td data-label="P&L" className={pnl != null ? (up ? 'up' : 'down') : 'muted'}>
                   {pnl != null ? mask(`${up ? '+' : ''}${formatCurrency(pnl, currency, usdInrRate)}`) : '—'}
                 </td>
-                {anyFolio && <td className="muted">{mask((m.folio ?? '').trim() || '—')}</td>}
+                {anyFolio && <td data-label="Folio" className="muted">{mask((m.folio ?? '').trim() || '—')}</td>}
               </tr>
             )
           })}
