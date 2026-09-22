@@ -3295,7 +3295,6 @@ body {
 }
 .history-stage {
   position: relative;
-  min-height: 380px;
 }
 .history-chart-wrap {
   position: relative;
