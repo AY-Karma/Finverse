@@ -4,11 +4,12 @@ import { filterNewsEvents, pageCount, pagedEvents, sentimentForTitle, titleParts
 import { useStore } from '../useStore'
 import { ImportView } from './ImportView'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
+import { UndoImportButton } from './UndoImportButton'
 
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 
 export function HoldingsView({ onRequestImport }: { onRequestImport: () => void }) {
-  const { folios, positions, settings, removeFolio, undoLastImport, exportPortfolio } = useStore()
+  const { folios, positions, settings, removeFolio, undoLastImport, undoImportFolioId, exportPortfolio } = useStore()
   const [feed, setFeed] = useState<LoadedMarketFeed | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshCount, setRefreshCount] = useState(0)
@@ -65,20 +66,20 @@ export function HoldingsView({ onRequestImport }: { onRequestImport: () => void 
 
   return (
     <>
-      <div className="page-head enter d0">
+      <div className="page-head monitor-page-head enter d0">
         <div>
           <div className="page-eyebrow">02 · Monitor</div>
           <h1 className="page-title">Portfolio watch</h1>
         </div>
-        <p className="page-sub">The Indian market wire with your holdings flagged, plus on-demand company deep dives. Overview remains the single place for portfolio value and performance.</p>
+        <p className="page-sub">Market news for your holdings.</p>
       </div>
 
       {!settings.allowExternalData ? (
         <section className="panel monitor-consent enter d1">
           <div>
             <span className="score-label">External data is off</span>
-            <strong>Portfolio Monitor is private until you opt in.</strong>
-            <span className="hint">Enabling it fetches public market news. Quantities, values and cost basis stay in this browser.</span>
+            <strong>Turn on market news in Settings.</strong>
+            <span className="hint">Your portfolio stays in this browser.</span>
           </div>
           <span className="section-index">Enable in Settings</span>
         </section>
@@ -115,6 +116,7 @@ export function HoldingsView({ onRequestImport }: { onRequestImport: () => void 
         onToggleImport={() => setImportOpen((open) => !open)}
         onExport={exportPortfolio}
         onUndoImport={undoLastImport}
+        undoImportFolioId={undoImportFolioId}
         onRemoveFolio={removeFolio}
       />
     </>
@@ -146,13 +148,12 @@ function MonitorStatusStrip({ loading, fetchedAt, storyCount, onRefresh }: {
         : tone === 'aging'
           ? 'Watching the tape'
           : 'Tape went quiet'
-  const updatedHint = `${fetchedAt ? `Updated ${formatRelativeTime(fetchedAt)} · ` : ''}Economic Times Markets · Business Standard`
+  const updatedHint = fetchedAt ? `Updated ${formatRelativeTime(fetchedAt)}` : 'Waiting for news'
 
   return <section className="panel monitor-status enter d1" aria-label="Portfolio monitor status">
     <div className="monitor-status-copy">
-      <span className="score-label">Signal desk</span>
       <strong>{headline}</strong>
-      <span className="hint">{storyCount > 0 ? `${storyCount} stories on the tape · ${updatedHint}` : updatedHint}</span>
+      <span className="hint">{storyCount > 0 ? `${storyCount} stories · ${updatedHint}` : updatedHint}</span>
     </div>
     <div className="monitor-status-side">
       <span className="monitor-signal" title={fetchedAt ? `Last fetch ${new Date(fetchedAt).toLocaleTimeString()}` : 'Not fetched yet'}>
@@ -202,26 +203,21 @@ function NewsFeedPanel({ events, positions, loading, activeQuery, onSelectQuery,
   const last = Math.min(currentPage * pageSize, filtered.length)
 
   return <section className="panel monitor-feed enter d2">
-    <div className="monitor-tools-head">
-      <span className="panel-title">Focus tools</span>
-      <span className="monitor-tools-legend"><span><i>1</i>Search any company or topic</span><span><i>2</i>Rows per page below</span></span>
-    </div>
     <form className="monitor-search" role="search" onSubmit={(event) => { event.preventDefault(); onSelectQuery(searchDraft.trim()) }}>
       <input
         type="search"
         value={searchDraft}
         onChange={(event) => setSearchDraft(event.target.value)}
-        placeholder="Search any company or topic — e.g. Infosys, IPO, gold"
+        placeholder="Company or topic"
         aria-label="Search market news"
       />
-      <button className="btn btn--secondary btn--small" type="submit">Search news</button>
+      <button className="btn btn--secondary btn--small" type="submit">Search</button>
       {activeQuery && <button className="btn btn--ghost btn--small" type="button" onClick={() => { setSearchDraft(''); onSelectQuery('') }}>Back to wire</button>}
     </form>
 
     <div className="monitor-feed-head">
       <div>
         <span className={`panel-title${activeQuery ? ' panel-title--deep' : ''}`}>{activeQuery ? `Deep dive · ${activeQuery}` : 'Live wire'}</span>
-        <span className="hint">Fresh Indian market news. Stories about your stocks carry their ticker. Read the source before acting.</span>
       </div>
       <div className="monitor-feed-actions">
         <details className={`monitor-menu${filters.query || filters.ticker !== 'all' || filters.sentiment !== 'all' || filters.sort !== 'latest' ? ' monitor-menu--active' : ''}`}>
@@ -294,6 +290,31 @@ function ChevronIcon({ direction }: { direction: 'left' | 'right' }) { return <s
 function ExternalIcon() { return <svg className="news-external-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" strokeLinecap="round" strokeLinejoin="round" /></svg> }
 function CloseIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" strokeLinejoin="round" /></svg> }
 
-function ManageHoldings({ folios, hasPositions, importOpen, onToggleImport, onExport, onUndoImport, onRemoveFolio }: { folios: ReturnType<typeof useStore>['folios']; hasPositions: boolean; importOpen: boolean; onToggleImport: () => void; onExport: ReturnType<typeof useStore>['exportPortfolio']; onUndoImport: () => void; onRemoveFolio: (id: string) => void }) {
-  return <section className="panel holdings-manage enter d4"><div className="panel-head"><div><span className="panel-title">Manage holdings</span><span className="hint">Imports, local folios and exports</span></div><button className="btn btn--secondary btn--small" type="button" aria-expanded={importOpen} onClick={onToggleImport}>{importOpen ? 'Close import' : 'Import holdings'}</button></div>{importOpen && <div className="holdings-import"><ImportView compact /></div>}<div className="manage-actions"><button className="btn btn--secondary btn--small" type="button" disabled={!hasPositions} onClick={() => onExport('csv')}>Export CSV</button><button className="btn btn--secondary btn--small" type="button" disabled={!hasPositions} onClick={() => onExport('json')}>Backup JSON</button><button className="btn btn--ghost btn--small" type="button" onClick={onUndoImport}>Undo import</button></div>{folios.length > 0 && <div className="folio-list">{folios.map((folio) => <div className="folio-row" key={folio.id}><div className="folio-marker" /><div className="folio-copy"><span className="sym">{folio.name}</span><span className="hint">{folio.positions.length} holding{folio.positions.length === 1 ? '' : 's'} · {new Date(folio.importedAt).toLocaleDateString()}</span></div><button className="btn-remove" type="button" aria-label={`Remove ${folio.name}`} onClick={() => onRemoveFolio(folio.id)}>×</button></div>)}</div>}</section>
+function ManageHoldings({ folios, hasPositions, importOpen, onToggleImport, onExport, onUndoImport, undoImportFolioId, onRemoveFolio }: {
+  folios: ReturnType<typeof useStore>['folios']
+  hasPositions: boolean
+  importOpen: boolean
+  onToggleImport: () => void
+  onExport: ReturnType<typeof useStore>['exportPortfolio']
+  onUndoImport: () => void
+  undoImportFolioId: string | null
+  onRemoveFolio: (id: string) => void
+}) {
+  return <section className="panel holdings-manage enter d4">
+    <div className="panel-head">
+      <span className="panel-title">Manage holdings</span>
+    </div>
+    <div className="manage-actions">
+      <button className="btn btn--secondary btn--small" type="button" aria-expanded={importOpen} title={importOpen ? 'Hide the import area.' : 'Choose spreadsheet files to add holdings.'} onClick={onToggleImport}>{importOpen ? 'Close import' : 'Import holdings'}</button>
+      <button className="btn btn--secondary btn--small" type="button" title="Download all holdings as a CSV file." disabled={!hasPositions} onClick={() => onExport('csv')}>Export CSV</button>
+      <button className="btn btn--secondary btn--small" type="button" title="Download a JSON backup of your folios." disabled={!hasPositions} onClick={() => onExport('json')}>Backup JSON</button>
+      <UndoImportButton targetId={undoImportFolioId} onConfirm={onUndoImport} />
+    </div>
+    {importOpen && <div className="holdings-import"><ImportView compact /></div>}
+    {folios.length > 0 && <div className="folio-list">{folios.map((folio) => <div className="folio-row" key={folio.id}>
+      <div className="folio-marker" />
+      <div className="folio-copy"><span className="sym">{folio.name}</span><span className="hint">{folio.positions.length} holding{folio.positions.length === 1 ? '' : 's'} · {new Date(folio.importedAt).toLocaleDateString()}</span></div>
+      <button className="btn-remove" type="button" aria-label={`Remove ${folio.name}`} onClick={() => onRemoveFolio(folio.id)}>×</button>
+    </div>)}</div>}
+  </section>
 }
