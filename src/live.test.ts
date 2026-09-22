@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LiveQuote, Position } from './types'
 import {
   fetchLiveQuotes,
+  fetchHistory,
   fetchUsdInrRate,
   fetchYahooPrice,
   isMarketOpen,
@@ -38,6 +39,24 @@ describe('market status text', () => {
 })
 
 describe('market data client', () => {
+  it('refetches history after an empty provider response', async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    })
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ points: [] }))
+      .mockResolvedValueOnce(Response.json({ points: [{ date: '2026-09-22', close: 101 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-09-01T00:00:00Z')
+    const to = new Date('2026-09-23T00:00:00Z')
+
+    await expect(fetchHistory('FMCGIETF.NS', from, to)).resolves.toEqual([])
+    await expect(fetchHistory('FMCGIETF.NS', from, to)).resolves.toEqual([{ date: '2026-09-22', close: 101 }])
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it('uses the same-origin quote endpoint and preserves the market timestamp', async () => {
     const marketTime = '2026-08-24T09:45:02.000Z'
     const fetcher = vi.fn<typeof fetch>(async () =>

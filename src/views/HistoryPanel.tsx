@@ -64,6 +64,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
   const [text, setText] = useState('')
   const [committed, setCommitted] = useState<string | null>(null)
   const [rangeDays, setRangeDays] = useState(366)
+  const [retryAttempt, setRetryAttempt] = useState(0)
   const [points, setPoints] = useState<HistoryPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -109,32 +110,44 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     if (!settings.allowExternalData || !query) {
       setPoints([])
       setError(null)
+      setLoading(false)
       return
     }
     let alive = true
     setLoading(true)
+    setPoints([])
     setError(null)
     const to = new Date()
     const from = new Date(to.getTime() - rangeDays * 24 * 60 * 60 * 1000)
     const run = async () => {
-      const out = await fetchOutcome(query, from, to)
-      if (!alive) return
-      setPoints(out.points)
-      setUsedLabel(out.usedLabel)
-      setLoading(false)
-      if (out.points.length === 0) {
+      try {
+        const out = await fetchOutcome(query, from, to)
+        if (!alive) return
+        setPoints(out.points)
+        setUsedLabel(out.usedLabel)
+        if (out.points.length === 0) {
+          setError(
+            query.kind === 'mf'
+              ? `Couldn't find “${query.label}” on mfapi.in, or no NAVs exist for this range.`
+              : `No price data for “${query.label}”. Retry, or check the ticker, exchange, or provider symbol.`,
+          )
+        }
+      } catch {
+        if (!alive) return
         setError(
           query.kind === 'mf'
-            ? `Couldn't find “${query.label}” on mfapi.in, or no NAVs exist for this range.`
-            : `No price data for “${query.label}”. Check the ticker, exchange, or provider symbol.`,
+            ? `Couldn't load NAV history for “${query.label}”. Please try again.`
+            : `Couldn't load price history for “${query.label}”. Please try again.`,
         )
+      } finally {
+        if (alive) setLoading(false)
       }
     }
     void run()
     return () => {
       alive = false
     }
-  }, [query, rangeDays, settings.allowExternalData])
+  }, [query, rangeDays, retryAttempt, settings.allowExternalData])
 
   const chartData = useMemo(
     () =>
@@ -193,6 +206,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     if (!matched) return
     setText(instrumentLabel(matched))
     setCommitted(instrumentLabel(matched))
+    setRetryAttempt((attempt) => attempt + 1)
     inputRef.current?.focus()
   }
 
@@ -223,7 +237,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
               ))}
             </datalist>
             <button className="btn btn--primary btn--small history-track" onClick={commit} disabled={!text.trim()}>
-              Track
+              {error && norm(text) === norm(effective) ? 'Retry' : 'Track'}
             </button>
           </div>
           <div className="history-range" role="group" aria-label="Date range">
@@ -297,8 +311,6 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                   )}
                 </div>
 
-                {error && <p className={`hint history-error${error ? ' down' : ''}`}>{error}</p>}
-
                 {purchase && !loading && (
                   <div className={`history-purchase ${purchase.pct >= 0 ? 'up' : 'down'}`}>
                     <span className="history-purchase-badge" aria-hidden="true">
@@ -315,6 +327,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                 )}
               </>
             )}
+            {error && <p className="hint history-error down" role="alert">{error}</p>}
             {!loading && points.length < 2 && !error && <p className="hint muted history-empty">Not enough data in this range.</p>}
           </div>
         )}

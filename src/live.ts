@@ -439,7 +439,7 @@ function readHistoryCache(key: string): HistoryPoint[] | null {
     const raw = localStorage.getItem(key)
     if (!raw) return null
     const v = JSON.parse(raw) as { points: HistoryPoint[]; at: number }
-    if (!Array.isArray(v?.points) || Date.now() - v.at > HISTORY_TTL_MS) return null
+    if (!Array.isArray(v?.points) || v.points.length === 0 || Date.now() - v.at > HISTORY_TTL_MS) return null
     return v.points
   } catch {
     return null
@@ -488,7 +488,7 @@ async function fetchHistoryUncached(symbol: string, from: Date, to: Date, key: s
     const points = (json.points ?? []).filter(
       (point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.close) && point.close > 0,
     )
-    writeHistoryCache(key, points)
+    if (points.length > 0) writeHistoryCache(key, points)
     return points
   } catch {
     return []
@@ -526,7 +526,7 @@ export async function fetchNavHistory(
     }
     // mfapi returns newest-first; we want ascending so the chart reads left→right.
     points.sort((a, b) => a.date.localeCompare(b.date))
-    writeHistoryCache(key, points)
+    if (points.length > 0) writeHistoryCache(key, points)
     return points
   } catch {
     return []
