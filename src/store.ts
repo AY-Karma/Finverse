@@ -81,8 +81,13 @@ export function sanitizeFolios(value: unknown): Folio[] {
   return value.slice(0, MAX_PERSISTED_FOLIOS).map(sanitizeFolio).filter((f): f is Folio => f !== null)
 }
 
-export function saveFolios(folios: Folio[]): void {
-  localStorage.setItem(FOLIOS_KEY, JSON.stringify(folios.map((folio) => ({ ...folio, positions: folio.positions.map(normalizePosition) }))))
+export function saveFolios(folios: Folio[]): boolean {
+  try {
+    localStorage.setItem(FOLIOS_KEY, JSON.stringify(folios.map((folio) => ({ ...folio, positions: folio.positions.map(normalizePosition) }))))
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function loadFolios(): Folio[] {

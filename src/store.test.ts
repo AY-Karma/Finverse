@@ -1,5 +1,21 @@
-import { describe, expect, it } from 'vitest'
-import { sanitizeFolios } from './store'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { sanitizeFolios, saveFolios } from './store'
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('saveFolios', () => {
+  it('reports a storage failure without throwing', () => {
+    vi.stubGlobal('localStorage', { setItem: () => { throw new DOMException('Full', 'QuotaExceededError') } })
+    expect(saveFolios([])).toBe(false)
+  })
+
+  it('reports a successful save', () => {
+    const setItem = vi.fn()
+    vi.stubGlobal('localStorage', { setItem })
+    expect(saveFolios([])).toBe(true)
+    expect(setItem).toHaveBeenCalledWith('finverse:folios', '[]')
+  })
+})
 
 describe('sanitizeFolios', () => {
   it('rejects malformed persisted records', () => {
