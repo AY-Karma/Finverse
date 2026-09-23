@@ -138,7 +138,7 @@ describe('market news adapter · wire', () => {
     let calls = 0
     const adapter = createMarketNewsAdapter(async (url) => {
       calls += 1
-      return decodeURIComponent(url).includes('economictimes') ? ET_FEED : BS_FEED
+      return url.includes('wire-et') ? ET_FEED : BS_FEED
     })
 
     const first = await adapter.fetchWire({})
@@ -153,7 +153,7 @@ describe('market news adapter · wire', () => {
 
   it('surfaces a named issue when one wire feed dies but still shows the other', async () => {
     const adapter = createMarketNewsAdapter(async (url) => {
-      if (decodeURIComponent(url).includes('economictimes')) throw new Error('HTTP 403')
+      if (url.includes('wire-et')) throw new Error('HTTP 403')
       return BS_FEED
     })
 
@@ -187,7 +187,7 @@ describe('market news adapter · wire', () => {
 
   it('drops stories older than the freshness window', async () => {
     const staleFeed = ET_FEED.replace('<pubDate>' + hoursAgo(1) + '</pubDate>', `<pubDate>${hoursAgo(24 * 20)}</pubDate>`)
-    const adapter = createMarketNewsAdapter(async (url) => decodeURIComponent(url).includes('economictimes') ? staleFeed : BS_FEED)
+    const adapter = createMarketNewsAdapter(async (url) => url.includes('wire-et') ? staleFeed : BS_FEED)
 
     const result = await adapter.fetchWire({})
 
@@ -196,10 +196,10 @@ describe('market news adapter · wire', () => {
 })
 
 describe('market news adapter · company search', () => {
-  it('queries Bing News RSS through the CORS relay and keeps each query cached separately', async () => {
+  it('queries the local news API and keeps each query cached separately', async () => {
     const urls: string[] = []
     const adapter = createMarketNewsAdapter(async (url) => {
-      urls.push(decodeURIComponent(url))
+      urls.push(url)
       return BING_FEED
     })
 
@@ -207,8 +207,7 @@ describe('market news adapter · company search', () => {
     await adapter.fetchCompanyNews('"Reliance Industries"', {})
     const otherQuery = await adapter.fetchCompanyNews('TCS', {})
 
-    expect(urls[0]).toContain('corsproxy.io')
-    expect(urls[0]).toContain('https://www.bing.com/news/search?q=%22Reliance%20Industries%22&format=RSS')
+    expect(urls[0]).toBe('/api/news?source=search&q=%22Reliance%20Industries%22')
     expect(urls).toHaveLength(2)
     expect(first.items.map((item) => item.source)).toEqual(['TechCircle', 'Market Desk'])
     // Same stories resolve under both queries but ids stay distinct per origin.
