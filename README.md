@@ -58,7 +58,7 @@ npm run preview   # Serve the production build locally
 - Portfolio data and chat history are stored locally in the browser.
 - API keys are kept in session storage and are not persisted as portfolio data.
 - External market data is opt-in.
-- Portfolio news uses GDELT general-news metadata and links to the original publisher; it is not an exchange-filings feed.
+- Portfolio news uses Economic Times and Google News market RSS feeds, with Google News search and a Bing News fallback. Stories link to the original publisher; this is not an exchange-filings feed.
 - Depending on your settings, market requests may use Yahoo Finance through `corsproxy.io`, mfapi.in, or Frankfurter.
 - AI requests send the portfolio context and conversation to the provider you configure.
 - Ollama defaults to localhost. Remote Ollama endpoints require HTTPS and explicit confirmation.
@@ -75,4 +75,4 @@ The current public market-data connection does not provide every index reliably,
 
 ## Technology
 
-React, TypeScript, Vite, Recharts, and `@e965/xlsx`.
+React, TypeScript, Vite, and `@e965/xlsx`.
