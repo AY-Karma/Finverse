@@ -78,10 +78,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [quickMode, setQuickModeState] = useState(false)
   const [marketDataRefreshing, setMarketDataRefreshing] = useState(settings.allowExternalData)
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
+  const [folioSaveFailed, setFolioSaveFailed] = useState(false)
   const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
   const lastImportedFolioId = useRef<string | null>(null)
 
-  useEffect(() => saveFolios(folios), [folios])
+  useEffect(() => setFolioSaveFailed(!saveFolios(folios)), [folios])
   useEffect(() => saveSettings(settings), [settings])
 
   const addFolio = useCallback((name: string, positions: Position[]) => {
@@ -328,7 +329,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setQuickMode,
   }
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+  return <StoreContext.Provider value={value}>
+    {folioSaveFailed && <div className="folio-save-warning" role="alert">
+      <span>Portfolio changes could not be saved in this browser. Export a backup before closing this tab.</span>
+      <button type="button" onClick={() => exportPortfolio('json')}>Export backup</button>
+      <button type="button" onClick={() => setFolioSaveFailed(!saveFolios(folios))}>Retry saving</button>
+    </div>}
+    {children}
+  </StoreContext.Provider>
 }
 
 export function useStore(): Store {

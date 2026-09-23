@@ -430,56 +430,106 @@ export interface HistoryPoint {
 const HISTORY_TTL_MS = 24 * 60 * 60 * 1000
 const historyRequests = new Map<string, Promise<HistoryPoint[]>>()
 
-function historyCacheKey(symbol: string, from: string, to: string): string {
-  return `finverse:history:${symbol}:${from}:${to}`
+interface HistoryCacheEntry {
+  from: string
+  to: string
+  points: HistoryPoint[]
+  at: number
 }
 
-function readHistoryCache(key: string): HistoryPoint[] | null {
+function historyCacheKey(symbol: string): string {
+  return `finverse:history:v2:${symbol}`
+}
+
+function readHistoryCache(key: string): HistoryCacheEntry | null {
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return null
-    const v = JSON.parse(raw) as { points: HistoryPoint[]; at: number }
-    if (!Array.isArray(v?.points) || v.points.length === 0 || Date.now() - v.at > HISTORY_TTL_MS) return null
-    return v.points
+    const entry = JSON.parse(raw) as HistoryCacheEntry
+    if (!Array.isArray(entry?.points) || !entry.from || !entry.to || !Number.isFinite(entry.at) || Date.now() - entry.at > HISTORY_TTL_MS) return null
+    return entry
   } catch {
     return null
   }
 }
 
-function writeHistoryCache(key: string, points: HistoryPoint[]): void {
+function writeHistoryCache(key: string, entry: HistoryCacheEntry): void {
   try {
-    localStorage.setItem(key, JSON.stringify({ points, at: Date.now() }))
+    const legacyPrefix = key.replace('finverse:history:v2:', 'finverse:history:') + ':'
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const storedKey = localStorage.key(index)
+      if (storedKey?.startsWith(legacyPrefix)) localStorage.removeItem(storedKey)
+    }
+    localStorage.setItem(key, JSON.stringify(entry))
   } catch {
     /* storage unavailable or full — refetch next time */
   }
 }
 
-/** Daily close series for an equity/ETF market symbol. */
-export function fetchHistory(
+function adjacentDay(date: string, offset: number): string {
+  const day = new Date(`${date}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() + offset)
+  return day.toISOString().slice(0, 10)
+}
+
+function historyInRange(points: HistoryPoint[], from: string, to: string): HistoryPoint[] {
+  return points.filter((point) => point.date >= from && point.date <= to)
+}
+
+function fetchCachedHistory(
   symbol: string,
   from: Date,
   to: Date,
+  fetchRange: (from: string, to: string) => Promise<HistoryPoint[]>,
 ): Promise<HistoryPoint[]> {
   const fromS = istDate(from)
   const toS = istDate(to)
-  const key = historyCacheKey(symbol, fromS, toS)
+  const key = historyCacheKey(symbol)
   const cached = readHistoryCache(key)
-  if (cached) return Promise.resolve(cached)
+  if (cached && cached.from <= fromS && cached.to >= toS) {
+    return Promise.resolve(historyInRange(cached.points, fromS, toS))
+  }
 
   const existing = historyRequests.get(key)
-  if (existing) return existing
+  if (existing) return existing.then(() => fetchCachedHistory(symbol, from, to, fetchRange))
 
-  const request = fetchHistoryUncached(symbol, from, to, key)
+  const request = (async () => {
+    const ranges: [string, string][] = cached
+      ? [
+          ...(fromS < cached.from ? [[fromS, adjacentDay(cached.from, -1)] as [string, string]] : []),
+          ...(toS > cached.to ? [[adjacentDay(cached.to, 1), toS] as [string, string]] : []),
+        ]
+      : [[fromS, toS]]
+    let next = cached ?? { from: fromS, to: toS, points: [], at: Date.now() }
+    for (const [rangeFrom, rangeTo] of ranges) {
+      const points = await fetchRange(rangeFrom, rangeTo)
+      if (points.length === 0) continue
+      next = {
+        from: rangeFrom < next.from ? rangeFrom : next.from,
+        to: rangeTo > next.to ? rangeTo : next.to,
+        points: [...new Map([...next.points, ...points].map((point) => [point.date, point])).values()]
+          .sort((a, b) => a.date.localeCompare(b.date)),
+        at: Date.now(),
+      }
+    }
+    if (next.points.length > 0) writeHistoryCache(key, next)
+    return historyInRange(next.points, fromS, toS)
+  })()
   historyRequests.set(key, request)
-  void request.finally(() => historyRequests.delete(key))
+  void request.then(() => historyRequests.delete(key), () => historyRequests.delete(key))
   return request
 }
 
-async function fetchHistoryUncached(symbol: string, from: Date, to: Date, key: string): Promise<HistoryPoint[]> {
+/** Daily close series for an equity/ETF market symbol. */
+export function fetchHistory(symbol: string, from: Date, to: Date): Promise<HistoryPoint[]> {
+  return fetchCachedHistory(symbol, from, to, (rangeFrom, rangeTo) => fetchHistoryUncached(symbol, rangeFrom, rangeTo))
+}
+
+async function fetchHistoryUncached(symbol: string, from: string, to: string): Promise<HistoryPoint[]> {
   const params = new URLSearchParams({
     symbol,
-    from: istDate(from),
-    to: istDate(to),
+    from,
+    to,
   })
   try {
     const res = await fetch(`/api/history?${params}`, { signal: AbortSignal.timeout(12000) })
@@ -488,7 +538,6 @@ async function fetchHistoryUncached(symbol: string, from: Date, to: Date, key: s
     const points = (json.points ?? []).filter(
       (point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.close) && point.close > 0,
     )
-    if (points.length > 0) writeHistoryCache(key, points)
     return points
   } catch {
     return []
@@ -496,22 +545,21 @@ async function fetchHistoryUncached(symbol: string, from: Date, to: Date, key: s
 }
 
 /** Daily NAV series for a mutual-fund scheme, matched by name via mfapi.in. */
-export async function fetchNavHistory(
+export function fetchNavHistory(
   schemeName: string,
   from: Date,
   to: Date,
 ): Promise<HistoryPoint[]> {
-  const fromS = istDate(from)
-  const toS = istDate(to)
-  const key = historyCacheKey(`mf:${normalizeScheme(schemeName)}`, fromS, toS)
-  const cached = readHistoryCache(key)
-  if (cached) return cached
+  return fetchCachedHistory(`mf:${normalizeScheme(schemeName)}`, from, to, (rangeFrom, rangeTo) =>
+    fetchNavHistoryUncached(schemeName, rangeFrom, rangeTo))
+}
 
+async function fetchNavHistoryUncached(schemeName: string, from: string, to: string): Promise<HistoryPoint[]> {
   const code = await resolveScheme(schemeName)
   if (code == null) return []
   try {
     const res = await fetch(
-      `https://api.mfapi.in/mf/${code}?startDate=${fromS}&endDate=${toS}`,
+      `https://api.mfapi.in/mf/${code}?startDate=${from}&endDate=${to}`,
       { signal: AbortSignal.timeout(12000) },
     )
     if (!res.ok) return []
@@ -526,7 +574,6 @@ export async function fetchNavHistory(
     }
     // mfapi returns newest-first; we want ascending so the chart reads left→right.
     points.sort((a, b) => a.date.localeCompare(b.date))
-    if (points.length > 0) writeHistoryCache(key, points)
     return points
   } catch {
     return []

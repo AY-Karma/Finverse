@@ -57,6 +57,29 @@ describe('market data client', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
+  it('fetches only the missing dates when history expands', async () => {
+    const stored = new Map<string, string>([['finverse:history:TCS.NS:2026-09-21:2026-09-22', 'old cache']])
+    vi.stubGlobal('localStorage', {
+      get length() { return stored.size },
+      key: (index: number) => [...stored.keys()][index] ?? null,
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+      removeItem: (key: string) => stored.delete(key),
+    })
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ points: [{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 101 }] }))
+      .mockResolvedValueOnce(Response.json({ points: [{ date: '2026-09-19', close: 98 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const date = (day: string) => new Date(`${day}T12:00:00+05:30`)
+
+    await expect(fetchHistory('TCS.NS', date('2026-09-21'), date('2026-09-22'))).resolves.toHaveLength(2)
+    await expect(fetchHistory('TCS.NS', date('2026-09-19'), date('2026-09-22'))).resolves.toHaveLength(3)
+    await expect(fetchHistory('TCS.NS', date('2026-09-21'), date('2026-09-22'))).resolves.toHaveLength(2)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(String(fetcher.mock.calls[1]?.[0])).toContain('from=2026-09-19&to=2026-09-20')
+    expect([...stored.keys()]).toEqual(['finverse:history:v2:TCS.NS'])
+  })
+
   it('uses the same-origin quote endpoint and preserves the market timestamp', async () => {
     const marketTime = '2026-08-24T09:45:02.000Z'
     const fetcher = vi.fn<typeof fetch>(async () =>
