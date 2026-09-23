@@ -30,6 +30,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [benchmarkPoints, setBenchmarkPoints] = useState<{ date: string; close: number }[]>([])
   const [benchmarkLoading, setBenchmarkLoading] = useState(false)
   const [benchmarkError, setBenchmarkError] = useState(false)
+  const [benchmarkReload, setBenchmarkReload] = useState(0)
   const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
   const [openKpi, setOpenKpi] = useState<'top-five' | 'drawdown' | null>(null)
@@ -86,33 +87,46 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const performanceHistory = performanceMode === 'tracked' && trackedAvailable ? chartHistory : backcastHistory
 
   useEffect(() => {
-    if (!settings.allowExternalData || analyticsStartAt == null || !selectedBenchmark.symbol) {
+    const symbol = selectedBenchmark.symbol
+    if (!settings.allowExternalData || analyticsStartAt == null || !symbol) {
       setBenchmarkPoints([])
+      setBenchmarkError(false)
+      setBenchmarkLoading(false)
       return
     }
     let alive = true
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     setBenchmarkPoints([])
     setBenchmarkError(false)
     setBenchmarkLoading(true)
     const to = new Date()
     const from = new Date(Math.min(analyticsStartAt, to.getTime() - 365 * 24 * 60 * 60 * 1000))
-    void marketData.benchmarkHistory(selectedBenchmark.symbol, from, to).then((points) => {
-      if (alive) {
-        setBenchmarkPoints(points)
-        setBenchmarkError(points.length < 2)
-        setBenchmarkLoading(false)
+    const load = async (attempt: number) => {
+      let points: typeof benchmarkPoints = []
+      try {
+        points = await marketData.benchmarkHistory(symbol, from, to)
+      } catch {
+        // A failed provider request can be retried while this benchmark is selected.
       }
-    }).catch(() => {
-      if (alive) {
+      if (!alive) return
+      if (points.length >= 2) {
+        setBenchmarkPoints(points)
+        setBenchmarkError(false)
+        setBenchmarkLoading(false)
+      } else if (attempt < 2) {
+        retryTimer = setTimeout(() => { void load(attempt + 1) }, attempt === 0 ? 600 : 1500)
+      } else {
         setBenchmarkPoints([])
         setBenchmarkError(true)
         setBenchmarkLoading(false)
       }
-    })
+    }
+    void load(0)
     return () => {
       alive = false
+      if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [analyticsStartAt, selectedBenchmark.symbol, settings.allowExternalData])
+  }, [analyticsStartAt, benchmarkReload, selectedBenchmark.symbol, settings.allowExternalData])
 
   const benchmarkSeries = useMemo<BenchmarkPoint[]>(() => {
     const history = analyticsHistory
@@ -175,6 +189,15 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const mask = (value: string) => hide ? '••••••' : value
   const currency = settings.currency
   const value = (amount: number) => mask(formatCurrency(amount, currency, snapshot.fxRate?.usdInr))
+  const axisCurrency = new Intl.NumberFormat('en-IN', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 })
+  const axisValue = (amount: number) => mask(currency === 'USD'
+    ? snapshot.fxRate?.usdInr ? axisCurrency.format(amount / snapshot.fxRate.usdInr) : '—'
+    : axisCurrency.format(amount))
+  const performanceLatest = performanceHistory[performanceHistory.length - 1]
+  const performanceGain = performanceLatest ? performanceLatest.value - performanceLatest.invested : null
+  const performanceGainPct = performanceGain != null && performanceLatest?.invested > 0
+    ? performanceGain / performanceLatest.invested * 100
+    : null
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
   const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
@@ -200,7 +223,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail"><div><span className="score-label">How this was calculated</span><strong>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong></div><p>{hasHistory && risk.worstAt && risk.worstPeakAt ? <>The reconstructed value fell from its high on <strong>{shortDate(risk.worstPeakAt)}</strong> to its lowest point on <strong>{shortDate(risk.worstAt)}</strong>. This uses today’s holdings across historical market prices and does not claim a news or event caused the move.</> : 'Historical prices are still loading for this calculation.'}</p></div>}
 
       <div className="insight-grid enter d2">
-        <section className="panel insight-panel insight-panel--wide">
+        <section className="panel insight-panel insight-panel--wide insight-panel--benchmark">
           <div className="panel-head">
             <div className="panel-head-titles">
               <span className="panel-title">Benchmark race</span>
@@ -235,8 +258,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
               </details>
             </div>
           </div>
-          <span className="hint">{selectedBenchmark.unavailableReason ?? (benchmarkError ? `Could not load ${selectedBenchmark.label} history` : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : 'Historical market data is unavailable')}</span>
-          <div className="insight-chart">
+          <span className="hint">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : trackedAvailable ? 'Tracked portfolio history' : 'Historical market data is unavailable')}</span>
+          <div className="insight-chart insight-chart--benchmark">
             {benchmarkSeries.length >= 2 ? <InteractiveTrendChart rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))} lines={[{ key: 'portfolio', label: 'Portfolio', color: '#5e6ad2' }, { key: 'benchmark', label: selectedBenchmark.label, color: '#f2b53c' }]} valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)} yAxisLabel="Return (%)" includeZero onReachStart={backcast ? requestMoreBackcast : undefined} /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (settings.allowExternalData ? 'Building your comparison' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
           </div>
         </section>
@@ -257,14 +280,19 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · Lower is safer</span></div><span className="hint">Uses today's quantities with past prices{backcast ? ` · ${backcast.coveragePct.toFixed(0)}% price coverage` : ''}</span></div>
-          {hasHistory ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} /> : <div className="chart-empty">Historical prices are loading to build your risk profile.</div>}
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · At a glance</span></div></div>
+          {hasHistory ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} usesBackcast={backcastHistory.length >= 2} /> : <div className="chart-empty">Historical prices are loading to build your risk profile.</div>}
         </section>
 
-        <section className="panel insight-panel insight-panel--wide">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Performance story</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio values' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
-          <div className="history-method-note"><div><strong>Backcast · available now</strong><span>Applies today’s quantities to real historical closes. Useful immediately, but it cannot know past trades or cash flows.</span></div><div><strong>Tracked · {trackedAvailable ? 'available' : 'collecting'}</strong><span>Saves one verified portfolio value per market day on this device, building an observed record of the portfolio from now on.</span></div></div>
-          <div className="insight-chart insight-chart--small">{performanceHistory.length >= 2 ? <InteractiveTrendChart rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))} lines={[{ key: 'value', label: 'Portfolio value', color: '#41b883' }, { key: 'invested', label: 'Invested capital', color: '#f2b53c', dashed: true }]} valueFormatter={value} yAxisLabel="Value" onReachStart={performanceMode === 'backcast' && backcast ? requestMoreBackcast : undefined} /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{backcastLoading ? 'Building your historical series' : 'Historical prices are unavailable'}</strong><span>{backcastLoading ? 'Current holdings are being matched with real historical closes.' : 'Enable external market data or use tracked snapshots as they accumulate.'}</span></div>}</div>
+        <section className="panel insight-panel insight-panel--wide insight-panel--performance">
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Performance story</span><span className="section-index">06 · Value vs invested</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio values' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
+          <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Saved daily portfolio values on this device.'}</p>
+          {performanceHistory.length >= 2 && performanceLatest && <div className="performance-summary" aria-label="Latest performance values">
+            <div><span>Portfolio value</span><strong>{value(performanceLatest.value)}</strong></div>
+            <div><span>Invested</span><strong>{value(performanceLatest.invested)}</strong></div>
+            <div><span>Gain / loss</span><strong className={hide ? '' : performanceGain != null && performanceGain >= 0 ? 'up' : 'down'}>{value(performanceGain ?? 0)}</strong>{performanceGainPct != null && <small>{mask(formatPercent(performanceGainPct))}</small>}</div>
+          </div>}
+          <div className="insight-chart insight-chart--performance">{performanceHistory.length >= 2 ? <InteractiveTrendChart rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))} lines={[{ key: 'value', label: 'Portfolio value', color: '#41b883' }, { key: 'invested', label: 'Invested capital', color: '#f2b53c', dashed: true }]} valueFormatter={value} axisFormatter={axisValue} yAxisLabel="Value" onReachStart={performanceMode === 'backcast' && backcast ? requestMoreBackcast : undefined} /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{backcastLoading ? 'Building your historical series' : 'Historical prices are unavailable'}</strong><span>{backcastLoading ? 'Current holdings are being matched with real historical closes.' : 'Enable external market data or use tracked snapshots as they accumulate.'}</span></div>}</div>
         </section>
       </div>
     </div>
@@ -385,53 +413,58 @@ function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus 
   return 'lower'
 }
 
-function RiskProfile({ current, worst, volatility, concentration, hideValues }: { current: number; worst: number; volatility: number; concentration: number; hideValues: boolean }) {
+function RiskProfile({ current, worst, volatility, concentration, hideValues, usesBackcast }: { current: number; worst: number; volatility: number; concentration: number; hideValues: boolean; usesBackcast: boolean }) {
   const [openDefinition, setOpenDefinition] = useState<string | null>(null)
   const mask = (text: string) => hideValues ? '••••' : text
+  const historyBasis = usesBackcast ? "Today's holdings at past prices." : 'Saved daily portfolio values.'
   const riskRows = [
     {
       id: 'below-high',
-      label: 'Below latest high',
+      label: 'Current drop from peak',
       value: Math.abs(current),
-      description: 'How far the latest portfolio value sits below its latest high.',
+      summary: "How far the portfolio's latest value is below its peak.",
       scaleMax: 30,
       watchAt: 10,
       highAt: 20,
       formula: 'Value = (latest high - latest value) ÷ latest high × 100.',
-      definition: 'The app compares the latest reconstructed portfolio value with the highest value reached before it. A value of 0% means the portfolio is at that high. The bar uses a fixed 0% to 30% scale, and values above 30% fill the bar.',
+      definition: 'Compares the latest value with the highest value reached before it. 0% means it is back at that high.',
+      basis: historyBasis,
     },
     {
       id: 'largest-drop',
-      label: 'Largest past drop',
+      label: 'Worst past drop',
       value: Math.abs(worst),
-      description: 'The biggest fall from a high to a later low in this history.',
+      summary: 'The biggest fall in portfolio value after an earlier peak.',
       scaleMax: 30,
       watchAt: 10,
       highAt: 20,
       formula: 'Value = largest (earlier high - later low) ÷ earlier high × 100.',
-      definition: 'The app checks every reconstructed day against the highest value reached before it, then keeps the largest fall. The bar uses a fixed 0% to 30% scale, so it no longer appears full just because it is the worst fall in this portfolio.',
+      definition: 'Finds the deepest fall from a peak to a later low. The portfolio may have recovered since.',
+      basis: historyBasis,
     },
     {
       id: 'yearly-movement',
-      label: 'Yearly ups and downs',
+      label: 'Yearly swings',
       value: volatility,
-      description: 'An estimate of how widely portfolio returns vary over a year.',
+      summary: 'How much daily percentage returns varied, shown as a yearly estimate.',
       scaleMax: 40,
       watchAt: 15,
       highAt: 25,
       formula: 'Value = daily return standard deviation × √252 × 100.',
-      definition: 'The app calculates each day-to-day percentage return, finds their sample standard deviation, and annualizes it using 252 trading days. The bar uses a fixed 0% to 40% scale. This measures variation, not the chance of losing money.',
+      definition: 'Estimates the size of return swings. Gains and losses both count; this is not a loss probability.',
+      basis: historyBasis,
     },
     {
       id: 'top-five-share',
-      label: 'Held in 5 largest positions',
+      label: 'Top five holdings',
       value: concentration,
-      description: 'How much of the portfolio depends on its five biggest holdings.',
+      summary: 'How much of the portfolio is in its five largest holdings.',
       scaleMax: 100,
       watchAt: 50,
       highAt: 75,
       formula: 'Value = five largest position values ÷ total portfolio value × 100.',
-      definition: 'The app sorts positions by current value, adds the largest five, and divides that total by the full portfolio value. The bar is a direct 0% to 100% scale. If the portfolio has five or fewer positions, this value will be 100%.',
+      definition: 'Adds the current value of the five largest positions, then compares it with the portfolio total. Five or fewer positions means 100%.',
+      basis: 'Uses current position values.',
     },
   ].map((row) => ({
     ...row,
@@ -441,24 +474,10 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
 
   return (
     <div className="risk-profile">
-      <div className="risk-read-guide">
-        <div>
-          <strong>How to read these bars</strong>
-          <span>A longer bar means more risk on that row. Each row has its own fixed scale, printed below it.</span>
-        </div>
-        <div className="risk-guide-key" aria-label="Risk range key">
-          <span className="risk-guide-key--lower">Lower concern</span>
-          <span className="risk-guide-key--watch">Watch</span>
-          <span className="risk-guide-key--high">High concern</span>
-        </div>
-        <small>These ranges are a Finverse screening guide, not a personal recommendation. Your goal, time horizon, and tolerance for loss still matter.</small>
-      </div>
-
       <div className="risk-bars">
         {riskRows.map((row) => {
           const tooltipId = `risk-definition-${row.id}`
           const isOpen = openDefinition === row.id
-          const fillPercent = Math.min(100, (row.value / row.scaleMax) * 100)
           const statusLabel = row.status === 'lower' ? 'Lower concern' : row.status === 'watch' ? 'Watch' : 'High concern'
           const displayedStatus = hideValues ? 'hidden' : row.status
           return (
@@ -477,14 +496,15 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
                     >
                       i
                       <span id={tooltipId} role="tooltip" className="risk-help-popover">
-                        <strong>Calculation</strong>
-                        {row.formula}
-                        <strong>How to read it</strong>
-                        {row.definition}
+                        <strong>{row.label}</strong>
+                        <span>{row.definition}</span>
+                        <span><b>Formula</b> {row.formula}</span>
+                        <span><b>Guide</b> Watch at {row.watchAt}% · High at {row.highAt}%</span>
+                        <small>Bar scale 0–{row.scaleMax}%. {row.basis} Screening guide only.</small>
                       </span>
                     </button>
                   </span>
-                  <span className="risk-description">{row.description}</span>
+                  <span className="risk-summary">{row.summary}</span>
                 </div>
                 <div className="risk-reading">
                   <strong>{mask(`${row.value.toFixed(1)}%`)}</strong>
@@ -492,25 +512,13 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
                 </div>
               </div>
 
-              <div className="risk-track" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${row.value.toFixed(1)}%, ${statusLabel}`}>
+              <div className="risk-track" role="img" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${row.value.toFixed(1)}%, ${statusLabel}. Bar scale 0 to ${row.scaleMax}%.`}>
+                <span className="risk-track-zone risk-track-zone--lower" style={{ width: `${row.watchAt / row.scaleMax * 100}%` }} />
+                <span className="risk-track-zone risk-track-zone--watch" style={{ width: `${(row.highAt - row.watchAt) / row.scaleMax * 100}%` }} />
+                <span className="risk-track-zone risk-track-zone--high" style={{ width: `${(row.scaleMax - row.highAt) / row.scaleMax * 100}%` }} />
                 <span className={`risk-fill risk-fill--${displayedStatus}`} style={{ width: hideValues ? 0 : `${row.width}%` }} />
               </div>
 
-              <div
-                className="risk-ranges"
-                style={{ gridTemplateColumns: `${row.watchAt}fr ${row.highAt - row.watchAt}fr ${row.scaleMax - row.highAt}fr` }}
-                aria-label={`Lower concern below ${row.watchAt}%, watch from ${row.watchAt}% to ${row.highAt}%, high concern above ${row.highAt}%`}
-              >
-                <span className="risk-range--lower">Lower<br />Under {row.watchAt}%</span>
-                <span className="risk-range--watch">Watch<br />{row.watchAt} to under {row.highAt}%</span>
-                <span className="risk-range--high">High<br />{row.highAt}%+</span>
-              </div>
-
-              <p className="risk-bar-calculation">
-                <strong>Bar length</strong>{' '}
-                {hideValues ? 'Hidden in peek mode.' : `${row.value.toFixed(1)}% ÷ ${row.scaleMax}% scale = ${fillPercent.toFixed(0)}% of the bar${row.value > row.scaleMax ? ', capped at 100%' : ''}.`}
-              </p>
-              <p className="risk-formula"><strong>Value calculation</strong>{' '}{row.formula}</p>
             </article>
           )
         })}

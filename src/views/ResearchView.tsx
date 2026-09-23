@@ -177,7 +177,7 @@ function DossierCard({ position, value, pnl, pnlPct, currency, fxUsdInr, hideVal
 function cardChips(position: Position, displayName: string, tickerBase: string, screenerPath?: string): ResearchLink[] {
   const news: ResearchLink = {
     label: 'News',
-    url: `https://news.google.com/search?q=${encodeURIComponent(`${displayName} ${tickerBase} stock`)}`,
+    url: `https://news.google.com/search?q=${encodeURIComponent(position.name?.trim() || tickerBase)}`,
   }
   if (position.type === 'mutual-fund') {
     return [...marketLinks(position), news]

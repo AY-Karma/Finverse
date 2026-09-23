@@ -33,6 +33,7 @@ interface InteractiveTrendChartProps {
   rows: TrendRow[]
   lines: TrendLine[]
   valueFormatter: (value: number) => string
+  axisFormatter?: (value: number) => string
   yAxisLabel: string
   includeZero?: boolean
   onReachStart?: () => void
@@ -109,6 +110,7 @@ export function InteractiveTrendChart({
   rows,
   lines,
   valueFormatter,
+  axisFormatter = valueFormatter,
   yAxisLabel,
   includeZero = false,
   onReachStart,
@@ -156,8 +158,8 @@ export function InteractiveTrendChart({
     [chartRows, lines],
   )
   const domain = yDomain(values, includeZero)
-  const labels = domain.ticks.map(valueFormatter)
-  const plotLeft = clamp(Math.max(...labels.map((label) => label.length), yAxisLabel.length) * 6.6 + 22, 68, 132)
+  const labels = domain.ticks.map(axisFormatter)
+  const plotLeft = clamp(Math.max(...labels.map((label) => label.length)) * 6.6 + 18, 60, 132)
   const plotWidth = chartWidth - plotLeft - PLOT_RIGHT
   const plotHeight = chartHeight - PLOT_TOP - PLOT_BOTTOM
   const preferredViewport = createChartViewport(chartRows.length)
@@ -406,10 +408,10 @@ export function InteractiveTrendChart({
         <linearGradient id={`comparison-flat-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b9b9b4" stopOpacity="0.18" /><stop offset="100%" stopColor="#b9b9b4" stopOpacity="0.025" /></linearGradient>
         <clipPath id={`trend-plot-${chartId}`}><rect x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} /></clipPath>
       </defs>
-      {domain.ticks.map((tick) => <g key={tick}>{appearance !== 'minimal' && <line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - PLOT_RIGHT} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} />}<text x={plotLeft - 12} y={yAt(tick) + 4} textAnchor="end" className="interactive-trend-axis-text">{valueFormatter(tick)}</text></g>)}
+      {domain.ticks.map((tick) => <g key={tick}>{appearance !== 'minimal' && <line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - PLOT_RIGHT} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} />}<text x={plotLeft - 12} y={yAt(tick) + 4} textAnchor="end" className="interactive-trend-axis-text">{axisFormatter(tick)}</text></g>)}
       {appearance !== 'minimal' && <line x1={plotLeft} y1={PLOT_TOP} x2={plotLeft} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />}
       <line x1={plotLeft} y1={chartHeight - PLOT_BOTTOM} x2={chartWidth - PLOT_RIGHT} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />
-      {visibleRows.length > 0 && tickIndices(visibleRows.length).map((localIndex) => localIndex + visibleStartIndex).filter((index) => {
+      {visibleRows.length > 0 && tickIndices(visibleRows.length, chartWidth < 480 ? 3 : 5).map((localIndex) => localIndex + visibleStartIndex).filter((index) => {
         const x = xAtIndex(index)
         return x >= plotLeft - 1 && x <= chartWidth - PLOT_RIGHT + 1
       }).map((index) => <g key={`${chartRows[index]?.at}-${index}`}><line x1={xAtIndex(index)} y1={chartHeight - PLOT_BOTTOM} x2={xAtIndex(index)} y2={chartHeight - PLOT_BOTTOM + 5} className="interactive-trend-axis" /><text x={xAtIndex(index)} y={chartHeight - 18} textAnchor="middle" className="interactive-trend-axis-text">{dateLabel(chartRows[index]?.at ?? firstAt, visibleTimeSpan)}</text></g>)}

@@ -25,7 +25,7 @@ interface NewsFetch {
 
 /**
  * True-external seam. The page only needs normalized news items, never vendor payloads.
- * Wire = one Indian market RSS feed; companyNews = on-demand per-query search.
+ * Wire = Indian market RSS feeds; companyNews = on-demand per-query search.
  */
 export interface MarketNewsAdapter {
   fetchWire(options: { signal?: AbortSignal }): Promise<NewsFetch>
@@ -37,8 +37,8 @@ export interface LoadedMarketFeed extends NewsFetch {
 }
 
 const WIRE_SOURCES = [
-  { name: 'Economic Times Markets', url: 'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms' },
-  { name: 'Business Standard Markets', url: 'https://www.business-standard.com/rss/markets-106.rss' },
+  { name: 'Economic Times Markets', url: '/api/news?source=wire-et' },
+  { name: 'Google News Markets', url: '/api/news?source=wire-google' },
 ] as const
 
 const WIRE_CACHE_MS = 15 * 60 * 1000
@@ -61,10 +61,6 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
     const timer = setTimeout(resolve, ms)
     signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Retry was cancelled.', 'AbortError')) }, { once: true })
   })
-}
-
-function proxied(url: string): string {
-  return `https://corsproxy.io/?url=${encodeURIComponent(url)}`
 }
 
 interface RawNewsItem {
@@ -90,7 +86,7 @@ function xmlTag(block: string, tag: string): string | undefined {
   return match ? decodeXml(match[1]) : undefined
 }
 
-/** Tolerant RSS 2.0 reader for the two shapes we consume (publisher feeds and Bing News). */
+/** Tolerant RSS 2.0 reader for publisher feeds and news search results. */
 export function rssItems(payload: string, fallbackPublisher: string): RawNewsItem[] {
   return [...payload.matchAll(/<item>([\s\S]*?)<\/item>/gi)].flatMap((match) => {
     const block = match[1]
@@ -195,7 +191,7 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
   }
 
   async function fetchFeed(name: string, url: string, cutoff: number, signal?: AbortSignal): Promise<NewsFetch> {
-    const payload = await request(proxied(url), signal)
+    const payload = await request(url, signal)
     const items = rssItems(payload, name)
       .map((raw) => toNewsItem(raw, 'wire', 'wire', cutoff))
       .filter((item): item is NewsItem => item != null)
@@ -228,15 +224,16 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
     if (!key) return { items: [], issues: [] }
     const cached = searchCache.get(key)
     if (cached && Date.now() - cached.at < cached.ttl) return cached.result
-    const target = `https://www.bing.com/news/search?q=${encodeURIComponent(query.trim())}&format=RSS`
+    const target = `/api/news?source=search&q=${encodeURIComponent(query.trim())}`
     const cutoff = Date.now() - NEWS_MAX_AGE_MS
     try {
-      const payload = await request(proxied(target), signal)
+      const payload = await request(target, signal)
       if (signal?.aborted) throw new DOMException('Company search was cancelled.', 'AbortError')
-      const result = { items: rssItems(payload, 'Bing News').map((raw) => toNewsItem(raw, `search:${key}`, 'search', cutoff)).filter((item): item is NewsItem => item != null), issues: [] }
+      const result = { items: rssItems(payload, 'News search').map((raw) => toNewsItem(raw, `search:${key}`, 'search', cutoff)).filter((item): item is NewsItem => item != null), issues: [] }
       searchCache.set(key, { at: Date.now(), ttl: SEARCH_CACHE_MS, result })
       return result
     } catch (error) {
+      if (signal?.aborted) throw error
       const rateLimited = String(error).includes('429')
       const result = { items: [], issues: [{ source: `Search · ${query}`, message: rateLimited ? 'The news search source is rate-limiting requests. Try again shortly.' : 'Company news search failed. Try another query or refresh later.' }] }
       searchCache.set(key, { at: Date.now(), ttl: SEARCH_FAILURE_CACHE_MS, result })
