@@ -29,7 +29,13 @@ export function HoldingsView({ onRequestImport }: { onRequestImport: () => void 
     }
     const controller = new AbortController()
     setLoading(true)
-    void loadMarketFeed(monitorPositions, { signal: controller.signal, query: activeQuery })
+    void loadMarketFeed(monitorPositions, {
+      signal: controller.signal,
+      query: activeQuery,
+      onPartial: (next) => {
+        if (!controller.signal.aborted) setFeed(next)
+      },
+    })
       .then((next) => {
         if (!controller.signal.aborted) setFeed(next)
       })

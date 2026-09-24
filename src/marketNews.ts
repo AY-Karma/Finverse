@@ -28,7 +28,7 @@ interface NewsFetch {
  * Wire = Indian market RSS feeds; companyNews = on-demand per-query search.
  */
 export interface MarketNewsAdapter {
-  fetchWire(options: { signal?: AbortSignal }): Promise<NewsFetch>
+  fetchWire(options: { signal?: AbortSignal; onPartial?: (feed: NewsFetch) => void }): Promise<NewsFetch>
   fetchCompanyNews(query: string, options: { signal?: AbortSignal }): Promise<NewsFetch>
 }
 
@@ -51,7 +51,8 @@ const RETRY_DELAY_MS = 700
 type TextFetcher = (url: string, signal?: AbortSignal) => Promise<string>
 
 async function fetchText(url: string, signal?: AbortSignal): Promise<string> {
-  const response = await fetch(url, { signal: signal ?? AbortSignal.timeout(12_000) })
+  const timeout = AbortSignal.timeout(12_000)
+  const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return response.text()
 }
@@ -184,7 +185,7 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
     try {
       return await requestText(url, signal)
     } catch (error) {
-      if (signal?.aborted) throw error
+      if (signal?.aborted || (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError'))) throw error
       await delay(RETRY_DELAY_MS, signal)
       return requestText(url, signal)
     }
@@ -198,11 +199,19 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
     return { items, issues: [] }
   }
 
-  const fetchWire = async ({ signal }: { signal?: AbortSignal } = {}): Promise<NewsFetch> => {
+  const fetchWire = async ({ signal, onPartial }: { signal?: AbortSignal; onPartial?: (feed: NewsFetch) => void } = {}): Promise<NewsFetch> => {
     if (wireCache && Date.now() - wireCache.at < wireCache.ttl) return wireCache.result
     const cutoff = Date.now() - NEWS_MAX_AGE_MS
+    const received: NewsFetch[] = []
     // Every reachable feed contributes; a partial outage still shows news and names the dead feed.
-    const outcomes = await Promise.allSettled(WIRE_SOURCES.map((source) => fetchFeed(source.name, source.url, cutoff, signal)))
+    const outcomes = await Promise.allSettled(WIRE_SOURCES.map(async (source) => {
+      const feed = await fetchFeed(source.name, source.url, cutoff, signal)
+      if (!signal?.aborted && feed.items.length > 0) {
+        received.push(feed)
+        onPartial?.({ items: dedupeItems(received.flatMap((item) => item.items)), issues: [] })
+      }
+      return feed
+    }))
     if (signal?.aborted) throw new DOMException('Wire refresh was cancelled.', 'AbortError')
     const fulfilled = outcomes.filter((outcome): outcome is PromiseFulfilledResult<NewsFetch> => outcome.status === 'fulfilled')
     const issues = fulfilled.length === WIRE_SOURCES.length ? [] : WIRE_SOURCES
@@ -249,17 +258,22 @@ const marketNewsAdapter = createMarketNewsAdapter()
 /** Wire always loads; the optional query layers a company deep-dive on top. Both failures surface as issues. */
 export async function loadMarketFeed(
   positions: Position[],
-  options: { signal?: AbortSignal; query?: string } = {},
+  options: { signal?: AbortSignal; query?: string; onPartial?: (feed: LoadedMarketFeed) => void } = {},
   adapter: MarketNewsAdapter = marketNewsAdapter,
 ): Promise<LoadedMarketFeed> {
   const holdings = eligibleHoldings(positions)
-  const [wire, search] = await Promise.all([
-    adapter.fetchWire(options),
-    options.query?.trim() ? adapter.fetchCompanyNews(options.query, options) : Promise.resolve({ items: [] as NewsItem[], issues: [] as MonitorIssue[] }),
-  ])
-  const tagged = dedupeItems([...wire.items, ...search.items]).map((item) => ({
+  const tag = (items: NewsItem[]) => dedupeItems(items).map((item) => ({
     ...item,
     matches: matchedTickers(item.title, holdings),
   }))
-  return { items: tagged, issues: [...search.issues, ...wire.issues], fetchedAt: Date.now() }
+  const [wire, search] = await Promise.all([
+    adapter.fetchWire({
+      signal: options.signal,
+      onPartial: options.onPartial ? (feed) => options.onPartial?.({
+        items: tag(feed.items), issues: feed.issues, fetchedAt: Date.now(),
+      }) : undefined,
+    }),
+    options.query?.trim() ? adapter.fetchCompanyNews(options.query, options) : Promise.resolve({ items: [] as NewsItem[], issues: [] as MonitorIssue[] }),
+  ])
+  return { items: tag([...wire.items, ...search.items]), issues: [...search.issues, ...wire.issues], fetchedAt: Date.now() }
 }

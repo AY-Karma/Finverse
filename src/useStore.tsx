@@ -31,6 +31,7 @@ type RefreshResult =
 
 const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
 const REFRESH_MS = 5 * 60_000 // live quote refresh cadence during market hours (5m)
+const CLOSED_REFRESH_MS = 24 * 60 * 60_000
 const FX_REFRESH_MS = 6 * 60 * 60_000 // Frankfurter publishes daily reference rates
 
 export interface ImportPreview {
@@ -209,7 +210,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     let open = isMarketOpen()
     let inFlight = false
-    let hasFetchedAfterClose = false
+    let closeRefreshPending = false
+    let lastRefreshAt = 0
     let active = true
 
     const refresh = async () => {
@@ -219,6 +221,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const result = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current)
         if (active) {
+          if (result.updated > 0 || result.skipped > 0 || result.failed === 0) lastRefreshAt = Date.now()
           setLiveQuotes(result.quotes)
           setMarketDataResult(result)
         }
@@ -244,11 +247,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const openTimer = window.setInterval(() => {
       const nowOpen = isMarketOpen()
       // Market just closed: do one final fetch to capture the official close.
-      if (open && !nowOpen && !hasFetchedAfterClose) {
-        hasFetchedAfterClose = true
+      if (open && !nowOpen) closeRefreshPending = true
+      open = nowOpen
+      if (closeRefreshPending && !document.hidden && !inFlight) {
+        closeRefreshPending = false
         void refresh()
       }
-      open = nowOpen
     }, MARKET_CHECK_MS)
 
     const refreshTimer = window.setInterval(() => {
@@ -256,7 +260,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }, REFRESH_MS)
 
     const onVisibility = () => {
-      if (!document.hidden) void refresh()
+      if (document.hidden) return
+      const nowOpen = isMarketOpen()
+      const marketOpened = !open && nowOpen
+      if (open && !nowOpen) closeRefreshPending = true
+      if (marketOpened) closeRefreshPending = false
+      open = nowOpen
+      if (closeRefreshPending || marketOpened || Date.now() - lastRefreshAt >= (nowOpen ? REFRESH_MS : CLOSED_REFRESH_MS)) {
+        if (closeRefreshPending && !inFlight) closeRefreshPending = false
+        void refresh()
+      }
     }
     document.addEventListener('visibilitychange', onVisibility)
 

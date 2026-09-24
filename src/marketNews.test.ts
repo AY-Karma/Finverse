@@ -42,6 +42,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('rssItems', () => {
@@ -134,6 +136,44 @@ describe('eligibleHoldings', () => {
 })
 
 describe('market news adapter · wire', () => {
+  it('shows a healthy feed before a second source finishes', async () => {
+    let finishSecond!: (feed: string) => void
+    const second = new Promise<string>((resolve) => { finishSecond = resolve })
+    const adapter = createMarketNewsAdapter((url) =>
+      url.includes('wire-et') ? Promise.resolve(ET_FEED) : second,
+    )
+    const partial: NewsItem[][] = []
+
+    const pending = adapter.fetchWire({ onPartial: (result) => partial.push(result.items) })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(partial[0]?.map((item) => item.title)).toContain('Markets rally as IT stocks surge 3%')
+    finishSecond(BS_FEED)
+    expect((await pending).items).toHaveLength(3)
+  })
+
+  it('ends stalled requests on timeout even when the view supplies an abort signal', async () => {
+    const timeout = new AbortController()
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal)
+    const fetcher = vi.fn<typeof fetch>((_url, options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject((options.signal as AbortSignal).reason), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    const adapter = createMarketNewsAdapter()
+
+    let settled = false
+    const pending = adapter.fetchWire({ signal: new AbortController().signal }).then((result) => {
+      settled = true
+      return result
+    })
+    timeout.abort(new DOMException('News request timed out.', 'TimeoutError'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(settled).toBe(true)
+    expect((await pending).issues).toHaveLength(1)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it('merges every reachable feed, dedupes them, and caches the wire between refreshes', async () => {
     let calls = 0
     const adapter = createMarketNewsAdapter(async (url) => {
