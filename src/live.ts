@@ -377,6 +377,7 @@ export async function fetchLiveQuotes(
   const funds = unique.filter((position) => position.type === 'mutual-fund')
   let nextFund = 0
   const worker = async () => {
+    let requestedFund = false
     while (nextFund < funds.length) {
       const position = funds[nextFund++]
       const key = quoteKey(position)
@@ -388,12 +389,13 @@ export async function fetchLiveQuotes(
       ) {
         outcomes.push({ key, status: 'skipped' })
       } else {
+        if (requestedFund) await delay(NAV_REQUEST_GAP_MS)
         const nav = await fetchNavByName(position.name || position.ticker)
+        requestedFund = true
         outcomes.push(nav
           ? { key, quote: nav, status: 'updated' }
           : { key, status: 'failed' })
       }
-      await delay(NAV_REQUEST_GAP_MS)
     }
   }
   await Promise.all(Array.from({ length: Math.min(NAV_REQUEST_CONCURRENCY, funds.length) }, () => worker()))

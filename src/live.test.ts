@@ -166,6 +166,32 @@ describe('market data client', () => {
       at: Date.parse('2026-08-24T09:45:02.000Z'),
     })
   })
+
+  it('does not wait after a current daily NAV that needs no request', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-25T06:00:00Z'))
+    try {
+      const fund: Position = { ...position('FUND'), type: 'mutual-fund' }
+      const previous: Record<string, LiveQuote> = {
+        'MF:fund': { price: 120, at: Date.now(), fetchedAt: Date.now(), source: 'nav' },
+      }
+      const fetcher = vi.fn<typeof fetch>()
+      vi.stubGlobal('fetch', fetcher)
+
+      let settled = false
+      const pending = fetchLiveQuotes([fund], previous).then((result) => {
+        settled = true
+        return result
+      })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(settled).toBe(true)
+      expect(await pending).toMatchObject({ updated: 0, failed: 0, skipped: 1 })
+      expect(fetcher).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 function position(ticker: string): Position {
