@@ -40,7 +40,13 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [ledgerPage, setLedgerPage] = useState(0)
   const [historyPanelReady, setHistoryPanelReady] = useState(false)
+  const [marketNow, setMarketNow] = useState(() => new Date())
   const hideValues = settings.hideValues
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setMarketNow(new Date()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (refreshAvailableAt <= Date.now()) return
@@ -78,7 +84,8 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
   const live = settings.allowExternalData ? liveQuotes : {}
   const liveCount = Object.keys(live).length
   const fetchingMarketData = refreshing || marketDataRefreshing
-  const marketOpen = isMarketOpen()
+  const marketOpen = isMarketOpen(marketNow)
+  const marketDotClass = `live-dot${marketOpen ? '' : ' live-dot--market-closed'}${fetchingMarketData ? ' live-dot--fetching' : liveCount > 0 ? '' : ' live-dot--loading'}`
   const fxReady = currency === 'INR' || !!fxRate?.usdInr
   const refreshCooldownSeconds = Math.max(0, Math.ceil((refreshAvailableAt - Date.now()) / 1000))
   const marketDataIssue = quoteRefreshIssueText(marketDataResult)
@@ -288,62 +295,64 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           <div className="page-eyebrow">Portfolio</div>
           <h1 className="page-title">Overview</h1>
         </div>
-        <div className="page-sub" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <Scope />
-          <button
-            className={`icon-btn${hideValues ? ' icon-btn--active' : ''}`}
-            onClick={() => setSettings({ ...settings, hideValues: !hideValues })}
-            title={hideValues ? 'Reveal values (peek mode off)' : 'Hide values (peek mode on)'}
-            aria-label={hideValues ? 'Reveal portfolio values' : 'Hide portfolio values'}
-            aria-pressed={hideValues}
-          >
-            {hideValues ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-                <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M14.1 5.6A11.4 11.4 0 0 1 22 12c-.9 1.9-2.5 4.1-4.6 5.6M13.4 17A10.9 10.9 0 0 1 2 12c1.3-2.7 3.6-5.4 7.1-6.7" />
-                <path d="M4 20 20 4" />
-              </svg>
-            ) : (
+        <div className="page-sub overview-sub">
+          <div className="overview-actions">
+            <Scope />
+            <button
+              className={`icon-btn${hideValues ? ' icon-btn--active' : ''}`}
+              onClick={() => setSettings({ ...settings, hideValues: !hideValues })}
+              title={hideValues ? 'Reveal values (peek mode off)' : 'Hide values (peek mode on)'}
+              aria-label={hideValues ? 'Reveal portfolio values' : 'Hide portfolio values'}
+              aria-pressed={hideValues}
+            >
+              {hideValues ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+                  <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M14.1 5.6A11.4 11.4 0 0 1 22 12c-.9 1.9-2.5 4.1-4.6 5.6M13.4 17A10.9 10.9 0 0 1 2 12c1.3-2.7 3.6-5.4 7.1-6.7" />
+                  <path d="M4 20 20 4" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
+            </button>
+            <button
+              className={`icon-btn${refreshing ? ' icon-btn--spinning' : ''}`}
+              onClick={onManualRefresh}
+              title={
+                positions.length === 0
+                  ? 'Import a portfolio first'
+                  : refreshCooldownSeconds > 0
+                    ? `Refresh available in ${refreshCooldownSeconds}s`
+                    : 'Refresh latest market prices'
+              }
+              disabled={refreshing || refreshCooldownSeconds > 0 || positions.length === 0}
+              aria-label="Refresh prices now"
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-                <circle cx="12" cy="12" r="3" />
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
               </svg>
-            )}
-          </button>
-          <button
-            className={`icon-btn${refreshing ? ' icon-btn--spinning' : ''}`}
-            onClick={onManualRefresh}
-            title={
-              positions.length === 0
-                ? 'Import a portfolio first'
-                : refreshCooldownSeconds > 0
-                  ? `Refresh available in ${refreshCooldownSeconds}s`
-                  : 'Refresh latest market prices'
-            }
-            disabled={refreshing || refreshCooldownSeconds > 0 || positions.length === 0}
-            aria-label="Refresh prices now"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-              <path d="M21 3v6h-6" />
-            </svg>
-          </button>
-          <span
-            className={`market-status ${marketOpen ? 'market-open' : fetchingMarketData ? 'offline-fetch' : 'offline'}`}
-            role="status"
-            aria-live="polite"
-          >
-            <span className={`live-dot${fetchingMarketData ? ' live-dot--fetching' : liveCount > 0 ? '' : ' live-dot--loading'}`} aria-hidden="true" />
-            {marketStatusText(marketOpen, settings.allowExternalData, fxReady, fetchingMarketData)}
-            {liveCount > 0 && (
-              <span className="market-status-time">· {quoteSourceLabel(live)} as of {lastRefreshTime(live)}</span>
-            )}
-          </span>
-          {refreshError && <span className="hint down" role="alert">{refreshError}</span>}
-          {!refreshError && marketDataIssue && <span className="hint down" role="status">{marketDataIssue}</span>}
-          <span>
-            Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
-            {scope === 'mutual' ? ' — mutual funds' : ''} at current market prices.
-          </span>
+            </button>
+          </div>
+          <div className="overview-meta">
+            <div className={`market-status ${marketOpen ? 'market-open' : 'market-closed'}`} role="status" aria-live="polite">
+              <span className={marketDotClass} aria-hidden="true" />
+              <span className="market-status-copy">
+                <span>{marketStatusText(marketOpen, settings.allowExternalData, fxReady, fetchingMarketData)}</span>
+                {liveCount > 0 && (
+                  <span className="market-status-time">{quoteSourceLabel(live)} as of {lastRefreshTime(live)}</span>
+                )}
+              </span>
+            </div>
+            {refreshError && <span className="hint down" role="alert">{refreshError}</span>}
+            {!refreshError && marketDataIssue && <span className="hint down" role="status">{marketDataIssue}</span>}
+            <div className="overview-net-position">
+              Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
+              {scope === 'mutual' ? ' · mutual funds' : ''}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -353,7 +362,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           <div className="score-label">
             <span>Current Value</span>
             {dailyMove == null ? (
-              <span className={`live-dot${fetchingMarketData ? ' live-dot--fetching' : liveCount > 0 ? '' : ' live-dot--loading'}`} />
+              <span className={marketDotClass} />
             ) : (
               <span
                 className={`current-value-move${hideValues || !dailyMoveDirection ? ' current-value-move--flat' : ` ${dailyMoveDirection}`}`}

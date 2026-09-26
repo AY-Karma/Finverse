@@ -310,7 +310,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                 </div>
 
                 {purchase && !loading && (
-                  <div className={`history-purchase ${purchase.pct >= 0 ? 'up' : 'down'}`}>
+                  <div className={`history-purchase history-purchase--${purchase.pct >= 0 ? 'up' : 'down'}`}>
                     <span className="history-purchase-badge" aria-hidden="true">
                       {purchase.pct >= 0 ? '▲' : '▼'}
                     </span>

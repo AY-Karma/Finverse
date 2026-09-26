@@ -31,6 +31,13 @@ describe('market status text', () => {
     expect(isMarketOpen(new Date('2027-01-04T04:00:00.000Z'))).toBe(true)
   })
 
+  it('treats the market as closed outside the NSE trading window', () => {
+    expect(isMarketOpen(new Date('2026-09-23T03:44:00.000Z'))).toBe(false)
+    expect(isMarketOpen(new Date('2026-09-23T03:45:00.000Z'))).toBe(true)
+    expect(isMarketOpen(new Date('2026-09-23T09:59:00.000Z'))).toBe(true)
+    expect(isMarketOpen(new Date('2026-09-23T10:00:00.000Z'))).toBe(false)
+  })
+
   it('reports partial quote retention without treating skipped daily NAVs as failures', () => {
     expect(quoteRefreshIssueText({ quotes: {}, updated: 7, failed: 1, skipped: 2 }))
       .toBe('1 quote retained from previous or imported values.')

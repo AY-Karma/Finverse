@@ -41,9 +41,7 @@ function slicePath(startDeg: number, endDeg: number): string {
   ].join(' ')
 }
 
-/** Allocation card: a 50/50 split. The top half pairs an SVG donut with a live
- *  legend (hovering either highlights both); the bottom half details breadth,
- *  asset split and weight bands for the whole book. */
+/** Allocation chart with a compact portfolio summary and optional detail. */
 export function AllocationCard({
   allocations,
   hideValues,
@@ -166,129 +164,132 @@ export function AllocationCard({
               onMouseLeave={clearSlice}
             >
               <i className="legend-swatch" style={{ background: stops[index]?.color ?? 'transparent' }} />
-              <span title={slice.symbol}>{slice.symbol}</span>
+              <span title={mask(slice.symbol)}>{mask(slice.symbol)}</span>
               <strong>{mask(`${((slice.value / total) * 100).toFixed(1)}%`)}</strong>
             </li>
           ))}
         </ul>
         <ul className="sr-only">
           {slices.map((item) => (
-            <li key={item.symbol}>{`${item.symbol} ${((item.value / total) * 100).toFixed(1)}%`}</li>
+            <li key={item.symbol}>{mask(`${item.symbol} ${((item.value / total) * 100).toFixed(1)}%`)}</li>
           ))}
         </ul>
       </section>
 
-      <section className="alloc-half alloc-bottom">
-        <div className="alloc-sections">
-          <section className="alloc-section">
-            <header className="alloc-section-head">
-              <span className="alloc-label">Breadth</span>
-              <strong className="alloc-figure">
-                <span className="alloc-figure-wide">{priced > 0 ? `${winShare}% of priced holdings in profit` : '—'}</span>
-                <span className="alloc-figure-compact">{priced > 0 ? `${winShare}% in profit` : '—'}</span>
-              </strong>
-            </header>
-            <p className="alloc-description">Compares each priced holding's current value with the amount invested.</p>
+      <section className="alloc-half alloc-bottom" aria-label="Portfolio composition">
+        <div className="alloc-summary">
+          <div className="alloc-summary-row">
+            <div className="alloc-summary-head">
+              <span>Breadth</span>
+              <strong className="alloc-figure">{priced > 0 ? <>{mask(`${winShare}%`)} in profit</> : 'No priced holdings'}</strong>
+            </div>
             <div className="alloc-bar" aria-hidden="true">
               <i className="alloc-fill-up" style={{ width: `${upShare}%` }} />
               <i className="alloc-fill-flat" style={{ width: `${flatShare}%` }} />
               <i className="alloc-fill-down" style={{ width: `${downShare}%` }} />
             </div>
-            <div className={`alloc-keys alloc-keys--breadth${p.flat > 0 ? ' alloc-keys--three' : ' alloc-keys--two'}`}>
-              <span className="alloc-key-block alloc-key-block--up">
-                <span className="alloc-key-name"><i className="alloc-dot up" />In profit</span>
-                <strong><span className="alloc-metric-value">{p.up}</span> position{p.up === 1 ? '' : 's'}</strong>
-                <small>{p.avgWinPct != null ? <><span className="alloc-detail-label">Average gain </span><span className="alloc-metric-value">{mask(`+${p.avgWinPct.toFixed(1)}%`)}</span></> : 'No winning positions'}</small>
-              </span>
-              {p.flat > 0 && (
-                <span className="alloc-key-block alloc-key-block--flat">
-                  <span className="alloc-key-name"><i className="alloc-dot flat" />At cost</span>
-                  <strong>{p.flat} position{p.flat === 1 ? '' : 's'}</strong>
-                  <small>No gain or loss</small>
-                </span>
-              )}
-              <span className="alloc-key-block alloc-key-block--down">
-                <span className="alloc-key-name"><i className="alloc-dot down" />In loss</span>
-                <strong><span className="alloc-metric-value">{p.down}</span> position{p.down === 1 ? '' : 's'}</strong>
-                <small>{p.avgLossPct != null ? <><span className="alloc-detail-label">Average loss </span><span className="alloc-metric-value">{mask(`${p.avgLossPct.toFixed(1)}%`)}</span></> : 'No losing positions'}</small>
-              </span>
+          </div>
+          <div className="alloc-summary-row">
+            <div className="alloc-summary-head">
+              <span>Asset mix</span>
+              <strong className="alloc-figure">{splitTotal > 0 ? <>{mask(`${eqShare.toFixed(0)}%`)} equity <span className="alloc-summary-separator">/</span> {mask(`${(100 - eqShare).toFixed(0)}%`)} funds</> : 'No valued assets'}</strong>
             </div>
-            {(p.best || p.worst) && (
-              <div className="alloc-edge-notes">
-                {p.best && <span className={p.best.pct >= 0 ? 'up' : 'down'}>Best <strong title={p.best.symbol}>{mask(p.best.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.best.pct >= 0 ? '+' : ''}${p.best.pct.toFixed(1)}%`)}</b></span>}
-                {p.worst && <span className={p.worst.pct >= 0 ? 'up' : 'down'}>Worst <strong title={p.worst.symbol}>{mask(p.worst.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.worst.pct >= 0 ? '+' : ''}${p.worst.pct.toFixed(1)}%`)}</b></span>}
-              </div>
-            )}
-          </section>
-
-          <section className="alloc-section">
-            <header className="alloc-section-head">
-              <span className="alloc-label">Equity vs funds</span>
-              <strong className="alloc-figure">{splitTotal > 0 ? mask(formatCurrency(splitTotal, currency, usdInrRate)) : '—'}</strong>
-            </header>
-            <p className="alloc-description">Shows how the portfolio's current value is split between shares and mutual funds.</p>
             <div className="alloc-bar" aria-hidden="true">
               <i className="alloc-fill-equity" style={{ width: `${eqShare}%` }} />
-              <i className="alloc-fill-funds" style={{ width: `${100 - eqShare}%` }} />
+              <i className="alloc-fill-funds" style={{ width: `${splitTotal > 0 ? 100 - eqShare : 0}%` }} />
             </div>
-            <div className="alloc-keys alloc-keys--two">
-              <span className="alloc-key-block alloc-key-block--equity">
-                <span className="alloc-key-name"><i className="alloc-dot equity" />Equity</span>
-                <strong>{mask(formatCurrency(p.equityValue, currency, usdInrRate))}</strong>
-                <small>{p.equityCount} position{p.equityCount === 1 ? '' : 's'} · {splitTotal > 0 ? mask(`${eqShare.toFixed(0)}%`) : '—'}</small>
-              </span>
-              <span className="alloc-key-block alloc-key-block--funds">
-                <span className="alloc-key-name"><i className="alloc-dot funds" />Mutual funds</span>
-                <strong>{mask(formatCurrency(p.mutualValue, currency, usdInrRate))}</strong>
-                <small>{p.mutualCount} fund{p.mutualCount === 1 ? '' : 's'} · {splitTotal > 0 ? mask(`${(100 - eqShare).toFixed(0)}%`) : '—'}</small>
-              </span>
+          </div>
+          <div className="alloc-summary-row">
+            <div className="alloc-summary-head">
+              <span>10%+ positions</span>
+              <strong className="alloc-figure">{p.bands.heavy > 0 ? <>{p.bands.heavy} hold {mask(`${p.bandWeight.heavy.toFixed(0)}%`)}</> : 'None'}</strong>
             </div>
-            {leader && smallest && (
-              <div className="alloc-edge-notes alloc-edge-notes--holdings">
-                <span>Largest <strong title={leader.symbol}>{mask(leader.symbol)}</strong> · {mask(`${((leader.value / total) * 100).toFixed(1)}%`)}</span>
-                <span>Smallest <strong title={smallest.symbol}>{mask(smallest.symbol)}</strong> · {mask(`${((smallest.value / total) * 100).toFixed(1)}%`)}</span>
-              </div>
-            )}
-          </section>
-
-          <section className="alloc-section">
-            <header className="alloc-section-head">
-              <span className="alloc-label">Weight bands</span>
-              <strong className="alloc-figure">
-                <span className="alloc-figure-wide">{p.bands.heavy} position{p.bands.heavy === 1 ? '' : 's'} at 10%+</span>
-                <span className="alloc-figure-compact">{p.bands.heavy} at 10%+</span>
-              </strong>
-            </header>
-            <p className="alloc-description">Groups positions by the share of total portfolio value each one represents.</p>
             <div className="alloc-bar" aria-hidden="true">
               <BandSegments weights={[p.bandWeight.heavy, p.bandWeight.mid, p.bandWeight.light]} />
             </div>
-            <div className="alloc-keys alloc-keys--three alloc-keys--bands">
-              <span className="alloc-key-block">
-                <span className="alloc-key-name"><i className="alloc-dot band-heavy" />10% or more</span>
-                <strong>{p.bands.heavy} position{p.bands.heavy === 1 ? '' : 's'}</strong>
-                <small>{mask(`${p.bandWeight.heavy.toFixed(0)}%`)} of portfolio</small>
-              </span>
-              <span className="alloc-key-block">
-                <span className="alloc-key-name"><i className="alloc-dot band-mid" />5% to under 10%</span>
-                <strong>{p.bands.mid} position{p.bands.mid === 1 ? '' : 's'}</strong>
-                <small>{mask(`${p.bandWeight.mid.toFixed(0)}%`)} of portfolio</small>
-              </span>
-              <span className="alloc-key-block">
-                <span className="alloc-key-name"><i className="alloc-dot band-light" />Under 5%</span>
-                <strong>{p.bands.light} position{p.bands.light === 1 ? '' : 's'}</strong>
-                <small>{mask(`${p.bandWeight.light.toFixed(0)}%`)} of portfolio</small>
-              </span>
-            </div>
-            <p className="alloc-member-note">{p.bands.heavy > 0 ? <><strong>Large positions</strong> {heavyMembers}. Together they make up {mask(`${p.bandWeight.heavy.toFixed(0)}%`)} of the portfolio.</> : 'No position accounts for 10% or more of the portfolio.'}</p>
-            {p.bands.heavy > 0 && (
-              <details className="alloc-member-details">
-                <summary>See large positions</summary>
-                <p>{heavyMembers}</p>
-              </details>
-            )}
-          </section>
+          </div>
         </div>
+
+        <details className="alloc-more">
+          <summary>More detail</summary>
+          <div className="alloc-more-content">
+            <section className="alloc-more-section">
+              <h3>Profit and loss</h3>
+              <p>Priced holdings compared with the amount invested.</p>
+              <div className={`alloc-keys${p.flat > 0 ? ' alloc-keys--three' : ' alloc-keys--two'}`}>
+                <span className="alloc-key-block alloc-key-block--up">
+                  <span className="alloc-key-name"><i className="alloc-dot up" />In profit</span>
+                  <strong><span className="alloc-metric-value">{p.up}</span> position{p.up === 1 ? '' : 's'}</strong>
+                  <small>{p.avgWinPct != null ? <>Average gain <span className="alloc-metric-value">{mask(`+${p.avgWinPct.toFixed(1)}%`)}</span></> : 'No winning positions'}</small>
+                </span>
+                {p.flat > 0 && (
+                  <span className="alloc-key-block">
+                    <span className="alloc-key-name"><i className="alloc-dot flat" />At cost</span>
+                    <strong>{p.flat} position{p.flat === 1 ? '' : 's'}</strong>
+                    <small>No gain or loss</small>
+                  </span>
+                )}
+                <span className="alloc-key-block alloc-key-block--down">
+                  <span className="alloc-key-name"><i className="alloc-dot down" />In loss</span>
+                  <strong><span className="alloc-metric-value">{p.down}</span> position{p.down === 1 ? '' : 's'}</strong>
+                  <small>{p.avgLossPct != null ? <>Average loss <span className="alloc-metric-value">{mask(`${p.avgLossPct.toFixed(1)}%`)}</span></> : 'No losing positions'}</small>
+                </span>
+              </div>
+              {(p.best || p.worst) && (
+                <div className="alloc-edge-notes">
+                  {p.best && <span className={p.best.pct >= 0 ? 'up' : 'down'}>Best <strong title={mask(p.best.symbol)}>{mask(p.best.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.best.pct >= 0 ? '+' : ''}${p.best.pct.toFixed(1)}%`)}</b></span>}
+                  {p.worst && <span className={p.worst.pct >= 0 ? 'up' : 'down'}>Worst <strong title={mask(p.worst.symbol)}>{mask(p.worst.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.worst.pct >= 0 ? '+' : ''}${p.worst.pct.toFixed(1)}%`)}</b></span>}
+                </div>
+              )}
+            </section>
+
+            <section className="alloc-more-section">
+              <h3>Equity and funds</h3>
+              <p>{splitTotal > 0 ? `${mask(formatCurrency(splitTotal, currency, usdInrRate))} total value` : 'No valued assets'}</p>
+              <div className="alloc-keys alloc-keys--two">
+                <span className="alloc-key-block alloc-key-block--equity">
+                  <span className="alloc-key-name"><i className="alloc-dot equity" />Equity</span>
+                  <strong>{mask(formatCurrency(p.equityValue, currency, usdInrRate))}</strong>
+                  <small>{p.equityCount} position{p.equityCount === 1 ? '' : 's'} · {splitTotal > 0 ? mask(`${eqShare.toFixed(0)}%`) : '—'}</small>
+                </span>
+                <span className="alloc-key-block alloc-key-block--funds">
+                  <span className="alloc-key-name"><i className="alloc-dot funds" />Mutual funds</span>
+                  <strong>{mask(formatCurrency(p.mutualValue, currency, usdInrRate))}</strong>
+                  <small>{p.mutualCount} fund{p.mutualCount === 1 ? '' : 's'} · {splitTotal > 0 ? mask(`${(100 - eqShare).toFixed(0)}%`) : '—'}</small>
+                </span>
+              </div>
+              {leader && smallest && (
+                <div className="alloc-edge-notes alloc-edge-notes--holdings">
+                  <span>Largest <strong title={mask(leader.symbol)}>{mask(leader.symbol)}</strong> · {mask(`${((leader.value / total) * 100).toFixed(1)}%`)}</span>
+                  <span>Smallest <strong title={mask(smallest.symbol)}>{mask(smallest.symbol)}</strong> · {mask(`${((smallest.value / total) * 100).toFixed(1)}%`)}</span>
+                </div>
+              )}
+            </section>
+
+            <section className="alloc-more-section">
+              <h3>Weight bands</h3>
+              <p>Share of portfolio value held by each group.</p>
+              <div className="alloc-keys alloc-keys--three">
+                <span className="alloc-key-block">
+                  <span className="alloc-key-name"><i className="alloc-dot band-heavy" />10% or more</span>
+                  <strong>{p.bands.heavy} position{p.bands.heavy === 1 ? '' : 's'}</strong>
+                  <small>{mask(`${p.bandWeight.heavy.toFixed(0)}%`)} of portfolio</small>
+                </span>
+                <span className="alloc-key-block">
+                  <span className="alloc-key-name"><i className="alloc-dot band-mid" />5% to under 10%</span>
+                  <strong>{p.bands.mid} position{p.bands.mid === 1 ? '' : 's'}</strong>
+                  <small>{mask(`${p.bandWeight.mid.toFixed(0)}%`)} of portfolio</small>
+                </span>
+                <span className="alloc-key-block">
+                  <span className="alloc-key-name"><i className="alloc-dot band-light" />Under 5%</span>
+                  <strong>{p.bands.light} position{p.bands.light === 1 ? '' : 's'}</strong>
+                  <small>{mask(`${p.bandWeight.light.toFixed(0)}%`)} of portfolio</small>
+                </span>
+              </div>
+              <p className="alloc-member-note">{p.bands.heavy > 0 ? <><strong>Large positions</strong> {heavyMembers}.</> : 'No position accounts for 10% or more of the portfolio.'}</p>
+            </section>
+          </div>
+        </details>
       </section>
     </div>
   )

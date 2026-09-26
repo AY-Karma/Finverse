@@ -25,7 +25,7 @@ const pulse: PortfolioPulse = {
 }
 
 describe('allocation card', () => {
-  it('keeps full and compact summaries with expandable large-position detail', () => {
+  it('shows three compact takeaways with supporting figures in one disclosure', () => {
     const markup = renderToStaticMarkup(
       <AllocationCard
         allocations={[
@@ -38,11 +38,30 @@ describe('allocation card', () => {
       />,
     )
 
-    expect(markup).toContain('70% of priced holdings in profit')
+    expect(markup.match(/class="alloc-summary-row"/g)).toHaveLength(3)
     expect(markup).toContain('70% in profit')
-    expect(markup).toContain('3 positions at 10%+')
-    expect(markup).toContain('3 at 10%+')
-    expect(markup).toContain('See large positions')
+    expect(markup).toContain('46% equity')
+    expect(markup).toContain('54% funds')
+    expect(markup).toContain('3 hold')
+    expect(markup).toContain('<details class="alloc-more"><summary>More detail</summary>')
+    expect(markup).toContain('Average gain')
+    expect(markup).toContain('Weight bands')
     expect(markup).toContain('Quant Mid Cap Fund Direct Growth')
+  })
+
+  it('masks holding names and percentages in the summary and detail', () => {
+    const markup = renderToStaticMarkup(
+      <AllocationCard
+        allocations={[{ symbol: 'Private Fund', value: 100_000, type: 'mutual-fund' }]}
+        hideValues
+        currency="INR"
+        pulse={{ ...pulse, best: { symbol: 'Private Fund', pct: 50 } }}
+      />,
+    )
+
+    const visibleText = markup.replace(/<[^>]+>/g, '')
+    expect(markup).not.toContain('Private Fund')
+    expect(visibleText).not.toContain('70%')
+    expect(markup).toContain('••••••')
   })
 })
