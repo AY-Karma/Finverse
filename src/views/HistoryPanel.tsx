@@ -163,7 +163,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     const first = points[0].close
     const last = points[points.length - 1].close
     if (first <= 0) return null
-    return { last, pct: ((last - first) / first) * 100 }
+    return { last, change: last - first, pct: ((last - first) / first) * 100 }
   }, [points])
 
   /** Purchase marker + "since you bought" stat, inferred from the cost basis
@@ -266,18 +266,17 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
             {(loading || points.length >= 2) && (
               <>
                 <div className="history-summary">
-                  <span className="history-name sym" title={query.label}>
-                    {query.label}
-                  </span>
-                  {rangeChange && (
-                    <>
-                      <span className="history-last">{fmtY(rangeChange.last)}</span>
+                  <div className="history-summary-main">
+                    <span className="history-name sym" title={query.label}>{query.label}</span>
+                    {rangeChange && <div className="history-quote">
+                      <span className="history-last"><small>₹</small>{fmtY(rangeChange.last)}</span>
                       <span className={`history-delta ${rangeChange.pct >= 0 ? 'up' : 'down'}`}>
-                        {rangeChange.pct >= 0 ? '+' : ''}
-                        {rangeChange.pct.toFixed(2)}% over {rangeLabel}
+                        {rangeChange.change >= 0 ? '+' : '-'}₹{fmtY(Math.abs(rangeChange.change))}
+                        <span>({rangeChange.pct >= 0 ? '+' : ''}{rangeChange.pct.toFixed(2)}%)</span>
+                        <small>{rangeLabel}</small>
                       </span>
-                    </>
-                  )}
+                    </div>}
+                  </div>
                   <span className="history-source muted">{sourceLabel}</span>
                 </div>
 
@@ -287,11 +286,10 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                       <InteractiveTrendChart
                         key={`${holding?.id ?? query.label}-${rangeDays}`}
                         rows={chartData}
-                        lines={[{ key: 'close', label: 'Close', color: LINE_COLOR }]}
+                        lines={[{ key: 'close', label: isMf ? 'NAV' : 'Close', color: LINE_COLOR }]}
                         valueFormatter={fmtY}
-                        yAxisLabel="Price"
-                        showArea={false}
-                        appearance="minimal"
+                        yAxisLabel={isMf ? 'NAV' : 'Price'}
+                        appearance="price"
                         markers={purchase && purchase.pinned ? [{
                           at: +new Date(`${purchase.date}T00:00:00`),
                           value: purchase.close,

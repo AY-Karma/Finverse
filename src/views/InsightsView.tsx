@@ -146,6 +146,13 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       }
     })
   }, [analyticsHistory, benchmarkPoints])
+  const benchmarkLatest = benchmarkSeries[benchmarkSeries.length - 1]
+  const benchmarkGap = benchmarkLatest?.benchmark == null ? null : benchmarkLatest.portfolio - benchmarkLatest.benchmark
+  const performanceLatest = performanceHistory[performanceHistory.length - 1]
+  const performanceGap = performanceLatest ? performanceLatest.value - performanceLatest.invested : null
+  const performanceGapPct = performanceLatest?.invested > 0 && performanceGap != null
+    ? performanceGap / performanceLatest.invested * 100
+    : null
 
   const risk = useMemo(() => {
     let peak = 0
@@ -193,11 +200,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const axisValue = (amount: number) => mask(currency === 'USD'
     ? snapshot.fxRate?.usdInr ? axisCurrency.format(amount / snapshot.fxRate.usdInr) : '—'
     : axisCurrency.format(amount))
-  const performanceLatest = performanceHistory[performanceHistory.length - 1]
-  const performanceGain = performanceLatest ? performanceLatest.value - performanceLatest.invested : null
-  const performanceGainPct = performanceGain != null && performanceLatest?.invested > 0
-    ? performanceGain / performanceLatest.invested * 100
-    : null
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
   const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
@@ -258,10 +260,40 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
               </details>
             </div>
           </div>
-          <span className="hint">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : trackedAvailable ? 'Tracked portfolio history' : 'Historical market data is unavailable')}</span>
+          {benchmarkSeries.length >= 2 && <div className="insight-chart-readout">
+            <div className="insight-chart-metric insight-chart-metric--portfolio">
+              <span><i aria-hidden="true" />Portfolio</span>
+              <strong>{benchmarkLatest ? mask(`${benchmarkLatest.portfolio >= 0 ? '+' : ''}${benchmarkLatest.portfolio.toFixed(1)}%`) : '—'}</strong>
+              <small>Since comparison start</small>
+            </div>
+            <div className="insight-chart-metric insight-chart-metric--benchmark">
+              <span><i aria-hidden="true" />{selectedBenchmark.label}</span>
+              <strong>{benchmarkLatest?.benchmark == null ? '—' : mask(`${benchmarkLatest.benchmark >= 0 ? '+' : ''}${benchmarkLatest.benchmark.toFixed(1)}%`)}</strong>
+              <small>Same starting date</small>
+            </div>
+            <div className="insight-chart-metric insight-chart-metric--gap">
+              <span>Return gap</span>
+              <strong className={hide || benchmarkGap == null ? '' : benchmarkGap >= 0 ? 'up' : 'down'}>{benchmarkGap == null ? '—' : mask(`${benchmarkGap >= 0 ? '+' : ''}${benchmarkGap.toFixed(1)} pts`)}</strong>
+              <small>{hide ? 'Comparison hidden' : benchmarkGap == null ? 'Waiting for benchmark' : benchmarkGap >= 0 ? 'Portfolio leads' : `${selectedBenchmark.label} leads`}</small>
+            </div>
+          </div>}
           <div className="insight-chart insight-chart--benchmark">
-            {benchmarkSeries.length >= 2 ? <InteractiveTrendChart rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))} lines={[{ key: 'portfolio', label: 'Portfolio', color: '#5e6ad2' }, { key: 'benchmark', label: selectedBenchmark.label, color: '#f2b53c' }]} valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)} yAxisLabel="Return (%)" includeZero onReachStart={backcast ? requestMoreBackcast : undefined} /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (settings.allowExternalData ? 'Building your comparison' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
+            {benchmarkSeries.length >= 2 ? (
+              <InteractiveTrendChart
+                rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))}
+                lines={[{ key: 'portfolio', label: 'Portfolio', color: 'var(--chart-portfolio)' }, { key: 'benchmark', label: selectedBenchmark.label, color: 'var(--chart-benchmark)' }]}
+                valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)}
+                differenceFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)} pts`)}
+                differenceLabel="Return gap"
+                yAxisLabel="Return (%)"
+                includeZero
+                showArea={false}
+                appearance="insight"
+                onReachStart={backcast ? requestMoreBackcast : undefined}
+              />
+            ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (settings.allowExternalData ? 'Building your comparison' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
           </div>
+          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : trackedAvailable ? 'Tracked portfolio history' : 'Historical market data is unavailable')}</span>
         </section>
 
         <section className="panel insight-panel">
@@ -285,14 +317,40 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         </section>
 
         <section className="panel insight-panel insight-panel--wide insight-panel--performance">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Performance story</span><span className="section-index">06 · Value vs invested</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio values' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Performance story</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio values' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
           <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Saved daily portfolio values on this device.'}</p>
-          {performanceHistory.length >= 2 && performanceLatest && <div className="performance-summary" aria-label="Latest performance values">
-            <div><span>Portfolio value</span><strong>{value(performanceLatest.value)}</strong></div>
-            <div><span>Invested</span><strong>{value(performanceLatest.invested)}</strong></div>
-            <div><span>Gain / loss</span><strong className={hide ? '' : performanceGain != null && performanceGain >= 0 ? 'up' : 'down'}>{value(performanceGain ?? 0)}</strong>{performanceGainPct != null && <small>{mask(formatPercent(performanceGainPct))}</small>}</div>
+          {performanceHistory.length >= 2 && <div className="insight-chart-readout">
+            <div className="insight-chart-metric insight-chart-metric--value">
+              <span><i aria-hidden="true" />Portfolio value</span>
+              <strong>{performanceLatest ? value(performanceLatest.value) : '—'}</strong>
+              <small>Latest observation</small>
+            </div>
+            <div className="insight-chart-metric insight-chart-metric--invested">
+              <span><i aria-hidden="true" />Invested capital</span>
+              <strong>{performanceLatest ? value(performanceLatest.invested) : '—'}</strong>
+              <small>Cost of today's holdings</small>
+            </div>
+            <div className="insight-chart-metric insight-chart-metric--gap">
+              <span>Value − invested</span>
+              <strong className={hide || performanceGap == null ? '' : performanceGap >= 0 ? 'up' : 'down'}>{performanceGap == null ? '—' : mask(`${performanceGap >= 0 ? '+' : ''}${formatCurrency(performanceGap, currency, snapshot.fxRate?.usdInr)}`)}</strong>
+              <small>{performanceGapPct == null ? 'Current difference' : mask(formatPercent(performanceGapPct))}</small>
+            </div>
           </div>}
-          <div className="insight-chart insight-chart--performance">{performanceHistory.length >= 2 ? <InteractiveTrendChart rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))} lines={[{ key: 'value', label: 'Portfolio value', color: '#41b883' }, { key: 'invested', label: 'Invested capital', color: '#f2b53c', dashed: true }]} valueFormatter={value} axisFormatter={axisValue} yAxisLabel="Value" onReachStart={performanceMode === 'backcast' && backcast ? requestMoreBackcast : undefined} /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{backcastLoading ? 'Building your historical series' : 'Historical prices are unavailable'}</strong><span>{backcastLoading ? 'Current holdings are being matched with real historical closes.' : 'Enable external market data or use tracked snapshots as they accumulate.'}</span></div>}</div>
+          <div className="insight-chart insight-chart--performance">
+            {performanceHistory.length >= 2 ? (
+              <InteractiveTrendChart
+                rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))}
+                lines={[{ key: 'value', label: 'Portfolio value', color: 'var(--chart-value)' }, { key: 'invested', label: 'Invested capital', color: 'var(--chart-invested)', dashed: true }]}
+                valueFormatter={value}
+                axisFormatter={axisValue}
+                differenceFormatter={value}
+                differenceLabel="Value − invested"
+                yAxisLabel="Value"
+                appearance="insight"
+                onReachStart={performanceMode === 'backcast' && backcast ? requestMoreBackcast : undefined}
+              />
+            ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{backcastLoading ? 'Building your historical series' : 'Historical prices are unavailable'}</strong><span>{backcastLoading ? 'Current holdings are being matched with real historical closes.' : 'Enable external market data or use tracked snapshots as they accumulate.'}</span></div>}
+          </div>
         </section>
       </div>
     </div>

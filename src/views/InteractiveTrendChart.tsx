@@ -34,12 +34,14 @@ interface InteractiveTrendChartProps {
   lines: TrendLine[]
   valueFormatter: (value: number) => string
   axisFormatter?: (value: number) => string
+  differenceFormatter?: (value: number) => string
+  differenceLabel?: string
   yAxisLabel: string
   includeZero?: boolean
   onReachStart?: () => void
   markers?: TrendMarker[]
   showArea?: boolean
-  appearance?: 'default' | 'minimal'
+  appearance?: 'default' | 'minimal' | 'price' | 'insight'
 }
 
 interface PanState {
@@ -111,6 +113,8 @@ export function InteractiveTrendChart({
   lines,
   valueFormatter,
   axisFormatter = valueFormatter,
+  differenceFormatter = valueFormatter,
+  differenceLabel = 'Difference',
   yAxisLabel,
   includeZero = false,
   onReachStart,
@@ -159,10 +163,14 @@ export function InteractiveTrendChart({
   )
   const domain = yDomain(values, includeZero)
   const labels = domain.ticks.map(axisFormatter)
-  const plotLeft = clamp(Math.max(...labels.map((label) => label.length)) * 6.6 + 18, 60, 132)
-  const plotWidth = chartWidth - plotLeft - PLOT_RIGHT
+  const isPriceChart = appearance === 'price'
+  const isRightScaleChart = isPriceChart || appearance === 'insight'
+  const axisWidth = clamp(Math.max(...labels.map((label) => label.length), yAxisLabel.length) * 6.6 + 22, 68, 132)
+  const plotLeft = isRightScaleChart ? 22 : axisWidth
+  const plotRight = isRightScaleChart ? Math.max(PLOT_RIGHT, axisWidth + 8) : PLOT_RIGHT
+  const plotWidth = chartWidth - plotLeft - plotRight
   const plotHeight = chartHeight - PLOT_TOP - PLOT_BOTTOM
-  const preferredViewport = createChartViewport(chartRows.length)
+  const preferredViewport = isPriceChart ? { start: 0, count: chartRows.length } : createChartViewport(chartRows.length)
   const visiblePointCount = preferredViewport.count
   const maxViewportStart = Math.max(0, chartRows.length - visiblePointCount)
   const viewStart = clampViewportStart(viewStartState ?? preferredViewport.start, chartRows.length, visiblePointCount)
@@ -173,6 +181,7 @@ export function InteractiveTrendChart({
   const visibleFirstAt = visibleRows[0]?.at ?? firstAt
   const visibleLastAt = visibleRows[visibleRows.length - 1]?.at ?? visibleFirstAt
   const visibleTimeSpan = Math.max(visibleLastAt - visibleFirstAt, 1)
+  const dateTickCount = isRightScaleChart ? clamp(Math.floor(plotWidth / 140) + 1, 2, 5) : chartWidth < 480 ? 3 : 5
   const domainRange = Math.max(domain.max - domain.min, 1)
   const pointSpacing = plotWidth / Math.max(visiblePointCount - 1, 1)
   const xAtIndex = (index: number) => visiblePointCount <= 1 ? plotLeft + plotWidth / 2 : plotLeft + ((index - viewStart) / (visiblePointCount - 1)) * plotWidth
@@ -210,7 +219,7 @@ export function InteractiveTrendChart({
   const pairedPoints = primaryLine && secondaryLine
     ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
     : []
-  const differencePath = primaryLine && secondaryLine && pairedPoints.length > 1
+  const differencePath = appearance !== 'insight' && primaryLine && secondaryLine && pairedPoints.length > 1
     ? `${pairedPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAtIndex(point.index).toFixed(1)},${yAt(point.row[primaryLine.key] as number).toFixed(1)}`).join(' ')} ${[...pairedPoints].reverse().map((point) => `L${xAtIndex(point.index).toFixed(1)},${yAt(point.row[secondaryLine.key] as number).toFixed(1)}`).join(' ')} Z`
     : ''
   const hovered = hoveredIndex == null ? null : chartRows[hoveredIndex] ?? null
@@ -218,6 +227,8 @@ export function InteractiveTrendChart({
   const tooltipLeft = clamp((hoverX / chartWidth) * 100, 8, 92)
   const tooltipTransform = tooltipLeft > 68 ? 'translateX(-100%)' : tooltipLeft < 28 ? 'translateX(0)' : 'translateX(-50%)'
   const latest = chartRows[chartRows.length - 1]
+  const latestPrice = primaryLine ? latest?.[primaryLine.key] : undefined
+  const latestPriceY = typeof latestPrice === 'number' && Number.isFinite(latestPrice) ? yAt(latestPrice) : null
   const latestDifference = primaryLine && secondaryLine && typeof latest?.[primaryLine.key] === 'number' && typeof latest?.[secondaryLine.key] === 'number'
     ? (latest[primaryLine.key] as number) - (latest[secondaryLine.key] as number)
     : null
@@ -338,7 +349,7 @@ export function InteractiveTrendChart({
     const bounds = event.currentTarget.getBoundingClientRect()
     const x = ((event.clientX - bounds.left) / bounds.width) * chartWidth
     const y = ((event.clientY - bounds.top) / bounds.height) * chartHeight
-    if (x < plotLeft || x > chartWidth - PLOT_RIGHT || y < PLOT_TOP || y > chartHeight - PLOT_BOTTOM) return
+    if (x < plotLeft || x > chartWidth - plotRight || y < PLOT_TOP || y > chartHeight - PLOT_BOTTOM) return
     const targetIndex = indexAtClientX(event.clientX, bounds)
     setComparison({ ...comparison, targetIndex })
     setHoveredIndex(targetIndex)
@@ -358,9 +369,10 @@ export function InteractiveTrendChart({
           <b className={`interactive-trend-comparison-change ${comparisonDifference >= 0 ? 'up' : 'down'}`}>{comparisonDifference >= 0 ? '▲' : '▼'} {comparisonDifference >= 0 ? '+' : ''}{valueFormatter(comparisonDifference)} <i>({comparisonPercent >= 0 ? '+' : ''}{comparisonPercent.toFixed(2)}%)</i></b>
           <span className="interactive-trend-comparison-duration">{comparisonDays >= 0 ? '+' : ''}{comparisonDays} days</span>
           <button type="button" className="interactive-trend-clear" onClick={() => setComparison(null)} aria-label="Clear price comparison">Clear</button>
-        </div> : comparisonMarker ? <span className="interactive-trend-compare-prompt">Select another point on the chart</span> : markers.some((marker) => marker.comparable) ? <span className="interactive-trend-compare-prompt">Select the purchase marker to compare</span> : null}
+        </div> : comparisonMarker ? <span className="interactive-trend-compare-prompt">Select another point on the chart</span> : markers.some((marker) => marker.comparable) ? <span className="interactive-trend-compare-prompt">{isPriceChart ? 'Select buy point to compare' : 'Select the purchase marker to compare'}</span> : null}
       </div>
       <div className="interactive-trend-toolbar-tools">
+        {isRightScaleChart && visibleRows.length > 1 && <span className="interactive-trend-period">{DATE_FORMATTER.format(new Date(visibleFirstAt))} - {DATE_FORMATTER.format(new Date(visibleLastAt))}</span>}
         {hasHistoryToPan && <div className="interactive-trend-navigation">
           <span className="interactive-trend-pan-hint">Drag to explore</span>
           <button
@@ -390,7 +402,7 @@ export function InteractiveTrendChart({
       preserveAspectRatio="none"
       role="img"
       tabIndex={hasHistoryToPan ? 0 : undefined}
-      aria-label={`${yAxisLabel} trend. Drag or swipe horizontally to move through history.`}
+      aria-label={`${yAxisLabel} trend. ${hasHistoryToPan ? 'Drag or swipe horizontally to move through history.' : 'Move across the chart to inspect values.'}`}
       onMouseMove={onMove}
       onMouseLeave={() => { if (!panRef.current) setHoveredIndex(null) }}
       onWheel={onWheel}
@@ -408,15 +420,16 @@ export function InteractiveTrendChart({
         <linearGradient id={`comparison-flat-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b9b9b4" stopOpacity="0.18" /><stop offset="100%" stopColor="#b9b9b4" stopOpacity="0.025" /></linearGradient>
         <clipPath id={`trend-plot-${chartId}`}><rect x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} /></clipPath>
       </defs>
-      {domain.ticks.map((tick) => <g key={tick}>{appearance !== 'minimal' && <line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - PLOT_RIGHT} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} />}<text x={plotLeft - 12} y={yAt(tick) + 4} textAnchor="end" className="interactive-trend-axis-text">{axisFormatter(tick)}</text></g>)}
-      {appearance !== 'minimal' && <line x1={plotLeft} y1={PLOT_TOP} x2={plotLeft} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />}
-      <line x1={plotLeft} y1={chartHeight - PLOT_BOTTOM} x2={chartWidth - PLOT_RIGHT} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />
-      {visibleRows.length > 0 && tickIndices(visibleRows.length, chartWidth < 480 ? 3 : 5).map((localIndex) => localIndex + visibleStartIndex).filter((index) => {
+      {domain.ticks.map((tick) => <g key={tick}>{appearance !== 'minimal' && <line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - plotRight} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} />}<text x={isRightScaleChart ? chartWidth - plotRight + 14 : plotLeft - 12} y={yAt(tick) + 4} textAnchor={isRightScaleChart ? 'start' : 'end'} className="interactive-trend-axis-text">{axisFormatter(tick)}</text></g>)}
+      {appearance === 'default' && <line x1={plotLeft} y1={PLOT_TOP} x2={plotLeft} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />}
+      <line x1={plotLeft} y1={chartHeight - PLOT_BOTTOM} x2={chartWidth - plotRight} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />
+      {visibleRows.length > 0 && tickIndices(visibleRows.length, dateTickCount).map((localIndex) => localIndex + visibleStartIndex).filter((index) => {
         const x = xAtIndex(index)
-        return x >= plotLeft - 1 && x <= chartWidth - PLOT_RIGHT + 1
+        return x >= plotLeft - 1 && x <= chartWidth - plotRight + 1
       }).map((index) => <g key={`${chartRows[index]?.at}-${index}`}><line x1={xAtIndex(index)} y1={chartHeight - PLOT_BOTTOM} x2={xAtIndex(index)} y2={chartHeight - PLOT_BOTTOM + 5} className="interactive-trend-axis" /><text x={xAtIndex(index)} y={chartHeight - 18} textAnchor="middle" className="interactive-trend-axis-text">{dateLabel(chartRows[index]?.at ?? firstAt, visibleTimeSpan)}</text></g>)}
       <g clipPath={`url(#trend-plot-${chartId})`}>
         {areaPath && <path d={areaPath} fill={`url(#trend-area-${chartId})`} className="interactive-trend-area" />}
+        {isPriceChart && atLatest && latestPriceY != null && <line x1={plotLeft} y1={latestPriceY} x2={chartWidth - plotRight} y2={latestPriceY} className="interactive-trend-current-line" stroke={primaryLine.color} />}
         {differencePath && <path d={differencePath} className={latestDifference != null && latestDifference < 0 ? 'interactive-trend-gap interactive-trend-gap--loss' : 'interactive-trend-gap interactive-trend-gap--gain'} />}
         {comparisonAreaPath && comparisonMarker && comparison?.targetIndex != null && comparisonTone && <g className={`interactive-trend-comparison-range interactive-trend-comparison-range--${comparisonTone}`}>
           <path d={comparisonAreaPath} fill={`url(#comparison-${comparisonTone}-${chartId})`} className="interactive-trend-comparison-area" />
@@ -434,15 +447,28 @@ export function InteractiveTrendChart({
         })}</g>}
         {comparisonTarget && comparison?.targetIndex != null && typeof comparisonTargetValue === 'number' && comparisonTone && <g className={`interactive-trend-comparison-target interactive-trend-comparison-target--${comparisonTone}`}><circle cx={xAtIndex(comparison.targetIndex)} cy={yAt(comparisonTargetValue)} r="8" /><circle cx={xAtIndex(comparison.targetIndex)} cy={yAt(comparisonTargetValue)} r="3.5" /></g>}
       </g>
+      {appearance === 'insight' && atLatest && lines.map((line) => {
+        const value = latest?.[line.key]
+        return typeof value === 'number' && Number.isFinite(value) ? <g key={line.key} className="interactive-trend-endpoint" aria-hidden="true">
+          <circle cx={chartWidth - plotRight} cy={yAt(value)} r="9" fill={line.color} fillOpacity="0.15" />
+          <circle cx={chartWidth - plotRight} cy={yAt(value)} r="4" fill={line.color} />
+        </g> : null
+      })}
+      {isPriceChart && atLatest && primaryLine && typeof latestPrice === 'number' && latestPriceY != null && <g className="interactive-trend-current" aria-hidden="true">
+        <circle cx={chartWidth - plotRight} cy={latestPriceY} r="8" fill={primaryLine.color} fillOpacity="0.2" />
+        <circle cx={chartWidth - plotRight} cy={latestPriceY} r="3.5" fill={primaryLine.color} />
+        <rect x={chartWidth - plotRight + 4} y={clamp(latestPriceY - 13, PLOT_TOP, chartHeight - PLOT_BOTTOM - 26)} width={plotRight - 8} height="26" rx="5" fill={primaryLine.color} />
+        <text x={chartWidth - plotRight + (plotRight / 2)} y={clamp(latestPriceY + 4, PLOT_TOP + 17, chartHeight - PLOT_BOTTOM - 9)} textAnchor="middle">{valueFormatter(latestPrice)}</text>
+      </g>}
       {markerPositions.filter((marker) => {
         const x = xAtIndex(marker.index)
-        return x >= plotLeft && x <= chartWidth - PLOT_RIGHT
+        return x >= plotLeft && x <= chartWidth - plotRight
       }).map((marker) => {
         const x = xAtIndex(marker.index)
         const y = yAt(marker.value)
         const label = marker.label ?? 'Marker'
         const labelWidth = clamp(label.length * 6.4 + 20, 68, 132)
-        const labelX = clamp(x - labelWidth / 2, plotLeft + 2, chartWidth - PLOT_RIGHT - labelWidth - 2)
+        const labelX = clamp(x - labelWidth / 2, plotLeft + 2, chartWidth - plotRight - labelWidth - 2)
         const labelY = y < PLOT_TOP + 44 ? y + 14 : y - 38
         const active = comparison?.markerIndex === marker.markerIndex
         return <g
@@ -465,6 +491,6 @@ export function InteractiveTrendChart({
         </g>
       })}
     </svg>
-    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />Difference<b>{valueFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
+    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />{differenceLabel}<b>{differenceFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
   </div>
 }
