@@ -346,13 +346,15 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
       </div>
 
       {/* Scoreboard */}
-      <div className="scoreboard enter d1">
-        <div className="score">
+      <section className="scoreboard enter d1" aria-label="Portfolio summary">
+        <div className="score score--current">
           <div className="score-label">
-            <span>{stats.valuationComplete ? 'Current Value' : 'Priced holdings value'}</span>
-            {dailyMove == null ? (
-              <span className={marketDotClass} />
-            ) : (
+            {stats.valuationComplete ? 'Current value' : 'Priced holdings value'}
+          </div>
+          <div className="score-value">{mask(stats.pricedCount ? formatCurrency(stats.currentValue, currency, fxRate?.usdInr) : 'Unpriced')}</div>
+          {dailyMove != null && (
+            <div className="score-foot score-move">
+              <span>Today</span>
               <span
                 className={`current-value-move${hideValues || !dailyMoveDirection ? ' current-value-move--flat' : ` ${dailyMoveDirection}`}`}
                 aria-label={hideValues ? "Today's portfolio move hidden" : `Today's portfolio move: ${dailyMoveText}`}
@@ -361,42 +363,45 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
                 <span className="current-value-move-arrow" aria-hidden="true">{dailyMoveArrow}</span>
                 <span>{mask(dailyMoveText)}</span>
               </span>
-            )}
-          </div>
-          <div className="score-value">{mask(stats.pricedCount ? formatCurrency(stats.currentValue, currency, fxRate?.usdInr) : 'Unpriced')}</div>
-          <div className="score-foot">{stats.valuationComplete ? 'Total market exposure' : `${stats.unpricedCount} holding${stats.unpricedCount === 1 ? '' : 's'} unpriced. Allocation uses priced holdings only.`}</div>
+            </div>
+          )}
+          {!stats.valuationComplete && (
+            <div className="score-foot" title="Value, returns and allocation use priced holdings only.">
+              {stats.unpricedCount} holding{stats.unpricedCount === 1 ? '' : 's'} unpriced
+            </div>
+          )}
         </div>
         <div className="score">
           <div className="score-label">Invested</div>
           <div className="score-value">{mask(formatCurrency(stats.invested, currency, fxRate?.usdInr))}</div>
-          <div className="score-foot">Cost basis deployed</div>
         </div>
         <div className="score">
           <div className="score-label">{stats.valuationComplete ? 'Unrealized P&L' : 'Priced holdings P&L'}</div>
-          <div className={`score-value ${pnlUp ? 'up' : 'down'}`}>
+          <div className={`score-value${stats.pricedCount ? pnlUp ? ' up' : ' down' : ''}`}>
             {mask(stats.pricedCount ? `${pnlUp ? '+' : ''}${formatCurrency(stats.pnl, currency, fxRate?.usdInr)}` : 'Unpriced')}
           </div>
-          <div className={`score-foot ${pnlUp ? 'up' : 'down'}`}>
-            {stats.pricedCount ? mask(formatPercent(stats.pnlPct)) : 'Unavailable'} on {stats.valuationComplete ? 'cost' : 'priced cost'}
+          <div className={`score-foot${stats.pricedCount ? pnlUp ? ' up' : ' down' : ''}`}>
+            {stats.pricedCount ? mask(formatPercent(stats.pnlPct)) : 'Unavailable'}
+            {!stats.valuationComplete && <span className="score-return-basis"> on priced cost</span>}
           </div>
         </div>
         <div className="score score--performers">
           <div className="performer-half">
-            <div className="score-label">Best Performer</div>
+            <div className="score-label">Best performer</div>
             <div className="score-value sym" title={best ? mask(best.position.ticker) : undefined}>{mask(best ? best.position.ticker : '—')}</div>
             <div className={`score-foot ${best ? (best.pct >= 0 ? 'up' : 'down') : ''}`}>
               {best ? mask(`${best.pct >= 0 ? '+' : ''}${best.pct.toFixed(2)}%`) : 'No priced data'}
             </div>
           </div>
           <div className="performer-half">
-            <div className="score-label">Worst Performer</div>
+            <div className="score-label">Worst performer</div>
             <div className="score-value sym" title={worst ? mask(worst.position.ticker) : undefined}>{mask(worst ? worst.position.ticker : '—')}</div>
             <div className={`score-foot ${worst ? (worst.pct >= 0 ? 'up' : 'down') : ''}`}>
               {worst ? mask(`${worst.pct >= 0 ? '+' : ''}${worst.pct.toFixed(2)}%`) : 'No priced data'}
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <div className="daily-brief enter d2">
         <div className="daily-brief-copy">
