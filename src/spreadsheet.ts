@@ -106,7 +106,7 @@ type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'investedValu
 
 const FIELD_ALIASES: Record<FieldKey, string[]> = {
   ticker: ['ticker', 'symbol', 'trading symbol', 'tradingsymbol', 'code', 'scrip', 'scrip code', 'script', 'security', 'instrument', 'stock', 'stock name', 'name', 'company name', 'security name'],
-  quantity: ['quantity', 'qty', 'net quantity', 'net qty', 'quantity held', 'units', 'shares', 'noofunits', 'no of units', 'held', 'pos'],
+  quantity: ['quantity', 'qty', 'net quantity', 'net qty', 'quantity held', 'quantity available', 'units', 'shares', 'noofunits', 'no of units', 'held', 'pos'],
   buyPrice: [
     'buyprice',
     'buy price',
@@ -143,7 +143,7 @@ const FIELD_ALIASES: Record<FieldKey, string[]> = {
     'prev',
   ],
   name: ['company', 'companyname', 'securityname', 'stock name', 'name', 'fund', 'fundname', 'scheme', 'description'],
-  type: ['type', 'assettype', 'assetclass', 'class', 'category'],
+  type: ['type', 'assettype', 'assetclass', 'instrument type', 'class', 'category'],
   isin: ['isin', 'isin code'],
 }
 
@@ -298,6 +298,11 @@ function assignColumns<Key extends string>(head: string[], aliases: Record<Key, 
   return cols
 }
 
+function isKiteHoldingsHeader(head: string[]): boolean {
+  const fields = new Set(head.map(normalizeHeader))
+  return ['symbol', 'isin', 'quantityavailable', 'averageprice', 'previousclosingprice'].every(field => fields.has(field))
+}
+
 function detectHeader(head: string[]) {
   const equity = assignColumns(head, FIELD_ALIASES)
   // Activity reports cannot be interpreted as current holdings.
@@ -339,8 +344,8 @@ function parseNumber(v: unknown, allowPercent = false): number | null {
 function inferType(v: unknown): AssetType {
   if (v == null) return 'other'
   const s = String(v).toLowerCase()
-  if (s.includes('mutual') || s.includes('fund') || s.includes('mf ')) return 'mutual-fund'
-  if (s.includes('etf')) return 'etf'
+  if (s.includes('etf') || s.includes('exchange traded fund') || s.includes('exchange-traded fund')) return 'etf'
+  if (s.includes('mutual') || s.includes('fund') || /(^|\s)mf($|\s)/.test(s)) return 'mutual-fund'
   // Broker exports commonly abbreviate cash-equity rows to just "EQ".
   if (/(^|\s)(eq|equity|equities|stocks|shares?)($|\s)/.test(s)) return 'stock'
   if (s.includes('stock') || s.includes('equity') || s.includes('share')) return 'stock'
@@ -357,7 +362,7 @@ function validCost(row: unknown[], buyColumn: number | null, investedColumn: num
   return buy == null && invested == null ? null : { buy, invested }
 }
 
-function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation: RowValidation): Position[] {
+function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation: RowValidation, defaultType?: AssetType): Position[] {
   const positions: Position[] = []
   for (const [index, row] of rows.entries()) {
     const ticker = row[cols.ticker ?? cols.isin ?? -1]
@@ -382,6 +387,10 @@ function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation:
       continue
     }
     const isin = cols.isin != null ? String(row[cols.isin] ?? '').trim().toUpperCase() : ''
+    const typeCell = cols.type != null ? row[cols.type] : null
+    const type = defaultType && /^(?:-|—|n\/a)?$/i.test(String(typeCell ?? '').trim())
+      ? defaultType
+      : cols.type != null ? inferType(typeCell) : 'stock'
 
     positions.push({
       id: crypto.randomUUID(),
@@ -389,7 +398,7 @@ function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation:
       name: cols.name != null ? String(row[cols.name] ?? '').trim() : '',
       // An equity-shaped header has already been detected. Broker exports
       // commonly omit an explicit Type column, and those rows are stocks.
-      type: cols.type != null ? inferType(row[cols.type]) : 'stock',
+      type,
       quantity: qtyRaw,
       buyPrice,
       lastPrice: lastRaw != null && lastRaw >= 0 ? lastRaw : value != null && value >= 0 && Number.isFinite(value / qtyRaw) ? value / qtyRaw : null,
@@ -487,17 +496,26 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
   const positions: Position[] = []
   const result: SpreadsheetParseResult = { positions, issues: [], rejectedCount: 0 }
   let totalCells = 0
-  for (const sheetName of wb.SheetNames) {
+  const worksheets = wb.SheetNames.map(sheetName => {
     totalCells = validateSheetDimensions(sheetName, wb.Sheets[sheetName], totalCells)
     const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], {
       header: 1,
       defval: null,
       raw: true,
     })
-    if (rows.length === 0) continue
     if (rows.length > MAX_IMPORT_ROWS) {
       throw new Error(`Each sheet must contain ${MAX_IMPORT_ROWS.toLocaleString()} rows or fewer.`)
     }
+    const kite = rows.some(row => isKiteHoldingsHeader(row.map(headerCellText)))
+    return { sheetName, rows, kite, kiteCombined: kite && normalizeHeader(sheetName) === 'combined' }
+  })
+  // Kite repeats its category sheets in Combined. Import that view first and once.
+  worksheets.sort((a, b) => Number(b.kiteCombined) - Number(a.kiteCombined))
+  let importedKiteCombined = false
+  for (const { sheetName, rows, kite, kiteCombined } of worksheets) {
+    if (importedKiteCombined && kite && ['equity', 'mutualfunds'].includes(normalizeHeader(sheetName))) continue
+    const sheetStart = positions.length
+    const defaultType = kite ? normalizeHeader(sheetName) === 'mutualfunds' ? 'mutual-fund' : 'stock' : undefined
 
     let active: { header: NonNullable<ReturnType<typeof detectHeader>>; dataStart: number } | null = null
     const appendRows = (end: number) => {
@@ -508,7 +526,7 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
       const validation = { sheet: sheetName, startRow: active.dataStart, result }
       const parsed = header.mode === 'mf'
         ? parseMfRows(data, header.cols, validation)
-        : parseEquityRows(data, header.cols, validation)
+        : parseEquityRows(data, header.cols, validation, defaultType)
       positions.push(...parsed)
       if (positions.length > MAX_IMPORT_POSITIONS) {
         throw new Error(`Portfolio imports are limited to ${MAX_IMPORT_POSITIONS.toLocaleString()} holdings.`)
@@ -530,6 +548,7 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
       i += consumed - 1
     }
     appendRows(rows.length)
+    if (kiteCombined && positions.length > sheetStart) importedKiteCombined = true
   }
   if (positions.length > 0) return result
   if (result.rejectedCount > 0) {

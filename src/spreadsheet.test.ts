@@ -2,15 +2,61 @@ import { describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
 import { parseSpreadsheet, parseSpreadsheetWithDiagnostics } from './spreadsheet'
 
-function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx'): ArrayBuffer {
+function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx', sheetNames?: string[]): ArrayBuffer {
   const book = XLSX.utils.book_new()
   sheets.forEach((rows, index) => {
-    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), `Sheet${index + 1}`)
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), sheetNames?.[index] ?? `Sheet${index + 1}`)
   })
   return XLSX.write(book, { type: 'array', bookType }) as ArrayBuffer
 }
 
 describe('holdings spreadsheet import', () => {
+  it('reads Kite quantities without using discrepant, long-term or pledged quantity columns', () => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Symbol', 'ISIN', 'Sector', 'Quantity Available', 'Quantity Discrepant', 'Quantity Long Term', 'Quantity Pledged (Margin)', 'Quantity Pledged (Loan)', 'Average Price', 'Previous Closing Price', 'Unrealized P&L', 'Unrealized P&L Pct.'],
+      ['EXAMPLE', 'INE000000001', 'Example sector', 10, 2, 5, 3, 1, 100, 120, 200, 20],
+    ]]))
+    expect(result.positions).toHaveLength(1)
+    expect(result.positions[0]).toMatchObject({ ticker: 'EXAMPLE', isin: 'INE000000001', type: 'stock', quantity: 10, buyPrice: 100, lastPrice: 120, invested: 1000 })
+    expect(result.rejectedCount).toBe(0)
+  })
+
+  it.each(['xlsx', 'biff8'] as const)('imports the default Kite %s report once using Combined', (format) => {
+    const header = ['Symbol', 'ISIN', 'Instrument Type', 'Quantity Available', 'Average Price', 'Previous Closing Price']
+    const equity = ['EXAMPLE', 'INE000000001', '-', 10, 100, 120]
+    const result = parseSpreadsheetWithDiagnostics(workbook([
+      [['Client ID', 'EXAMPLE-CLIENT'], ...Array.from({ length: 20 }, () => []), header, equity],
+      [header],
+      [['Holdings report'], [], header, equity],
+    ], format, ['Equity', 'Mutual Funds', 'Combined']))
+    expect(result.positions).toHaveLength(1)
+    expect(result.positions[0]).toMatchObject({ ticker: 'EXAMPLE', type: 'stock', quantity: 10, invested: 1000, lastPrice: 120 })
+    expect(result.rejectedCount).toBe(0)
+  })
+
+  it('keeps Kite fund and ETF types and preserves rows from unrelated sheets', () => {
+    const header = ['Symbol', 'ISIN', 'Instrument Type', 'Quantity Available', 'Average Price', 'Previous Closing Price']
+    const positions = parseSpreadsheet(workbook([
+      [header, ['EXAMPLE FUND', 'INF000000001', 'MF', 2, 100, 120], ['EXAMPLE ETF', 'INF000000002', 'Exchange Traded Fund', 3, 100, 120]],
+      [['Symbol', 'Quantity', 'Buy Price'], ['EXAMPLE ETF', 3, 100]],
+    ], 'xlsx', ['Combined', 'Other folio']))
+    expect(positions.map(({ ticker, type }) => ({ ticker, type }))).toEqual([
+      { ticker: 'EXAMPLE FUND', type: 'mutual-fund' },
+      { ticker: 'EXAMPLE ETF', type: 'etf' },
+      { ticker: 'EXAMPLE ETF', type: 'stock' },
+    ])
+  })
+
+  it.each([false, true])('uses Kite category sheets when Combined has no holdings or is absent: %s', (emptyCombined) => {
+    const header = ['Symbol', 'ISIN', 'Instrument Type', 'Quantity Available', 'Average Price', 'Previous Closing Price']
+    const sheets = [[header, ['EXAMPLE', 'INE000000001', '-', 10, 100, 120]], [header, ['EXAMPLE FUND', 'INF000000001', '-', 2, 100, 120]]]
+    const names = ['Equity', 'Mutual Funds']
+    if (emptyCombined) { sheets.push([header]); names.push('Combined') }
+    const positions = parseSpreadsheet(workbook(sheets, 'xlsx', names))
+    expect(positions.map(position => position.type)).toEqual(['stock', 'mutual-fund'])
+    expect(positions.map(position => position.quantity)).toEqual([10, 2])
+  })
+
   it('reports malformed required cells without changing them into zero costs', () => {
     const result = parseSpreadsheetWithDiagnostics(workbook([[
       ['Ticker', 'Quantity', 'Buy Price', 'Last Price'],
