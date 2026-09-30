@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatMessage, ChartSpec, Currency, LiveQuote, Position } from '../types'
-import { chat, portfolioContext, isLocalProvider } from '../providers'
+import { boundChatHistory, chat, MAX_CHAT_MESSAGE_CHARS, portfolioContext, isLocalProvider } from '../providers'
 import { renderMessage, extractCharts } from '../format'
 import { ChatChart } from '../ChatChart'
 import { instrumentLabel } from '../instruments'
-import { positionPnlPct, positionValue, formatCurrency } from '../valuation'
+import { computePortfolioStats, effectivePrice, positionPnlPct, positionValue, formatCurrency } from '../valuation'
 import { useStore, type View } from '../useStore'
+import { visibleQuotes } from '../privacy'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
 
 const CHAT_KEY = 'finverse:chat'
@@ -29,9 +30,6 @@ const WORKING_PHRASES = [
 ]
 
 const CHIP_CAP = 6
-const MAX_CHAT_MESSAGES = 100
-const MAX_CHAT_MESSAGE_CHARS = 24_000
-const MAX_CHAT_STORAGE_BYTES = 500_000
 
 // Quick mode is a promise: it must come back fast. If the model hasn't answered
 // within this window, we abort and hand over the computed snapshot instead.
@@ -47,19 +45,18 @@ function quickSummary(
   if (positions.length === 0) {
     return 'Quick mode hit its 30-second cap, but there are no positions loaded yet — import a sheet and ask again.'
   }
-  const invested = positions.reduce((s, p) => s + p.invested, 0)
-  const value = positions.reduce((s, p) => s + positionValue(p, liveQuotes), 0)
-  const pnl = value - invested
-  const pnlPct = invested > 0 ? (pnl / invested) * 100 : null
+  const stats = computePortfolioStats(positions, liveQuotes)
+  const { invested, currentValue: value, pnl, pnlPct } = stats
   const equity = positions.filter((p) => p.type !== 'mutual-fund').length
   const mf = positions.length - equity
 
   const rows = positions
+    .slice(0, 100)
     .map((p) => {
-      const price = p.quantity > 0 ? positionValue(p, liveQuotes) / p.quantity : null
+      const price = effectivePrice(p, liveQuotes)
       const v = positionValue(p, liveQuotes)
       const hPnlPct = positionPnlPct(p, liveQuotes)
-      const weight = value > 0 ? (v / value) * 100 : null
+      const weight = price != null && value > 0 ? (v / value) * 100 : null
       const label = p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
       return (
         `${label} — ${p.quantity} @ ${formatCurrency(p.buyPrice, currency, usdInrRate)} | last ` +
@@ -72,12 +69,13 @@ function quickSummary(
 
   return [
     'Quick mode hit its 30-second cap, so here is the computed snapshot of your board:',
-    `Invested: ${formatCurrency(invested, currency, usdInrRate)} | Current: ${formatCurrency(value, currency, usdInrRate)} | ` +
-      `P&L: ${pnl >= 0 ? '+' : ''}${formatCurrency(pnl, currency, usdInrRate)}` +
-      `${pnlPct != null ? ` (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)` : ''}`,
+    `Invested: ${formatCurrency(invested, currency, usdInrRate)} | Current${stats.valuationComplete ? '' : ' (priced subtotal)'}: ${stats.pricedCount > 0 ? formatCurrency(value, currency, usdInrRate) : 'unknown'} | ` +
+      `P&L${stats.valuationComplete ? '' : ' (priced holdings only)'}: ${stats.pricedCount > 0 ? `${pnl >= 0 ? '+' : ''}${formatCurrency(pnl, currency, usdInrRate)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)` : 'unknown'}`,
+    `Valuation coverage: ${stats.pricedCount}/${positions.length} holdings priced. Missing prices are unknown, not zero.`,
     `Holdings: ${positions.length} (${equity} equity, ${mf} mutual fund${mf === 1 ? '' : 's'})`,
     '',
     rows,
+    ...(positions.length > 100 ? [`${positions.length - 100} additional holdings omitted from this summary.`] : []),
   ].join('\n')
 }
 
@@ -109,37 +107,40 @@ function contextualSuggestions(
   return out
 }
 
-function loadChat(): ChatMessage[] {
+function loadChat(): { messages: ChatMessage[]; omitted: boolean } {
   try {
     const raw = localStorage.getItem(CHAT_KEY)
     const parsed = raw ? JSON.parse(raw) : []
-    if (!Array.isArray(parsed)) return []
-    return parsed
+    if (!Array.isArray(parsed)) return { messages: [], omitted: false }
+    const valid = parsed
       .filter((message): message is ChatMessage =>
         message && typeof message === 'object' &&
         (message.role === 'user' || message.role === 'assistant') &&
         typeof message.content === 'string',
       )
-      .slice(-MAX_CHAT_MESSAGES)
+      .slice(-100)
       .map((message) => ({
-        ...message,
+        role: message.role,
         content: message.content.slice(0, MAX_CHAT_MESSAGE_CHARS),
         charts: sanitizeCharts(message.charts),
+        kind: message.kind === 'stopped' || message.kind === 'timeout' || message.kind === 'quick-fallback' ? message.kind : undefined,
       }))
+    const messages = boundChatHistory(valid)
+    return { messages, omitted: messages.length < parsed.length }
   } catch {
-    return []
+    return { messages: [], omitted: false }
   }
 }
 
 function sanitizeCharts(value: unknown): ChartSpec[] | undefined {
   if (!Array.isArray(value)) return undefined
-  const charts = value.flatMap((candidate): ChartSpec[] => {
+  const charts = value.slice(0, 8).flatMap((candidate): ChartSpec[] => {
     if (!candidate || typeof candidate !== 'object') return []
     const chart = candidate as Record<string, unknown>
     const kind = chart.kind
     if (kind !== 'bar' && kind !== 'pie' && kind !== 'line') return []
     if (!Array.isArray(chart.data)) return []
-    const data = chart.data.flatMap((row): ChartSpec['data'] => {
+    const data = chart.data.slice(0, 20).flatMap((row): ChartSpec['data'] => {
       if (!row || typeof row !== 'object') return []
       const item = row as Record<string, unknown>
       return typeof item.label === 'string' && typeof item.value === 'number' && Number.isFinite(item.value)
@@ -153,21 +154,20 @@ function sanitizeCharts(value: unknown): ChartSpec[] | undefined {
 
 function persistChat(messages: ChatMessage[]): void {
   try {
-    const bounded = messages.slice(-MAX_CHAT_MESSAGES).map((message) => ({
-      ...message,
-      content: message.content.slice(0, MAX_CHAT_MESSAGE_CHARS),
-      charts: message.charts?.slice(0, 8),
-    }))
-    const serialized = JSON.stringify(bounded)
-    if (serialized.length <= MAX_CHAT_STORAGE_BYTES) localStorage.setItem(CHAT_KEY, serialized)
+    localStorage.setItem(CHAT_KEY, JSON.stringify(boundChatHistory(messages)))
   } catch {
     /* Chat remains available in memory when browser storage is unavailable/full. */
   }
 }
 
 export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) => void; onRequestImport: () => void }) {
-  const { positions, settings, liveQuotes, fxRate, quickMode, setQuickMode } = useStore()
-  const [messages, setMessages] = useState<ChatMessage[]>(loadChat)
+  const { positions, settings, liveQuotes: retainedQuotes, fxRate, quickMode, setQuickMode } = useStore()
+  const liveQuotes = useMemo(() => visibleQuotes(settings.allowExternalData, retainedQuotes), [settings.allowExternalData, retainedQuotes])
+  const [initialChat] = useState(loadChat)
+  const [messages, setMessages] = useState<ChatMessage[]>(initialChat.messages)
+  const [historyOmitted, setHistoryOmitted] = useState(initialChat.omitted)
+  const [conversationRevealed, setConversationRevealed] = useState(false)
+  const conversationHidden = settings.hideValues && !conversationRevealed
   const [input, setInput] = useState('')
   const [chips, setChips] = useState<string[]>(QUICK_PROMPTS)
   const [loading, setLoading] = useState(false)
@@ -178,6 +178,15 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
   const [escalate, setEscalate] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
   const chatRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => setConversationRevealed(false), [settings.hideValues])
+
+  function updateMessages(next: ChatMessage[]) {
+    const bounded = boundChatHistory(next.map((message) => ({ ...message, charts: sanitizeCharts(message.charts) })))
+    if (bounded.length < next.length) setHistoryOmitted(true)
+    setMessages(bounded)
+    return bounded
+  }
 
   useEffect(() => {
     persistChat(messages)
@@ -241,8 +250,7 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
     setChips((c) => c.filter((ch) => ch !== trimmed))
     refillChips()
 
-    const history = [...messages, { role: 'user' as const, content: trimmed }]
-    setMessages(history)
+    const history = updateMessages([...messages, { role: 'user' as const, content: trimmed }])
     setLoading(true)
 
     const controller = new AbortController()
@@ -269,15 +277,18 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
         signal: controller.signal,
         quick,
         confirmRemoteOllama: settings.confirmRemoteOllama,
+        allowExternalData: settings.allowExternalData,
       })
-      setMessages([...history, { role: 'assistant', content, charts }])
+      if (controllerRef.current !== controller) return
+      updateMessages([...history, { role: 'assistant', content, charts }])
       refillChips()
     } catch (e) {
+      if (controllerRef.current !== controller) return
       if (controller.signal.aborted) {
         if (timedOut.current && quick) {
           // 30s cap hit in quick mode: hand over the computed snapshot and
           // offer to continue the request in full mode.
-          setMessages([
+          updateMessages([
             ...history,
             {
               role: 'assistant',
@@ -292,7 +303,7 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
           ])
           setEscalate(trimmed)
         } else {
-          setMessages([
+          updateMessages([
             ...history,
             {
               role: 'assistant',
@@ -309,8 +320,10 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
       }
     } finally {
       window.clearTimeout(timeoutId)
-      if (controllerRef.current === controller) controllerRef.current = null
-      setLoading(false)
+      if (controllerRef.current === controller) {
+        controllerRef.current = null
+        setLoading(false)
+      }
     }
   }
 
@@ -324,7 +337,10 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
 
   function clearChat() {
     controllerRef.current?.abort()
+    controllerRef.current = null
+    setLoading(false)
     setMessages([])
+    setHistoryOmitted(false)
     setInput('')
     setError(null)
     persistChat([])
@@ -362,6 +378,9 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
             )}
           </div>
           <div className="panel-head-actions">
+            {settings.hideValues && !conversationHidden && (
+              <button className="btn btn--ghost btn--small" onClick={() => setConversationRevealed(false)}>Hide conversation</button>
+            )}
             {messages.length > 0 && (
               <button className="btn btn--ghost btn--small" onClick={clearChat} disabled={loading}>
                 Clear chat
@@ -373,6 +392,14 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
           </div>
         </div>
 
+        {conversationHidden ? (
+          <div className="chat">
+            <p className="hint">Conversation hidden. Messages, charts, and prompts may contain portfolio values.</p>
+            <button className="btn btn--ghost" onClick={() => setConversationRevealed(true)}>Reveal conversation</button>
+            {loading && <button className="btn btn--stop" onClick={stop}>Stop generation</button>}
+          </div>
+        ) : <>
+        {historyOmitted && <p className="hint" role="status">Older messages were omitted to keep the conversation within its size limit.</p>}
         <div className="chat" ref={chatRef}>
           {messages.length === 0 && (
             <div className="msg msg--assistant">
@@ -427,6 +454,7 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
           <div className="chat-input">
             <input
               className="input"
+              maxLength={MAX_CHAT_MESSAGE_CHARS}
               placeholder={quickMode ? 'Quick ask…' : 'Ask your coach…'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -455,6 +483,7 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
           </div>
 
         {error && <p className="hint down" style={{ marginTop: 12 }}>{error}</p>}
+        </>}
       </div>
 
       {warnOpen && (

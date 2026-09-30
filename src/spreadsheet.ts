@@ -7,6 +7,33 @@ const MAX_IMPORT_SHEETS = 20
 const MAX_IMPORT_COLUMNS = 1_000
 const MAX_IMPORT_CELLS = 2_000_000
 const MAX_IMPORT_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+const MAX_IMPORT_ISSUES = 100
+
+export interface ImportRowIssue {
+  sheet: string
+  row: number
+  field: 'Quantity' | 'Cost'
+  message: string
+}
+
+export interface SpreadsheetParseResult {
+  positions: Position[]
+  issues: ImportRowIssue[]
+  rejectedCount: number
+}
+
+interface RowValidation {
+  sheet: string
+  startRow: number
+  result: SpreadsheetParseResult
+}
+
+function rejectRow(validation: RowValidation, index: number, field: ImportRowIssue['field'], message: string): void {
+  validation.result.rejectedCount++
+  if (validation.result.issues.length < MAX_IMPORT_ISSUES) {
+    validation.result.issues.push({ sheet: validation.sheet, row: validation.startRow + index + 1, field, message })
+  }
+}
 
 function preflightZip(file: ArrayBuffer): void {
   const bytes = new Uint8Array(file)
@@ -292,15 +319,20 @@ function detectHeader(head: string[]) {
   return null
 }
 
-function parseNumber(v: unknown): number | null {
+function parseNumber(v: unknown, allowPercent = false): number | null {
   if (v == null || v === '') return null
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
   const s = String(v).trim()
   // Parenthetical negatives: (1,234.50) => -1234.5
   const neg = s.startsWith('(') && s.endsWith(')')
-  const numeric = s.replace(/\b(INR|USD|EUR|GBP|Rs|rupees)\b\.?/gi, '').replace(/[,\s₹$€£%()]/g, '')
-  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(numeric)) return null
-  const n = Number(numeric) * (neg ? -1 : 1)
+  const numeric = (neg ? s.slice(1, -1) : s).trim()
+    .replace(/^(?:(?:INR|USD|EUR|GBP|Rs\.?|rupees)\s*|[₹$€£]\s*)/i, '')
+    .replace(/\s*(?:INR|USD|EUR|GBP|rupees)$/i, '').trim()
+  const amount = allowPercent ? numeric.replace(/%$/, '').trim() : numeric
+  const plain = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i
+  const grouped = /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d*)?$/
+  if (!plain.test(amount) && !grouped.test(amount)) return null
+  const n = Number(amount.replace(/,/g, '')) * (neg ? -1 : 1)
   return Number.isFinite(n) ? n : null
 }
 
@@ -315,19 +347,40 @@ function inferType(v: unknown): AssetType {
   return 'other'
 }
 
-function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>): Position[] {
+function validCost(row: unknown[], buyColumn: number | null, investedColumn: number | null): { buy: number | null; invested: number | null } | null {
+  const buy = buyColumn != null ? parseNumber(row[buyColumn]) : null
+  const invested = investedColumn != null ? parseNumber(row[investedColumn]) : null
+  for (const [column, parsed] of [[buyColumn, buy], [investedColumn, invested]] as const) {
+    const raw = column != null ? row[column] : null
+    if (raw != null && String(raw).trim() !== '' && (parsed == null || parsed < 0)) return null
+  }
+  return buy == null && invested == null ? null : { buy, invested }
+}
+
+function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation: RowValidation): Position[] {
   const positions: Position[] = []
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const ticker = row[cols.ticker ?? cols.isin ?? -1]
     if (ticker == null || String(ticker).trim() === '' || SUMMARY_LABELS.test(String(ticker))) continue
 
     const qtyRaw = cols.quantity != null ? parseNumber(row[cols.quantity]) : null
-    const buyRaw = cols.buyPrice != null ? parseNumber(row[cols.buyPrice]) : null
+    if (qtyRaw == null || qtyRaw <= 0) {
+      rejectRow(validation, index, 'Quantity', 'Enter a positive numeric quantity; zero, negative, missing and mixed-text quantities are unsupported.')
+      continue
+    }
+    const cost = validCost(row, cols.buyPrice, cols.investedValue)
+    if (!cost) {
+      rejectRow(validation, index, 'Cost', 'Enter a non-negative numeric buy price or invested value. Correct any malformed cost cells.')
+      continue
+    }
+    const { buy: buyRaw, invested } = cost
     const lastRaw = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
-    const invested = cols.investedValue != null ? parseNumber(row[cols.investedValue]) : null
     const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
-    if (qtyRaw == null || qtyRaw <= 0 || (buyRaw == null && lastRaw == null && invested == null && value == null)) continue
-    const buyPrice = buyRaw ?? (invested != null ? invested / qtyRaw : 0)
+    const buyPrice = buyRaw ?? invested! / qtyRaw
+    if (!Number.isFinite(buyPrice) || !Number.isFinite(invested ?? qtyRaw * buyPrice)) {
+      rejectRow(validation, index, 'Cost', 'Cost or quantity is too large to value safely.')
+      continue
+    }
     const isin = cols.isin != null ? String(row[cols.isin] ?? '').trim().toUpperCase() : ''
 
     positions.push({
@@ -339,7 +392,7 @@ function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>): Position[]
       type: cols.type != null ? inferType(row[cols.type]) : 'stock',
       quantity: qtyRaw,
       buyPrice,
-      lastPrice: lastRaw ?? (value != null ? value / qtyRaw : null),
+      lastPrice: lastRaw != null && lastRaw >= 0 ? lastRaw : value != null && value >= 0 && Number.isFinite(value / qtyRaw) ? value / qtyRaw : null,
       invested: invested ?? qtyRaw * buyPrice,
       ...(isin ? { isin } : {}),
     })
@@ -350,28 +403,39 @@ function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>): Position[]
 const SUMMARY_LABELS =
   /^\s*(totals?|sub[ -]?total|summary|holdings summary|invested values|total invest(ment)?s?|grand total|net value|profit|loss|xirr)\s*[:\-]?\s*$/i
 
-function parseMfRows(rows: unknown[][], cols: Columns<MfField>): Position[] {
+function parseMfRows(rows: unknown[][], cols: Columns<MfField>, validation: RowValidation): Position[] {
   const positions: Position[] = []
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const schemeCell = cols.scheme != null ? row[cols.scheme] : null
     const schemeStr = schemeCell != null ? String(schemeCell).trim() : ''
     if (schemeStr === '' || SUMMARY_LABELS.test(schemeStr)) continue
 
     const units = cols.units != null ? parseNumber(row[cols.units]) : null
-    if (units == null || units <= 0) continue
+    if (units == null || units <= 0) {
+      rejectRow(validation, index, 'Quantity', 'Enter positive numeric units; zero, negative, missing and mixed-text units are unsupported.')
+      continue
+    }
 
-    const invested = cols.investedValue != null ? parseNumber(row[cols.investedValue]) : null
+    const cost = validCost(row, cols.buyPrice, cols.investedValue)
+    if (!cost) {
+      rejectRow(validation, index, 'Cost', 'Enter a non-negative numeric average cost or invested value. Correct any malformed cost cells.')
+      continue
+    }
+    const { buy, invested } = cost
     const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
-    const buy = cols.buyPrice != null ? parseNumber(row[cols.buyPrice]) : null
     const last = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
-    if (invested == null && value == null && buy == null && last == null) continue
+    const buyPrice = buy ?? invested! / units
+    if (!Number.isFinite(buyPrice) || !Number.isFinite(invested ?? units * buyPrice)) {
+      rejectRow(validation, index, 'Cost', 'Cost or quantity is too large to value safely.')
+      continue
+    }
     const amc = cols.amc != null ? String(row[cols.amc] ?? '').trim() : ''
     const category = cols.category != null ? String(row[cols.category] ?? '').trim() : ''
     const subCategory = cols.subCategory != null ? String(row[cols.subCategory] ?? '').trim() : ''
     const folio = cols.folio != null ? String(row[cols.folio] ?? '').trim() : ''
     const source = cols.source != null ? String(row[cols.source] ?? '').trim() : ''
     const returns = cols.returns != null ? parseNumber(row[cols.returns]) : null
-    const xirr = cols.xirr != null ? parseNumber(row[cols.xirr]) : null
+    const xirr = cols.xirr != null ? parseNumber(row[cols.xirr], true) : null
 
     positions.push({
       id: crypto.randomUUID(),
@@ -380,9 +444,9 @@ function parseMfRows(rows: unknown[][], cols: Columns<MfField>): Position[] {
       name: schemeStr,
       type: 'mutual-fund',
       quantity: units,
-      buyPrice: buy ?? (invested != null ? invested / units : 0),
-      lastPrice: last ?? (value != null ? value / units : null),
-      invested: invested ?? units * (buy ?? 0),
+      buyPrice,
+      lastPrice: last != null && last >= 0 ? last : value != null && value >= 0 && Number.isFinite(value / units) ? value / units : null,
+      invested: invested ?? units * buyPrice,
       amc,
       category,
       subCategory,
@@ -411,7 +475,7 @@ function combineHeaderRow(a: readonly unknown[], b: readonly unknown[]): string[
   return out
 }
 
-export function parseSpreadsheet(file: ArrayBuffer): Position[] {
+export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetParseResult {
   if (file.byteLength > MAX_IMPORT_FILE_BYTES) {
     throw new Error('Portfolio files must be 10 MB or smaller.')
   }
@@ -421,6 +485,7 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
     throw new Error(`Spreadsheets are limited to ${MAX_IMPORT_SHEETS} worksheets.`)
   }
   const positions: Position[] = []
+  const result: SpreadsheetParseResult = { positions, issues: [], rejectedCount: 0 }
   let totalCells = 0
   for (const sheetName of wb.SheetNames) {
     totalCells = validateSheetDimensions(sheetName, wb.Sheets[sheetName], totalCells)
@@ -440,9 +505,10 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
       const data = rows.slice(active.dataStart, end)
       const { header } = active
       if (header.mode === 'activity') return
+      const validation = { sheet: sheetName, startRow: active.dataStart, result }
       const parsed = header.mode === 'mf'
-        ? parseMfRows(data, header.cols)
-        : parseEquityRows(data, header.cols)
+        ? parseMfRows(data, header.cols, validation)
+        : parseEquityRows(data, header.cols, validation)
       positions.push(...parsed)
       if (positions.length > MAX_IMPORT_POSITIONS) {
         throw new Error(`Portfolio imports are limited to ${MAX_IMPORT_POSITIONS.toLocaleString()} holdings.`)
@@ -465,9 +531,18 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
     }
     appendRows(rows.length)
   }
-  if (positions.length > 0) return positions
+  if (positions.length > 0) return result
+  if (result.rejectedCount > 0) {
+    const first = result.issues[0]
+    throw new Error(`No valid holdings found. ${result.rejectedCount} row(s) rejected. ${first.sheet}, row ${first.row}: ${first.field} - ${first.message}`)
+  }
 
   throw new Error(
     'No recognizable holdings header found. Use Ticker or Symbol with Quantity and Buy Price for equities, or Scheme Name with Units and Invested Value for mutual funds.',
   )
+}
+
+/** Legacy positions-only seam; import previews use diagnostics to expose rejected rows. */
+export function parseSpreadsheet(file: ArrayBuffer): Position[] {
+  return parseSpreadsheetWithDiagnostics(file).positions
 }

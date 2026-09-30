@@ -1,11 +1,12 @@
 import type { Folio, FxRate, LiveQuote, PortfolioSnapshot, Position } from './types'
-import { assetTypeLabel, instrumentKey, instrumentLabel, normalizePosition } from './instruments'
-import { combinePositions, computePortfolioStats, positionPnl, positionValue, quoteKey } from './valuation'
+import { assetTypeLabel, instrumentLabel, normalizePosition } from './instruments'
+import { combinePositions, computePortfolioStats, effectivePrice, positionPnl, positionValue, quoteKey } from './valuation'
 
 interface Contribution {
   symbol: string
   type: Position['type']
   value: number
+  priced: boolean
   weight: number
   pnl: number | null
   dailyChange: number | null
@@ -30,6 +31,10 @@ export interface InvestmentSnapshot {
   quotes: Record<string, LiveQuote>
   fxRate: FxRate | null
   invested: number
+  pricedInvested: number
+  pricedCount: number
+  unpricedCount: number
+  valuationComplete: boolean
   currentValue: number
   pnl: number
   pnlPct: number
@@ -91,6 +96,7 @@ function buildContributions(positions: Position[], quotes: Record<string, LiveQu
         symbol: instrumentLabel(position),
         type: position.type,
         value,
+        priced: effectivePrice(position, quotes) != null,
         weight: currentValue > 0 ? (value / currentValue) * 100 : 0,
         pnl: positionPnl(position, quotes),
         dailyChange,
@@ -106,6 +112,7 @@ function buildContributions(positions: Position[], quotes: Record<string, LiveQu
 function buildSectors(contributions: Contribution[], currentValue: number): SectorAllocation[] {
   const groups = new Map<string, { value: number; types: Set<Position['type']>; count: number }>()
   for (const item of contributions) {
+    if (!item.priced) continue
     const group = groups.get(item.sector) ?? { value: 0, types: new Set<Position['type']>(), count: 0 }
     group.value += item.value
     group.types.add(item.type)
@@ -148,6 +155,10 @@ export const investmentWorkspace: InvestmentWorkspace = {
       quotes: input.quotes,
       fxRate: input.fxRate,
       invested: stats.invested,
+      pricedInvested: stats.pricedInvested,
+      pricedCount: stats.pricedCount,
+      unpricedCount: stats.unpricedCount,
+      valuationComplete: stats.valuationComplete,
       currentValue: stats.currentValue,
       pnl: stats.pnl,
       pnlPct: stats.pnlPct,
@@ -166,11 +177,9 @@ export const investmentWorkspace: InvestmentWorkspace = {
 /** Used by import preview and export without coupling those views to storage. */
 export function importIdentitySummary(positions: Position[]): { normalized: Position[]; duplicateCount: number; unmatchedCount: number } {
   const normalized = investmentWorkspace.normalizeImport(positions)
-  const counts = new Map<string, number>()
-  for (const position of normalized) counts.set(instrumentKey(position), (counts.get(instrumentKey(position)) ?? 0) + 1)
   return {
     normalized,
-    duplicateCount: Array.from(counts.values()).filter((count) => count > 1).reduce((sum, count) => sum + count - 1, 0),
+    duplicateCount: normalized.length - combinePositions(normalized).length,
     unmatchedCount: normalized.filter((position) => position.type === 'other').length,
   }
 }

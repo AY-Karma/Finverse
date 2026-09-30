@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { exportPortfolioCsv, investmentWorkspace } from './investmentWorkspace'
+import { exportPortfolioCsv, importIdentitySummary, investmentWorkspace } from './investmentWorkspace'
 import { sanitizeFolios } from './store'
 
 describe('exposure buckets', () => {
+  it('reports only compatible merged rows as duplicates in import preview', () => {
+    const holding = { id: 'first', ticker: 'SAME', name: '', type: 'stock' as const, quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchange: 'NSE' as const, isin: 'INE000000001' }
+    expect(importIdentitySummary([holding, { ...holding, id: 'same' }]).duplicateCount).toBe(1)
+    expect(importIdentitySummary([holding, { ...holding, id: 'conflict', isin: 'INE000000002' }]).duplicateCount).toBe(0)
+  })
   it('labels mutual funds as Mutual fund and legacy equities as Equity, never swapped', () => {
     const folios = sanitizeFolios([{
       id: 'folio-1',

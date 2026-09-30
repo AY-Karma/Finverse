@@ -1,8 +1,11 @@
+import { createRequestBudget, readBoundedText } from './requestBudget'
+
 const HEADERS = {
   'Cache-Control': 'no-store',
   'Content-Type': 'application/xml; charset=utf-8',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
 }
 
 interface NewsHandlerDependencies {
@@ -18,11 +21,12 @@ function googleSearch(query: string): string {
   return url.toString()
 }
 
-async function fetchFeed(url: string, fetcher: typeof fetch): Promise<string | null> {
+async function fetchFeed(url: string, fetcher: typeof fetch, signal: AbortSignal): Promise<string | null> {
   try {
-    const response = await fetcher(url, { signal: AbortSignal.timeout(10_000) })
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(4_000)])
+    const response = await fetcher(url, { signal: deadline })
     if (!response.ok) return null
-    const body = await response.text()
+    const body = await readBoundedText(response, 1024 * 1024, deadline)
     return /<item(?:\s|>)/i.test(body) ? body : null
   } catch {
     return null
@@ -33,6 +37,7 @@ export function createNewsHandler(
   dependencies: Partial<NewsHandlerDependencies> = {},
 ): (request: Request) => Promise<Response> {
   const fetcher = dependencies.fetcher ?? fetch
+  const budget = createRequestBudget()
 
   return async (request: Request) => {
     if (request.method !== 'GET') return new Response('Method not allowed.', { status: 405 })
@@ -53,11 +58,14 @@ export function createNewsHandler(
       return new Response('Invalid news request.', { status: 400 })
     }
 
-    for (const url of urls) {
-      const feed = await fetchFeed(url, fetcher)
-      if (feed) return new Response(feed, { status: 200, headers: HEADERS })
-    }
-    return new Response('News providers are unavailable.', { status: 502 })
+    return budget(urls.join('|'), 300_000, async (signal) => {
+      for (const url of urls) {
+        if (signal.aborted) break
+        const feed = await fetchFeed(url, fetcher, signal)
+        if (feed) return new Response(feed, { status: 200, headers: HEADERS })
+      }
+      return new Response('News providers are unavailable.', { status: 502, headers: { 'Cache-Control': 'no-store' } })
+    })
   }
 }
 

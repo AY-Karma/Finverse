@@ -1,4 +1,5 @@
 import { isMarketSymbol, type HistoryPayload } from '../src/marketDataProtocol'
+import { createRequestBudget, readBoundedText } from './requestBudget'
 
 const UPSTREAM_TIMEOUT_MS = 8_000
 const MAX_RANGE_MS = 5 * 366 * 24 * 60 * 60 * 1000
@@ -44,6 +45,7 @@ export function createHistoryHandler(
   dependencies: Partial<HistoryHandlerDependencies> = {},
 ): (request: Request) => Promise<Response> {
   const fetcher = dependencies.fetcher ?? fetch
+  const budget = createRequestBudget()
 
   return async (request: Request) => {
     if (request.method !== 'GET') return json({ error: 'Method not allowed.' }, 405)
@@ -61,36 +63,41 @@ export function createHistoryHandler(
     upstream.searchParams.set('period2', String(Math.floor((to + 24 * 60 * 60 * 1000) / 1000)))
     upstream.searchParams.set('interval', '1d')
 
-    try {
-      const response = await fetcher(upstream, {
-        headers: {
-          Accept: 'application/json',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36',
-        },
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-      })
-      if (!response.ok) return json({ error: `History provider returned HTTP ${response.status}.` }, 502)
-      const data = (await response.json()) as YahooHistoryResponse
-      const result = data.chart?.result?.[0]
-      const timestamps = result?.timestamp
-      const closes = result?.indicators?.quote?.[0]?.close
-      if (!Array.isArray(timestamps) || !Array.isArray(closes)) {
-        return json({ error: 'History provider returned no usable series.' }, 502)
-      }
-      const points: HistoryPayload['points'] = []
-      for (let index = 0; index < timestamps.length; index += 1) {
-        const close = closes[index]
-        if (typeof close !== 'number' || !Number.isFinite(close) || close <= 0) continue
-        points.push({
-          date: new Date(timestamps[index] * 1000).toISOString().slice(0, 10),
-          close,
+    return budget(`${symbol}:${from}:${to}`, 3_600_000, async (signal) => {
+      try {
+        const deadline = AbortSignal.any([signal, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)])
+        const response = await fetcher(upstream, {
+          headers: {
+            Accept: 'application/json',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36',
+          },
+          signal: deadline,
         })
+        if (!response.ok) return json({ error: `History provider returned HTTP ${response.status}.` }, 502)
+        const data = JSON.parse(await readBoundedText(response, 2 * 1024 * 1024, deadline)) as YahooHistoryResponse
+        const result = data.chart?.result?.[0]
+        const timestamps = result?.timestamp
+        const closes = result?.indicators?.quote?.[0]?.close
+        if (!Array.isArray(timestamps) || !Array.isArray(closes)) {
+          return json({ error: 'History provider returned no usable series.' }, 502)
+        }
+        const points: HistoryPayload['points'] = []
+        for (let index = 0; index < timestamps.length; index += 1) {
+          const timestamp = timestamps[index]
+          if (!Number.isFinite(timestamp) || Math.abs(timestamp) > 8_640_000_000_000) continue
+          const close = closes[index]
+          if (typeof close !== 'number' || !Number.isFinite(close) || close <= 0) continue
+          points.push({
+            date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+            close,
+          })
+        }
+        return json({ symbol, points } satisfies HistoryPayload, 200, true)
+      } catch {
+        return json({ error: 'History provider could not be reached.' }, 502)
       }
-      return json({ symbol, points } satisfies HistoryPayload, 200, true)
-    } catch {
-      return json({ error: 'History provider could not be reached.' }, 502)
-    }
+    })
   }
 }
 

@@ -1,11 +1,13 @@
+import { createSharedRequest } from './sharedRequest'
+
 /**
  * Company logo resolution for holdings avatars.
  *
  * Layered guarantee — every holding ends up with something distinctive:
  *  1. Real marks from keyless static CDNs, keyed by ISIN (jsDelivr's
  *     extra-isin set) and by exchange+ticker (EODHD).
- *  2. Sparse imports often lack ISINs, so we resolve them once from Groww's
- *     public instruments CSV and cache locally — unlocking layer 1's best set.
+ *  2. Sparse imports often lack ISINs, so we resolve them once from NSE's
+ *     official equity master and cache locally — unlocking layer 1's best set.
  *  3. If every remote source misses (obscure ETFs do), a deterministic
  *     tinted-monogram tile keeps the row glanceable. Never blank.
  */
@@ -41,22 +43,53 @@ function normalizeTicker(ticker: string): string {
 
 type TextFetcher = (url: string, signal?: AbortSignal) => Promise<string>
 
-async function defaultFetcher(url: string): Promise<string> {
+async function defaultFetcher(url: string, signal?: AbortSignal): Promise<string> {
   const response = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(url)}`, {
-    signal: AbortSignal.timeout(45_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12_000)]) : AbortSignal.timeout(12_000),
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return response.text()
 }
 
-let masterInFlight: Promise<string> | null = null
+interface MasterCache {
+  index?: Map<string, string>
+  request: ReturnType<typeof createSharedRequest<Map<string, string>>>
+}
 
-function loadEquityMaster(fetcher: TextFetcher): Promise<string> {
-  masterInFlight ??= fetcher(NSE_EQUITY_MASTER_URL).catch((reason) => {
-    masterInFlight = null
-    throw reason
-  })
-  return masterInFlight
+const masterCaches = new WeakMap<TextFetcher, MasterCache>()
+
+function indexEquityMaster(csv: string): Map<string, string> {
+  const lines = csv.split(/\r?\n/)
+  const header = lines[0]?.split(',') ?? []
+  const symbolIndex = header.findIndex((name) => name.trim().toUpperCase() === 'SYMBOL')
+  const isinIndex = header.findIndex((name) => name.trim().toUpperCase() === 'ISIN NUMBER')
+  const index = new Map<string, string>()
+  if (symbolIndex < 0 || isinIndex < 0) return index
+  for (const line of lines.slice(1)) {
+    const row = line.split(',')
+    const symbol = (row[symbolIndex] ?? '').trim().toUpperCase()
+    const isin = (row[isinIndex] ?? '').trim().toUpperCase()
+    if (symbol && ISIN_PATTERN.test(isin)) index.set(symbol, isin)
+  }
+  return index
+}
+
+function loadEquityMaster(fetcher: TextFetcher, signal?: AbortSignal): Promise<Map<string, string>> {
+  signal?.throwIfAborted()
+  let cache = masterCaches.get(fetcher)
+  if (!cache) {
+    cache = { request: createSharedRequest<Map<string, string>>() }
+    masterCaches.set(fetcher, cache)
+  }
+  if (cache.index) return Promise.resolve(cache.index)
+  const current = cache
+  return current.request('master', async (requestSignal) => {
+    const csv = await fetcher(NSE_EQUITY_MASTER_URL, requestSignal)
+    requestSignal.throwIfAborted()
+    const index = indexEquityMaster(csv)
+    current.index = index
+    return index
+  }, signal)
 }
 
 /** Pull the ISIN column out of one CSV row using the header's column order. */
@@ -94,23 +127,17 @@ function writeCachedIsin(ticker: string, isin: string): void {
 export async function resolveIsin(
   ticker: string,
   fetcher: TextFetcher = defaultFetcher,
+  signal?: AbortSignal,
 ): Promise<string | null> {
+  signal?.throwIfAborted()
   const symbol = normalizeTicker(ticker)
   if (!symbol || !/^[A-Z0-9]{2,20}$/.test(symbol)) return null
   const cached = readCachedIsin(symbol)
   if (cached) return cached
-  const csv = await loadEquityMaster(fetcher)
-  const lines = csv.split(/\r?\n/)
-  const header = lines[0]?.split(',').map((name) => name.trim()) ?? []
-  for (let index = 1; index < lines.length; index++) {
-    const row = lines[index].split(',')
-    const isin = extractIsinFromRow(header, row, symbol)
-    if (isin) {
-      writeCachedIsin(symbol, isin)
-      return isin
-    }
-  }
-  return null
+  const index = await loadEquityMaster(fetcher, signal)
+  const isin = index.get(symbol) ?? null
+  if (isin) writeCachedIsin(symbol, isin)
+  return isin
 }
 
 // ---------------------------------------------------------------------------

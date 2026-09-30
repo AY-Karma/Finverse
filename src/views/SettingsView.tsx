@@ -294,10 +294,12 @@ export function SettingsView() {
                     onChange={(event) => {
                       const id = event.target.value as typeof settings.provider
                       const provider = PROVIDERS.find((item) => item.id === id)
+                      if (id === settings.provider) return
                       update({
                         provider: id,
-                        model: settings.model || provider?.model || '',
-                        baseUrl: id === 'ollama' && !settings.baseUrl ? 'http://localhost:11434/v1' : settings.baseUrl,
+                        apiKey: '',
+                        model: provider?.model || '',
+                        baseUrl: id === 'ollama' ? 'http://localhost:11434/v1' : '',
                         confirmRemoteOllama: false,
                       })
                     }}
@@ -362,12 +364,13 @@ export function SettingsView() {
                         )}
                       </div>
                     )}
-                    <p className="hint">Localhost is the default. Remote Ollama endpoints must use HTTPS and require confirmation before a request is sent.</p>
+                    <p className="hint">Use localhost or 127.0.0.1 with your Ollama port. Remote endpoints must use HTTPS and require confirmation before a request is sent.</p>
                   </div>
                 )}
 
                 {settings.provider && !local && (
                   <div className="ai-config-fields">
+                    <p className="hint">Credential destination: <code>{PROVIDERS.find((provider) => provider.id === settings.provider)?.endpoint}</code>. Switching providers clears the key and resets the model.</p>
                     <div className="settings-form-grid">
                       <TextField id="apikey" label="API key" type="password" placeholder="sk-…" value={settings.apiKey} onChange={(apiKey) => update({ apiKey })} />
                       <TextField id="model" label="Model" placeholder={getProviderDefault(settings.provider)} value={settings.model} onChange={(model) => update({ model })} />

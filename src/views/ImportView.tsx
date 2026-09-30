@@ -62,6 +62,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
   }
 
   const previewPositions = previews.flatMap((preview) => preview.positions)
+  const rejectedCount = previews.reduce((count, preview) => count + preview.rejectedCount, 0)
   const previewFileLabel = `${previews.length} file${previews.length === 1 ? '' : 's'}`
 
   return (
@@ -185,7 +186,14 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
             {previewPositions.slice(0, 8).map((position, index) => <span key={`${position.id}-${index}`} className="tag">{position.ticker} · {position.exchange ?? 'local'} · {position.currency ?? 'INR'}</span>)}
             {previewPositions.length > 8 && <span className="hint">+ {previewPositions.length - 8} more</span>}
           </div>
-          <div className="import-actions"><button type="button" className="btn btn--primary" onClick={confirmImport}>{previews.length === 1 ? 'Add to portfolio' : `Add ${previews.length} folios`}</button><button type="button" className="btn btn--ghost" onClick={() => setPreviews([])}>Cancel</button></div>
+          {rejectedCount > 0 && <div role="alert">
+            <p className="hint down">{rejectedCount} row{rejectedCount === 1 ? '' : 's'} rejected. Correct the amounts in your file and import again, or add only the accepted holdings.</p>
+            <details><summary>Review rejected rows</summary>
+              <ul>{previews.flatMap((preview) => preview.issues.map((issue, index) => <li className="hint" key={`${preview.id}-${index}`}>{preview.fileName} · {issue.sheet}, row {issue.row}, {issue.field}: {issue.message}</li>))}</ul>
+              {rejectedCount > previews.reduce((count, preview) => count + preview.issues.length, 0) && <p className="hint">Showing the first reported errors per file. {rejectedCount} rows were rejected in total.</p>}
+            </details>
+          </div>}
+          <div className="import-actions"><button type="button" className="btn btn--primary" onClick={confirmImport}>{rejectedCount > 0 ? 'Add accepted holdings' : previews.length === 1 ? 'Add to portfolio' : `Add ${previews.length} folios`}</button><button type="button" className="btn btn--ghost" onClick={() => setPreviews([])}>Cancel</button></div>
         </section>
       )}
 

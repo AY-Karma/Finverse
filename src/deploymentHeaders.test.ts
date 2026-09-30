@@ -19,5 +19,11 @@ describe('deployment security headers', () => {
       'X-Content-Type-Options',
       'Strict-Transport-Security',
     ]))
+    const csp = vercel?.headers.find(({ key }) => key === 'Content-Security-Policy')?.value ?? ''
+    const html = readFileSync('index.html', 'utf8')
+    expect(html).toContain(`content="${csp.replace("frame-ancestors 'none'; ", '')}"`)
+    expect(csp).toContain('img-src \'self\' data: https://cdn.jsdelivr.net https://eodhd.com;')
+    expect(csp).toContain('connect-src \'self\' https: http://localhost:* http://127.0.0.1:*;')
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'")
   })
 })

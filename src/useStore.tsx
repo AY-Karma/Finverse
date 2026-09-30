@@ -15,6 +15,7 @@ import { exportPortfolioCsv, importIdentitySummary, investmentWorkspace, type In
 import { appendPortfolioSnapshot, loadPortfolioSnapshots } from './portfolioHistory'
 import { marketData } from './marketData'
 import type { LiveQuotesResult } from './live'
+import type { ImportRowIssue } from './spreadsheet'
 import {
   fetchUsdInrRate,
   isMarketOpen,
@@ -33,6 +34,7 @@ const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluate
 const REFRESH_MS = 5 * 60_000 // live quote refresh cadence during market hours (5m)
 const CLOSED_REFRESH_MS = 24 * 60 * 60_000
 const FX_REFRESH_MS = 6 * 60 * 60_000 // Frankfurter publishes daily reference rates
+const EMPTY_QUOTES: Record<string, LiveQuote> = {}
 
 export interface ImportPreview {
   id: string
@@ -40,6 +42,8 @@ export interface ImportPreview {
   positions: Position[]
   duplicateCount: number
   unmatchedCount: number
+  issues: ImportRowIssue[]
+  rejectedCount: number
   createdAt: number
 }
 
@@ -82,6 +86,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [folioSaveFailed, setFolioSaveFailed] = useState(false)
   const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
   const lastImportedFolioId = useRef<string | null>(null)
+  const manualRefreshControllers = useRef(new Set<AbortController>())
 
   useEffect(() => setFolioSaveFailed(!saveFolios(folios)), [folios])
   useEffect(() => saveSettings(settings), [settings])
@@ -105,8 +110,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setQuickMode = useCallback((v: boolean) => setQuickModeState(v), [])
 
   const snapshot = useMemo(
-    () => investmentWorkspace.readSnapshot({ folios, quotes: liveQuotes, fxRate, history: portfolioHistory }),
-    [folios, liveQuotes, fxRate, portfolioHistory],
+    () => investmentWorkspace.readSnapshot({ folios, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, fxRate, history: portfolioHistory }),
+    [folios, liveQuotes, settings.allowExternalData, fxRate, portfolioHistory],
   )
   const rawPositions = snapshot.rawPositions
   const positions = snapshot.positions
@@ -116,6 +121,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => folios.map((folio) => `${folio.id}:${folio.positions.length}`).join('|'),
     [folios],
   )
+  useEffect(() => () => {
+    for (const controller of manualRefreshControllers.current) controller.abort()
+    manualRefreshControllers.current.clear()
+  }, [folioRefreshKey, settings.allowExternalData])
 
   const setLiveQuotes = useCallback((q: Record<string, LiveQuote>) => {
     liveQuotesRef.current = q
@@ -132,15 +141,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         throw new Error('Portfolio files must be 10 MB or smaller.')
       }
       const buffer = await file.arrayBuffer()
-      const { parseSpreadsheetInWorker } = await import('./spreadsheetClient')
-      const parsed = await parseSpreadsheetInWorker(buffer)
-      const summary = importIdentitySummary(parsed)
+      const { parseSpreadsheetPreviewInWorker } = await import('./spreadsheetClient')
+      const parsed = await parseSpreadsheetPreviewInWorker(buffer)
+      const summary = importIdentitySummary(parsed.positions)
       return {
         id: crypto.randomUUID(),
         fileName: file.name || 'Portfolio',
         positions: summary.normalized,
         duplicateCount: summary.duplicateCount,
         unmatchedCount: summary.unmatchedCount,
+        issues: parsed.issues,
+        rejectedCount: parsed.rejectedCount,
         createdAt: Date.now(),
       }
     },
@@ -179,24 +190,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!check.allowed) {
       return { ok: false, reason: 'cooldown', retryInMs: check.retryInMs ?? 0 }
     }
-    let result: LiveQuotesResult
+    const controller = new AbortController()
+    manualRefreshControllers.current.add(controller)
     try {
-      result = await marketData.refreshQuotes(positions, liveQuotesRef.current)
+      const result = await marketData.refreshQuotes(positions, liveQuotesRef.current, controller.signal)
+      controller.signal.throwIfAborted()
+      setMarketDataResult(result)
+      if (result.failed > 0 && result.updated === 0 && result.skipped === 0) {
+        return { ok: false, reason: 'failed', retryInMs: 0 }
+      }
+      setLiveQuotes(result.quotes)
+      recordManualRefresh()
+      if (settings.currency === 'USD') {
+        const rate = await fetchUsdInrRate(controller.signal)
+        controller.signal.throwIfAborted()
+        if (rate) setFxRateState(rate)
+      }
+      return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
     } catch {
-      setMarketDataResult({ quotes: liveQuotesRef.current, updated: 0, failed: positions.length, skipped: 0 })
+      if (!controller.signal.aborted) setMarketDataResult({ quotes: liveQuotesRef.current, updated: 0, failed: positions.length, skipped: 0 })
       return { ok: false, reason: 'failed', retryInMs: 0 }
+    } finally {
+      manualRefreshControllers.current.delete(controller)
     }
-    setMarketDataResult(result)
-    if (result.failed > 0 && result.updated === 0 && result.skipped === 0) {
-      return { ok: false, reason: 'failed', retryInMs: 0 }
-    }
-    setLiveQuotes(result.quotes)
-    recordManualRefresh()
-    if (settings.currency === 'USD') {
-      const rate = await fetchUsdInrRate()
-      if (rate) setFxRateState(rate)
-    }
-    return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
   }, [positions, settings.allowExternalData, settings.currency, setLiveQuotes])
 
   // Live-quote polling: every 30s while NSE market is open; one final fetch after
@@ -213,13 +229,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let closeRefreshPending = false
     let lastRefreshAt = 0
     let active = true
+    const controller = new AbortController()
 
     const refresh = async () => {
       if (inFlight || document.hidden) return
       inFlight = true
       if (active) setMarketDataRefreshing(true)
       try {
-        const result = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current)
+        const result = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current, controller.signal)
         if (active) {
           if (result.updated > 0 || result.skipped > 0 || result.failed === 0) lastRefreshAt = Date.now()
           setLiveQuotes(result.quotes)
@@ -275,6 +292,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false
+      controller.abort()
       window.clearInterval(openTimer)
       window.clearInterval(refreshTimer)
       document.removeEventListener('visibilitychange', onVisibility)
@@ -287,14 +305,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return
     }
     let active = true
+    const controller = new AbortController()
     const refresh = async () => {
-      const rate = await fetchUsdInrRate()
+      const rate = await fetchUsdInrRate(controller.signal)
       if (active && rate) setFxRateState(rate)
     }
     void refresh()
     const timer = window.setInterval(refresh, FX_REFRESH_MS)
     return () => {
       active = false
+      controller.abort()
       window.clearInterval(timer)
     }
   }, [settings.allowExternalData, settings.currency])
@@ -302,7 +322,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Keep a small local performance history so the portfolio story survives
   // between sessions without sending holdings to a remote system.
   useEffect(() => {
-    if (snapshot.positions.length === 0 || snapshot.currentValue <= 0) return
+    if (snapshot.positions.length === 0 || !snapshot.valuationComplete || snapshot.currentValue <= 0) return
     // When external prices are enabled, wait for the first quote response.
     // Recording the imported fallback first created artificial intraday cliffs.
     if (settings.allowExternalData && snapshot.lastUpdatedAt == null) return
@@ -316,7 +336,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }, current)
       return next.length === current.length && next[next.length - 1]?.at === current[current.length - 1]?.at ? current : next
     })
-  }, [settings.allowExternalData, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length])
+  }, [settings.allowExternalData, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length, snapshot.valuationComplete])
 
   const value: Store = {
     folios,

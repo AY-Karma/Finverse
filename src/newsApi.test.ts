@@ -23,4 +23,32 @@ describe('news API', () => {
     expect(response.status).toBe(400)
     expect(fetcher).not.toHaveBeenCalled()
   })
+
+  it('coalesces simultaneous feed requests and briefly caches provider failures', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response('', { status: 503 }))
+    const handler = createNewsHandler({ fetcher })
+    const request = () => new Request('http://localhost/api/news?source=wire-et')
+    const responses = await Promise.all(Array.from({ length: 20 }, () => handler(request())))
+    expect(responses.every((response) => response.status === 502)).toBe(true)
+    await handler(request())
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects excessive distinct concurrent requests before upstream work', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      await gate
+      return new Response(STORY)
+    })
+    const handler = createNewsHandler({ fetcher })
+    const pending = Array.from({ length: 20 }, (_, index) => handler(
+      new Request(`http://localhost/api/news?source=search&q=S${index}`),
+    ))
+    release()
+    const responses = await Promise.all(pending)
+    expect(responses.some((response) => response.status === 429)).toBe(true)
+    expect(fetcher.mock.calls.length).toBeLessThanOrEqual(8)
+    expect(responses.find((response) => response.status === 429)?.headers.get('retry-after')).toBeTruthy()
+  })
 })

@@ -1,5 +1,6 @@
 import type { FxRate, LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
+import { createSharedRequest } from './sharedRequest'
 import {
   MAX_MARKET_SYMBOLS,
   isMarketSymbol,
@@ -172,34 +173,51 @@ function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number): Yahoo
   }
 }
 
-async function fetchYahooPrices(symbols: string[]): Promise<Map<string, YahooResult>> {
-  const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
+const sharedQuoteBatch = createSharedRequest<Map<string, YahooResult>>()
+const QUOTE_REQUEST_CONCURRENCY = 4
+
+async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Map<string, YahooResult>> {
   const quotes = new Map<string, YahooResult>()
-  for (let start = 0; start < unique.length; start += MAX_MARKET_SYMBOLS) {
-    const batch = unique.slice(start, start + MAX_MARKET_SYMBOLS)
-    const params = new URLSearchParams({ symbols: batch.join(',') })
-    try {
-      const response = await fetch(`/api/quotes?${params}`, {
-        signal: AbortSignal.timeout(12000),
-      })
-      if (!response.ok) continue
-      const payload = (await response.json()) as QuotesPayload
-      const fetchedAt = Date.parse(payload.fetchedAt)
-      if (!Number.isFinite(fetchedAt)) continue
-      for (const item of payload.quotes ?? []) {
-        const quote = quoteFromPayload(item, fetchedAt)
-        if (quote && batch.includes(item.symbol)) quotes.set(item.symbol, quote)
-      }
-    } catch {
-      continue
+  const params = new URLSearchParams({ symbols: batch.join(',') })
+  try {
+    const response = await fetch(`/api/quotes?${params}`, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]),
+    })
+    if (!response.ok) return quotes
+    const payload = (await response.json()) as QuotesPayload
+    const fetchedAt = Date.parse(payload.fetchedAt)
+    if (!Number.isFinite(fetchedAt)) return quotes
+    for (const item of payload.quotes ?? []) {
+      const quote = quoteFromPayload(item, fetchedAt)
+      if (quote && batch.includes(item.symbol)) quotes.set(item.symbol, quote)
     }
+  } catch {
+    signal.throwIfAborted()
   }
   return quotes
 }
 
-export async function fetchYahooPrice(symbol: string): Promise<YahooResult | null> {
+async function fetchYahooPrices(symbols: string[], signal?: AbortSignal): Promise<Map<string, YahooResult>> {
+  const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
+  const quotes = new Map<string, YahooResult>()
+  let next = 0
+  const worker = async () => {
+    while (next < unique.length) {
+      signal?.throwIfAborted()
+      const start = next
+      next += MAX_MARKET_SYMBOLS
+      const batch = unique.slice(start, start + MAX_MARKET_SYMBOLS)
+      const results = await sharedQuoteBatch(batch.join(','), (requestSignal) => fetchQuoteBatch(batch, requestSignal), signal)
+      for (const [symbol, quote] of results) quotes.set(symbol, quote)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, Math.ceil(unique.length / MAX_MARKET_SYMBOLS)) }, worker))
+  return quotes
+}
+
+export async function fetchYahooPrice(symbol: string, signal?: AbortSignal): Promise<YahooResult | null> {
   const normalized = symbol.toUpperCase()
-  return (await fetchYahooPrices([normalized])).get(normalized) ?? null
+  return (await fetchYahooPrices([normalized], signal)).get(normalized) ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -207,10 +225,10 @@ export async function fetchYahooPrice(symbol: string): Promise<YahooResult | nul
 // ---------------------------------------------------------------------------
 
 /** Fetch a short-lived conversion rate used only for display conversion. */
-export async function fetchUsdInrRate(): Promise<FxRate | null> {
+export async function fetchUsdInrRate(signal?: AbortSignal): Promise<FxRate | null> {
   try {
     const res = await fetch('https://api.frankfurter.app/latest?from=USD&to=INR', {
-      signal: AbortSignal.timeout(10000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
     })
     if (!res.ok) return null
     const json = (await res.json()) as { date?: string; rates?: { INR?: number } }
@@ -258,13 +276,13 @@ function pickScheme(
 }
 
 /** Resolve a scheme name to its mfapi.in scheme code via the search endpoint. */
-async function resolveScheme(schemeName: string): Promise<number | null> {
+async function resolveScheme(schemeName: string, signal?: AbortSignal): Promise<number | null> {
   const target = normalizeScheme(schemeName)
   if (!target) return null
   try {
     const res = await fetch(
       `https://api.mfapi.in/mf/search?q=${encodeURIComponent(schemeName)}`,
-      { signal: AbortSignal.timeout(10000) },
+      { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000) },
     )
     if (!res.ok) return null
     const matches = (await res.json()) as { schemeCode: number; schemeName: string }[]
@@ -276,12 +294,18 @@ async function resolveScheme(schemeName: string): Promise<number | null> {
   }
 }
 
-async function fetchNavByName(schemeName: string): Promise<LiveQuote | null> {
-  const code = await resolveScheme(schemeName)
+const sharedNav = createSharedRequest<LiveQuote | null>()
+
+function fetchNavByName(schemeName: string, signal?: AbortSignal): Promise<LiveQuote | null> {
+  return sharedNav(normalizeScheme(schemeName), (requestSignal) => fetchNavUncached(schemeName, requestSignal), signal)
+}
+
+async function fetchNavUncached(schemeName: string, signal?: AbortSignal): Promise<LiveQuote | null> {
+  const code = await resolveScheme(schemeName, signal)
   if (code == null) return null
   try {
     const navRes = await fetch(`https://api.mfapi.in/mf/${code}/latest`, {
-      signal: AbortSignal.timeout(10000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
     })
     if (!navRes.ok) return null
     const data = (await navRes.json()) as { data?: { date?: string; nav?: string }[] }
@@ -330,6 +354,7 @@ const NAV_REQUEST_GAP_MS = 750
 export async function fetchLiveQuotes(
   positions: Position[],
   prev: Record<string, LiveQuote>,
+  signal?: AbortSignal,
 ): Promise<LiveQuotesResult> {
   const quotes: Record<string, LiveQuote> = { ...prev }
   const today = istDate()
@@ -345,11 +370,11 @@ export async function fetchLiveQuotes(
     const candidates = resolveYahooSymbolCandidates(position)
     return candidates.length > 0 ? [{ position, candidates }] : []
   })
-  const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]))
+  const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]), signal)
   const retrySymbols = equities.flatMap(({ candidates }) =>
     !primaryQuotes.has(candidates[0]) && candidates[1] ? [candidates[1]] : [],
   )
-  const retryQuotes = await fetchYahooPrices(retrySymbols)
+  const retryQuotes = await fetchYahooPrices(retrySymbols, signal)
   for (const { position, candidates } of equities) {
     const key = quoteKey(position)
     const quote = primaryQuotes.get(candidates[0]) ?? retryQuotes.get(candidates[1])
@@ -379,6 +404,7 @@ export async function fetchLiveQuotes(
   const worker = async () => {
     let requestedFund = false
     while (nextFund < funds.length) {
+      signal?.throwIfAborted()
       const position = funds[nextFund++]
       const key = quoteKey(position)
       const existing = prev[key]
@@ -389,8 +415,9 @@ export async function fetchLiveQuotes(
       ) {
         outcomes.push({ key, status: 'skipped' })
       } else {
-        if (requestedFund) await delay(NAV_REQUEST_GAP_MS)
-        const nav = await fetchNavByName(position.name || position.ticker)
+        if (requestedFund) await delay(NAV_REQUEST_GAP_MS, signal)
+        const nav = await fetchNavByName(position.name || position.ticker, signal)
+        signal?.throwIfAborted()
         requestedFund = true
         outcomes.push(nav
           ? { key, quote: nav, status: 'updated' }
@@ -411,8 +438,13 @@ export async function fetchLiveQuotes(
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return }
+    const abort = () => { clearTimeout(timer); reject(signal?.reason) }
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve() }, ms)
+    signal?.addEventListener('abort', abort, { once: true })
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -430,7 +462,7 @@ export interface HistoryPoint {
 }
 
 const HISTORY_TTL_MS = 24 * 60 * 60 * 1000
-const historyRequests = new Map<string, Promise<HistoryPoint[]>>()
+const sharedHistory = createSharedRequest<{ from: string; to: string; points: HistoryPoint[] }>()
 
 interface HistoryCacheEntry {
   from: string
@@ -482,8 +514,10 @@ function fetchCachedHistory(
   symbol: string,
   from: Date,
   to: Date,
-  fetchRange: (from: string, to: string) => Promise<HistoryPoint[]>,
+  fetchRange: (from: string, to: string, signal: AbortSignal) => Promise<HistoryPoint[]>,
+  signal?: AbortSignal,
 ): Promise<HistoryPoint[]> {
+  signal?.throwIfAborted()
   const fromS = istDate(from)
   const toS = istDate(to)
   const key = historyCacheKey(symbol)
@@ -492,10 +526,7 @@ function fetchCachedHistory(
     return Promise.resolve(historyInRange(cached.points, fromS, toS))
   }
 
-  const existing = historyRequests.get(key)
-  if (existing) return existing.then(() => fetchCachedHistory(symbol, from, to, fetchRange))
-
-  const request = (async () => {
+  return sharedHistory(key, async (requestSignal) => {
     const ranges: [string, string][] = cached
       ? [
           ...(fromS < cached.from ? [[fromS, adjacentDay(cached.from, -1)] as [string, string]] : []),
@@ -504,7 +535,8 @@ function fetchCachedHistory(
       : [[fromS, toS]]
     let next = cached ?? { from: fromS, to: toS, points: [], at: Date.now() }
     for (const [rangeFrom, rangeTo] of ranges) {
-      const points = await fetchRange(rangeFrom, rangeTo)
+      const points = await fetchRange(rangeFrom, rangeTo, requestSignal)
+      requestSignal.throwIfAborted()
       if (points.length === 0) continue
       next = {
         from: rangeFrom < next.from ? rangeFrom : next.from,
@@ -515,26 +547,25 @@ function fetchCachedHistory(
       }
     }
     if (next.points.length > 0) writeHistoryCache(key, next)
-    return historyInRange(next.points, fromS, toS)
-  })()
-  historyRequests.set(key, request)
-  void request.then(() => historyRequests.delete(key), () => historyRequests.delete(key))
-  return request
+    return { from: fromS, to: toS, points: historyInRange(next.points, fromS, toS) }
+  }, signal).then((result) => result.from === fromS && result.to === toS
+    ? result.points
+    : fetchCachedHistory(symbol, from, to, fetchRange, signal))
 }
 
 /** Daily close series for an equity/ETF market symbol. */
-export function fetchHistory(symbol: string, from: Date, to: Date): Promise<HistoryPoint[]> {
-  return fetchCachedHistory(symbol, from, to, (rangeFrom, rangeTo) => fetchHistoryUncached(symbol, rangeFrom, rangeTo))
+export function fetchHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]> {
+  return fetchCachedHistory(symbol, from, to, (rangeFrom, rangeTo, requestSignal) => fetchHistoryUncached(symbol, rangeFrom, rangeTo, requestSignal), signal)
 }
 
-async function fetchHistoryUncached(symbol: string, from: string, to: string): Promise<HistoryPoint[]> {
+async function fetchHistoryUncached(symbol: string, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
   const params = new URLSearchParams({
     symbol,
     from,
     to,
   })
   try {
-    const res = await fetch(`/api/history?${params}`, { signal: AbortSignal.timeout(12000) })
+    const res = await fetch(`/api/history?${params}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) })
     if (!res.ok) return []
     const json = (await res.json()) as HistoryPayload
     const points = (json.points ?? []).filter(
@@ -551,18 +582,19 @@ export function fetchNavHistory(
   schemeName: string,
   from: Date,
   to: Date,
+  signal?: AbortSignal,
 ): Promise<HistoryPoint[]> {
-  return fetchCachedHistory(`mf:${normalizeScheme(schemeName)}`, from, to, (rangeFrom, rangeTo) =>
-    fetchNavHistoryUncached(schemeName, rangeFrom, rangeTo))
+  return fetchCachedHistory(`mf:${normalizeScheme(schemeName)}`, from, to, (rangeFrom, rangeTo, requestSignal) =>
+    fetchNavHistoryUncached(schemeName, rangeFrom, rangeTo, requestSignal), signal)
 }
 
-async function fetchNavHistoryUncached(schemeName: string, from: string, to: string): Promise<HistoryPoint[]> {
-  const code = await resolveScheme(schemeName)
+async function fetchNavHistoryUncached(schemeName: string, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
+  const code = await resolveScheme(schemeName, signal)
   if (code == null) return []
   try {
     const res = await fetch(
       `https://api.mfapi.in/mf/${code}?startDate=${from}&endDate=${to}`,
-      { signal: AbortSignal.timeout(12000) },
+      { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) },
     )
     if (!res.ok) return []
     const data = (await res.json()) as { data?: { date?: string; nav?: string }[] }
