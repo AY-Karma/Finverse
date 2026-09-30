@@ -1,5 +1,5 @@
-import { isMarketSymbol, type HistoryPayload } from '../src/marketDataProtocol'
-import { createRequestBudget, readBoundedText } from './requestBudget'
+import { isMarketSymbol, type HistoryPayload } from '../src/marketDataProtocol.js'
+import { createRequestBudget, readBoundedText } from './requestBudget.js'
 
 const UPSTREAM_TIMEOUT_MS = 8_000
 const MAX_RANGE_MS = 5 * 366 * 24 * 60 * 60 * 1000

@@ -4,8 +4,8 @@ import {
   type MarketQuotePayload,
   type QuoteErrorPayload,
   type QuotesPayload,
-} from '../src/marketDataProtocol'
-import { createRequestBudget, readBoundedText } from './requestBudget'
+} from '../src/marketDataProtocol.js'
+import { createRequestBudget, readBoundedText } from './requestBudget.js'
 
 const UPSTREAM_TIMEOUT_MS = 4_000
 const NSE_CLOSE_CACHE_MS = 60 * 60 * 1000
