@@ -1,0 +1,147 @@
+import { describe, expect, it } from 'vitest'
+import * as XLSX from '@e965/xlsx'
+import { parseSpreadsheet } from './spreadsheet'
+
+function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx'): ArrayBuffer {
+  const book = XLSX.utils.book_new()
+  sheets.forEach((rows, index) => {
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), `Sheet${index + 1}`)
+  })
+  return XLSX.write(book, { type: 'array', bookType }) as ArrayBuffer
+}
+
+describe('holdings spreadsheet import', () => {
+  it('finds mutual-fund holdings below account details and a portfolio summary', () => {
+    const positions = parseSpreadsheet(workbook([[
+      ['Name', 'Example Investor'],
+      ['Mobile Number', '9000000000'],
+      ['PAN', 'ABCDE1234F'],
+      [],
+      ['Total Investments', 'Current Portfolio Value', 'Returns', 'XIRR'],
+      [200, 240, 40, '20%'],
+      [],
+      ['HOLDINGS AS ON 2026-09-23'],
+      ['Scheme Name', 'AMC', 'Category', 'Sub-category', 'Folio No.', 'Source', 'Units', 'Invested Value', 'Current Value', 'Returns', 'XIRR'],
+      [],
+      ['Example Fund', 'Example AMC', 'Equity', 'Small Cap', 'EXAMPLE-1', 'Groww', 2, 200, 240, 40, '20%'],
+    ]]))
+
+    expect(positions).toHaveLength(1)
+    expect(positions[0]).toMatchObject({
+      ticker: 'Example Fund', type: 'mutual-fund', quantity: 2, invested: 200,
+      buyPrice: 100, lastPrice: 120, folio: 'EXAMPLE-1', xirr: 20,
+    })
+  })
+
+  it.each(['xlsx', 'biff8'] as const)('reads reordered stock columns and ignores metadata, totals and invalid rows in %s', (format) => {
+    const positions = parseSpreadsheet(workbook([[
+      ['Client ID', 'EXAMPLE-CLIENT'],
+      ['Summary', 'Investment Value', 'Current Value'],
+      ['Portfolio', 200, 240],
+      [],
+      ['Account', 'Market Value (INR)', 'Stock Name', 'ISIN', 'Invested Value (Rs.)', 'Quantity', 'Pledged Quantity'],
+      ['EXAMPLE', '₹2,400', 'Example Stock', 'INE000000001', 'Rs. 2,000', '10', 4],
+      ['EXAMPLE', '-', 'Placeholder', '', 'N/A', '', ''],
+      ['EXAMPLE', '100', 'Note 2026', '', 'Note 2026', 'reference 23', ''],
+      ['EXAMPLE', 2400, 'Grand Total', '', 2000, 10, ''],
+      ['EXAMPLE', 0, 'Closed Stock', '', 0, 0, ''],
+    ]], format))
+
+    expect(positions).toHaveLength(1)
+    expect(positions[0]).toMatchObject({ ticker: 'EXAMPLE STOCK', isin: 'INE000000001', type: 'stock', quantity: 10, buyPrice: 200, invested: 2000, lastPrice: 240 })
+  })
+
+  it('reads holdings on later worksheets and multiple holdings tables', () => {
+    const positions = parseSpreadsheet(workbook([
+      [['STOCK', 'SYMBOL', 'PRICE', 'Change (%)'], ['Example Stock', 'EXAMPLE', 125, 2]],
+      [
+        ['Portfolio instructions'], [],
+        ['Stock', 'Date Purchased', 'Shares', 'Purchase Price', 'Fees', 'Purchase Cost', 'Current Price', 'Current Value'],
+        ['EXAMPLE', '2026-09-23', 2, 100, 5, 205, 125, 250],
+        ['TOTALS', '', 2, 100, 5, 205, 125, 250],
+        [],
+        ['Ticker', 'Quantity', 'Buy Price', 'Last Price'],
+        ['SECOND', 3, 10, 12],
+      ],
+      [['Scheme Name', 'Units', 'Invested Value', 'Current Value'], ['Example Fund', 5, 500, 600]],
+    ]))
+
+    expect(positions.map((position) => position.ticker)).toEqual(['EXAMPLE', 'SECOND', 'Example Fund'])
+    expect(positions[0]).toMatchObject({ quantity: 2, buyPrice: 100, invested: 205, lastPrice: 125 })
+  })
+
+  it('combines split headers without assigning blank columns to a previous field', () => {
+    const positions = parseSpreadsheet(workbook([[
+      ['Scheme Name', null, 'Units', 'Invested', 'Current'],
+      [null, null, null, 'Value', 'Value'],
+      ['Example Fund', 'Ignore this column', 2, 200, 240],
+    ]]))
+    expect(positions).toHaveLength(1)
+    expect(positions[0]).toMatchObject({ ticker: 'Example Fund', quantity: 2, invested: 200, lastPrice: 120 })
+  })
+
+  it('skips repeated headers and summary/footer rows with numeric cells', () => {
+    const positions = parseSpreadsheet(workbook([[
+      ['Ticker', 'Quantity', 'Avg. Cost', 'LTP'],
+      ['EXAMPLE', 2, 100, 125],
+      ['Ticker', 'Quantity', 'Avg. Cost', 'LTP'],
+      ['SECOND', 3, 10, 12],
+      ['Total', 5, 110, 137],
+      ['Disclaimer 2026', 'version 1', 'page 2', '-'],
+    ]]))
+    expect(positions.map((position) => position.ticker)).toEqual(['EXAMPLE', 'SECOND'])
+  })
+
+  it('does not import a stock tradebook as holdings', () => {
+    expect(() => parseSpreadsheet(workbook([[
+      ['Symbol', 'Quantity', 'Price', 'Buy/Sell', 'Order ID'],
+      ['EXAMPLE', 2, 100, 'BUY', 'ORDER-1'],
+    ]]))).toThrow('No recognizable holdings header found')
+  })
+
+  it('stops importing holdings when a trade section follows on the same sheet', () => {
+    const positions = parseSpreadsheet(workbook([[
+      ['Symbol', 'Quantity', 'Price'],
+      ['EXAMPLE', 2, 100],
+      ['Symbol', 'Quantity', 'Price', 'Buy/Sell'],
+      ['TRADE', 3, 110, 'BUY'],
+    ]]))
+    expect(positions.map((position) => position.ticker)).toEqual(['EXAMPLE'])
+  })
+
+  it('keeps optional last prices empty instead of turning placeholders into zero', () => {
+    const positions = parseSpreadsheet(workbook([[
+      ['Symbol', 'Qty', 'Avg. Cost', 'LTP'],
+      ['EXAMPLE', '1,000', '1.5', '-'],
+      ['SECOND', 1, '₹10', 'N/A'],
+    ]]))
+    expect(positions[0]).toMatchObject({ quantity: 1000, buyPrice: 1.5, invested: 1500, lastPrice: null })
+    expect(positions[1].lastPrice).toBeNull()
+  })
+
+  it('reads fund NAV columns and fund names identified by XIRR', () => {
+    const positions = parseSpreadsheet(workbook([
+      [['Fund Name', 'Units', 'Average NAV', 'Current NAV'], ['Example Fund', 2, 100, 120]],
+      [['Name', 'Units', 'Invested Value', 'Current Value', 'XIRR'], ['Second Fund', 3, 300, 360, '12%']],
+    ]))
+    expect(positions).toHaveLength(2)
+    expect(positions[0]).toMatchObject({ type: 'mutual-fund', buyPrice: 100, lastPrice: 120, invested: 200 })
+    expect(positions[1]).toMatchObject({ type: 'mutual-fund', ticker: 'Second Fund', xirr: 12 })
+  })
+
+  it('preserves security names that start with summary words', () => {
+    const positions = parseSpreadsheet(workbook([[
+      ['Stock Name', 'Shares', 'Purchase Price'],
+      ['Total Energy Services', 2, 100],
+    ]]))
+    expect(positions).toHaveLength(1)
+  })
+
+  it('enforces the holdings limit across worksheets', () => {
+    const rows = Array.from({ length: 2501 }, (_, index) => [`STOCK${index}`, 1, 10])
+    expect(() => parseSpreadsheet(workbook([
+      [['Ticker', 'Quantity', 'Buy Price'], ...rows],
+      [['Ticker', 'Quantity', 'Buy Price'], ...rows],
+    ]))).toThrow('limited to 5,000 holdings')
+  })
+})

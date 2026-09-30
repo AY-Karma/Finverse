@@ -75,14 +75,19 @@ function validateSheetDimensions(sheetName: string, sheet: unknown, totalCells: 
   return totalCells + cells
 }
 
-type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'name' | 'type'
+type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'investedValue' | 'currentValue' | 'name' | 'type' | 'isin'
 
 const FIELD_ALIASES: Record<FieldKey, string[]> = {
-  ticker: ['ticker', 'symbol', 'code', 'script', 'isin', 'instrument', 'name'],
-  quantity: ['quantity', 'qty', 'units', 'shares', 'noofunits', 'no of units', 'held', 'pos'],
+  ticker: ['ticker', 'symbol', 'trading symbol', 'tradingsymbol', 'code', 'scrip', 'scrip code', 'script', 'security', 'instrument', 'stock', 'stock name', 'name', 'company name', 'security name'],
+  quantity: ['quantity', 'qty', 'net quantity', 'net qty', 'quantity held', 'units', 'shares', 'noofunits', 'no of units', 'held', 'pos'],
   buyPrice: [
     'buyprice',
     'buy price',
+    'purchase price',
+    'average buy price',
+    'avg. buy price',
+    'buy average',
+    'average cost price',
     'price',
     'avgcost',
     'averagecost',
@@ -93,12 +98,15 @@ const FIELD_ALIASES: Record<FieldKey, string[]> = {
     'nav',
     'cost',
   ],
+  investedValue: ['invested value', 'invested amount', 'investment amount', 'investment value', 'total investment', 'invested', 'purchase cost', 'buy value', 'cost value', 'total cost'],
+  currentValue: ['current value', 'market value', 'current market value', 'present value', 'valuation'],
   lastPrice: [
     'lastprice',
     'last price',
     'lasttradedprice',
     'ltp',
     'currentprice',
+    'current market price',
     'marketprice',
     'market price',
     'previous closing price',
@@ -107,8 +115,9 @@ const FIELD_ALIASES: Record<FieldKey, string[]> = {
     'closing',
     'prev',
   ],
-  name: ['company', 'companyname', 'securityname', 'fund', 'fundname', 'scheme', 'description'],
+  name: ['company', 'companyname', 'securityname', 'stock name', 'name', 'fund', 'fundname', 'scheme', 'description'],
   type: ['type', 'assettype', 'assetclass', 'class', 'category'],
+  isin: ['isin', 'isin code'],
 }
 
 type MfField =
@@ -116,6 +125,8 @@ type MfField =
   | 'units'
   | 'investedValue'
   | 'currentValue'
+  | 'buyPrice'
+  | 'lastPrice'
   | 'amc'
   | 'category'
   | 'subCategory'
@@ -125,6 +136,8 @@ type MfField =
   | 'xirr'
 
 const MF_ALIASES: Record<MfField, string[]> = {
+  buyPrice: ['buy price', 'purchase price', 'average price', 'avg price', 'average nav', 'avg nav', 'average cost', 'avg cost'],
+  lastPrice: ['nav', 'current nav', 'latest nav', 'last price', 'current price', 'ltp'],
   scheme: [
     'schemename',
     'scheme name',
@@ -209,189 +222,85 @@ const MF_ALIASES: Record<MfField, string[]> = {
   xirr: ['xirr', 'irr', 'annualized return', 'annualised return', 'return', 'yield'],
 }
 
-function normalize(s: string): string {
-  return s.trim().toLowerCase().replace(/[\s\-_.()/]/g, '')
-}
-
 function normalizeHeader(s: string): string {
-  return normalize(s).replace(/[^a-z0-9]/g, '')
+  return s.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-/**
- * Turn an unknown value into a string for header scoring, tolerating merged
- * cells, date cells and stored numbers.
- */
 function headerCellText(v: unknown): string {
-  if (v == null) return ''
-  if (typeof v === 'number') return String(v)
-  return String(v).trim()
+  return v == null ? '' : String(v).trim()
 }
 
-/**
- * Rebuild a header row after horizontal merges. Excel only writes *one* cell per
- * merged run, leaving the rest empty (null), so a truly merged header like
- * "Scheme Name" spanning columns A-C becomes ["Scheme Name", null, null, ...].
- * We fill those gaps left-to-right so subsequent cells can still be matched.
- */
-function fillMerged(head: readonly unknown[]): string[] {
-  let carry: string | null = null
-  return head.map((v) => {
-    const t = headerCellText(v)
-    if (t !== '') {
-      carry = t
-      return t
-    }
-    if (carry != null) return carry
-    return ''
-  })
-}
-
-/**
- * Score how well a header matches a field's aliases.
- * Exact header == alias scores highest; otherwise the longest matching alias.
- * Generic aliases like 'price'/'type' get low scores so they lose to specific ones.
- */
 function matchScore(head: string, aliases: string[]): number {
-  const h = normalizeHeader(head)
-  if (!h) return 0
+  const normalized = normalizeHeader(head)
+  if (!normalized) return 0
   let best = 0
-  for (const a of aliases) {
-    const an = normalizeHeader(a)
-    if (!an) continue
-    if (h === an) {
-      best = Math.max(best, 200 + an.length)
-    } else if (h.includes(an) || an.includes(h)) {
-      best = Math.max(best, an.length)
+  for (const alias of aliases) {
+    const candidate = normalizeHeader(alias)
+    if (normalized === candidate) {
+      best = Math.max(best, 200 + candidate.length)
+    } else if (normalized.startsWith(candidate) && /^(in)?(rs|inr|rupees|usd|eur|gbp)$/.test(normalized.slice(candidate.length))) {
+      best = Math.max(best, candidate.length)
     }
   }
   return best
 }
 
-/**
- * Assign columns to fields greedily. Each column is claimed by the highest-scoring
- * field, and no column is reused across fields.
- */
-function assignFields(head: string[]): { [k in FieldKey]: number | null } {
-  const keys = Object.keys(FIELD_ALIASES) as FieldKey[]
-  const out: { [k in FieldKey]: number | null } = {
-    ticker: null,
-    quantity: null,
-    buyPrice: null,
-    lastPrice: null,
-    name: null,
-    type: null,
-  }
+type Columns<Key extends string> = Record<Key, number | null>
 
-  const candidates: { key: FieldKey; col: number; score: number }[] = []
-  for (const key of keys) {
-    for (let col = 0; col < head.length; col++) {
-      const score = matchScore(head[col], FIELD_ALIASES[key])
-      if (score > 0) candidates.push({ key, col, score })
-    }
-  }
+function fieldCount(cols: Columns<string>): number {
+  return Object.values(cols).filter((col) => col != null).length
+}
 
-  // Highest score first, then field priority, then column order.
-  const order: Record<FieldKey, number> = {
-    ticker: 0,
-    quantity: 1,
-    buyPrice: 2,
-    lastPrice: 3,
-    name: 4,
-    type: 5,
-  }
-  candidates.sort(
-    (a, b) =>
-      b.score - a.score || order[a.key] - order[b.key] || a.col - b.col,
-  )
-
+function assignColumns<Key extends string>(head: string[], aliases: Record<Key, string[]>): Columns<Key> {
+  const keys = Object.keys(aliases) as Key[]
+  const cols = Object.fromEntries(keys.map((key) => [key, null])) as Columns<Key>
+  const candidates: { key: Key; col: number; score: number; priority: number }[] = []
+  keys.forEach((key, priority) => {
+    head.forEach((cell, col) => {
+      const score = matchScore(cell, aliases[key])
+      if (score > 0) candidates.push({ key, col, score, priority })
+    })
+  })
+  candidates.sort((a, b) => b.score - a.score || a.priority - b.priority || a.col - b.col)
   const taken = new Set<number>()
-  for (const c of candidates) {
-    if (out[c.key] != null) continue
-    if (taken.has(c.col)) continue
-    out[c.key] = c.col
-    taken.add(c.col)
+  for (const candidate of candidates) {
+    if (cols[candidate.key] != null || taken.has(candidate.col)) continue
+    cols[candidate.key] = candidate.col
+    taken.add(candidate.col)
   }
-  return out
+  return cols
 }
 
-function bestColumn(head: string[], aliases: string[]): number | null {
-  let bestCol: number | null = null
-  let bestScore = 0
-  for (let col = 0; col < head.length; col++) {
-    const score = matchScore(head[col], aliases)
-    if (score > bestScore) {
-      bestScore = score
-      bestCol = col
-    }
+function detectHeader(head: string[]) {
+  const equity = assignColumns(head, FIELD_ALIASES)
+  // Activity reports cannot be interpreted as current holdings.
+  if (head.some((cell) => ['buysell', 'tradetype', 'transactiontype', 'orderid', 'tradeid', 'executionid'].includes(normalizeHeader(cell)))) {
+    return equity.quantity != null && (equity.ticker != null || equity.isin != null)
+      ? { mode: 'activity' as const, cols: equity }
+      : null
   }
-  return bestCol
-}
-
-function assignMfFields(head: string[]): { [k in MfField]: number | null } {
-  const keys = Object.keys(MF_ALIASES) as MfField[]
-  const out = {} as { [k in MfField]: number | null }
-  for (const k of keys) out[k] = bestColumn(head, MF_ALIASES[k])
-  return out
-}
-
-function looksLikeHeaderRow(row: readonly unknown[]): boolean {
-  const head = row.map((c) => headerCellText(c))
-  const cols = assignFields(fillMerged(head))
-  return (
-    cols.ticker != null &&
-    (cols.quantity != null || cols.buyPrice != null || cols.lastPrice != null)
-  )
-}
-
-/** A mutual-fund sheet is recognized by a scheme column plus value/units columns. */
-function looksLikeMfHeaderRow(row: readonly unknown[]): boolean {
-  const cols = assignMfFields(fillMerged(row))
-  // Scheme column present — treat any MF-ish digit column as confirmation.
-  if (cols.scheme != null) {
-    return (
-      cols.units != null ||
-      cols.investedValue != null ||
-      cols.currentValue != null ||
-      cols.xirr != null
-    )
+  const mf = assignColumns(head, MF_ALIASES)
+  if (mf.scheme == null && mf.xirr != null) mf.scheme = equity.ticker ?? equity.name
+  if (mf.scheme != null && mf.units != null &&
+    (mf.investedValue != null || mf.currentValue != null || mf.buyPrice != null || mf.lastPrice != null)) {
+    return { mode: 'mf' as const, cols: mf }
   }
-  // No "scheme" word found: require XIRR (the classic fund-only column) plus any
-  // value/units. This keeps equity-like "Qty + Avg. cost + LTP" sheets out.
-  return cols.xirr != null && (cols.units != null || cols.currentValue != null || cols.investedValue != null)
-}
-
-/** Score a candidate row by how many MF-ish columns it carries (for fallback). */
-function mfHeaderScore(row: readonly unknown[]): number {
-  const cols = assignMfFields(fillMerged(row))
-  let n = 0
-  if (cols.scheme != null) n += 2
-  if (cols.units != null) n += 1
-  if (cols.investedValue != null) n += 1
-  if (cols.currentValue != null) n += 1
-  if (cols.xirr != null) n += 1
-  // A XIRR OR Current Value column is the classic MF-only fingerprint.
-  if (cols.xirr != null || cols.currentValue != null) n += 2
-  return n
-}
-
-/** Score a candidate row by how many equity-ish columns it carries. */
-function equityHeaderScore(row: readonly unknown[]): number {
-  const cols = assignFields(fillMerged(row))
-  let n = 0
-  if (cols.ticker != null) n += 3
-  if (cols.quantity != null) n += 1
-  if (cols.buyPrice != null) n += 1
-  if (cols.lastPrice != null) n += 1
-  return n
+  if ((equity.ticker != null || equity.isin != null) && equity.quantity != null &&
+    (equity.buyPrice != null || equity.lastPrice != null || equity.investedValue != null || equity.currentValue != null)) {
+    return { mode: 'equity' as const, cols: equity }
+  }
+  return null
 }
 
 function parseNumber(v: unknown): number | null {
   if (v == null || v === '') return null
-  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
   const s = String(v).trim()
   // Parenthetical negatives: (1,234.50) => -1234.5
   const neg = s.startsWith('(') && s.endsWith(')')
-  const n = Number(s.replace(/[^0-9.-]/g, '')) * (neg ? -1 : 1)
+  const numeric = s.replace(/\b(INR|USD|EUR|GBP|Rs|rupees)\b\.?/gi, '').replace(/[,\s₹$€£%()]/g, '')
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(numeric)) return null
+  const n = Number(numeric) * (neg ? -1 : 1)
   return Number.isFinite(n) ? n : null
 }
 
@@ -406,22 +315,20 @@ function inferType(v: unknown): AssetType {
   return 'other'
 }
 
-function parseEquityColumnRow(
-  rows: unknown[][],
-  dataStart: number,
-  cols: ReturnType<typeof assignFields>,
-): Position[] {
+function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>): Position[] {
   const positions: Position[] = []
-  for (let i = dataStart; i < rows.length; i++) {
-    const row = rows[i]
-    const ticker = cols.ticker != null ? row[cols.ticker] : null
-    if (ticker == null || String(ticker).trim() === '') continue
+  for (const row of rows) {
+    const ticker = row[cols.ticker ?? cols.isin ?? -1]
+    if (ticker == null || String(ticker).trim() === '' || SUMMARY_LABELS.test(String(ticker))) continue
 
     const qtyRaw = cols.quantity != null ? parseNumber(row[cols.quantity]) : null
     const buyRaw = cols.buyPrice != null ? parseNumber(row[cols.buyPrice]) : null
     const lastRaw = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
-    // Skip blank / total / summary rows that have no numeric figures at all.
-    if (qtyRaw == null && buyRaw == null && lastRaw == null) continue
+    const invested = cols.investedValue != null ? parseNumber(row[cols.investedValue]) : null
+    const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
+    if (qtyRaw == null || qtyRaw <= 0 || (buyRaw == null && lastRaw == null && invested == null && value == null)) continue
+    const buyPrice = buyRaw ?? (invested != null ? invested / qtyRaw : 0)
+    const isin = cols.isin != null ? String(row[cols.isin] ?? '').trim().toUpperCase() : ''
 
     positions.push({
       id: crypto.randomUUID(),
@@ -430,35 +337,34 @@ function parseEquityColumnRow(
       // An equity-shaped header has already been detected. Broker exports
       // commonly omit an explicit Type column, and those rows are stocks.
       type: cols.type != null ? inferType(row[cols.type]) : 'stock',
-      quantity: qtyRaw ?? 0,
-      buyPrice: buyRaw ?? 0,
-      lastPrice: lastRaw,
-      invested: (qtyRaw ?? 0) * (buyRaw ?? 0),
+      quantity: qtyRaw,
+      buyPrice,
+      lastPrice: lastRaw ?? (value != null ? value / qtyRaw : null),
+      invested: invested ?? qtyRaw * buyPrice,
+      ...(isin ? { isin } : {}),
     })
   }
   return positions
 }
 
 const SUMMARY_LABELS =
-  /^\s*(total|summary|summ ary|holdings summary|invested values|total invest(ment)?s?|grand total|net value|profit|loss|xirr)\b/i
+  /^\s*(totals?|sub[ -]?total|summary|holdings summary|invested values|total invest(ment)?s?|grand total|net value|profit|loss|xirr)\s*[:\-]?\s*$/i
 
-function parseMfRows(
-  rows: unknown[][],
-  dataStart: number,
-  cols: ReturnType<typeof assignMfFields>,
-): Position[] {
+function parseMfRows(rows: unknown[][], cols: Columns<MfField>): Position[] {
   const positions: Position[] = []
-  for (let i = dataStart; i < rows.length; i++) {
-    const row = rows[i]
+  for (const row of rows) {
     const schemeCell = cols.scheme != null ? row[cols.scheme] : null
     const schemeStr = schemeCell != null ? String(schemeCell).trim() : ''
     if (schemeStr === '' || SUMMARY_LABELS.test(schemeStr)) continue
 
     const units = cols.units != null ? parseNumber(row[cols.units]) : null
-    if (units == null) continue // skip blank/summary rows
+    if (units == null || units <= 0) continue
 
     const invested = cols.investedValue != null ? parseNumber(row[cols.investedValue]) : null
     const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
+    const buy = cols.buyPrice != null ? parseNumber(row[cols.buyPrice]) : null
+    const last = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
+    if (invested == null && value == null && buy == null && last == null) continue
     const amc = cols.amc != null ? String(row[cols.amc] ?? '').trim() : ''
     const category = cols.category != null ? String(row[cols.category] ?? '').trim() : ''
     const subCategory = cols.subCategory != null ? String(row[cols.subCategory] ?? '').trim() : ''
@@ -474,9 +380,9 @@ function parseMfRows(
       name: schemeStr,
       type: 'mutual-fund',
       quantity: units,
-      buyPrice: invested != null && units > 0 ? invested / units : (invested ?? 0),
-      lastPrice: value != null && units > 0 ? value / units : null,
-      invested: invested ?? ((invested != null ? invested : 0)),
+      buyPrice: buy ?? (invested != null ? invested / units : 0),
+      lastPrice: last ?? (value != null ? value / units : null),
+      invested: invested ?? units * (buy ?? 0),
       amc,
       category,
       subCategory,
@@ -500,9 +406,9 @@ function combineHeaderRow(a: readonly unknown[], b: readonly unknown[]): string[
   for (let i = 0; i < n; i++) {
     const ta = headerCellText(a[i])
     const tb = headerCellText(b[i])
-    out.push(ta !== '' ? ta : tb)
+    out.push(ta && tb ? `${ta} ${tb}` : ta || tb)
   }
-  return fillMerged(out)
+  return out
 }
 
 export function parseSpreadsheet(file: ArrayBuffer): Position[] {
@@ -514,6 +420,7 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
   if (wb.SheetNames.length > MAX_IMPORT_SHEETS) {
     throw new Error(`Spreadsheets are limited to ${MAX_IMPORT_SHEETS} worksheets.`)
   }
+  const positions: Position[] = []
   let totalCells = 0
   for (const sheetName of wb.SheetNames) {
     totalCells = validateSheetDimensions(sheetName, wb.Sheets[sheetName], totalCells)
@@ -527,80 +434,39 @@ export function parseSpreadsheet(file: ArrayBuffer): Position[] {
       throw new Error(`Each sheet must contain ${MAX_IMPORT_ROWS.toLocaleString()} rows or fewer.`)
     }
 
-    // ---- Detect the true header (skip title / blank / meta rows) ----
-    // A header can be one row, or two vertically-merged rows (fund exports often
-    // split "Scheme Name" from the Units/Invested/Current block). Track the
-    // strongest candidates and the first data row below the chosen header.
-    let headerIndex = -1
-    let mfMode = false
-    let headerRow = 1 // rows consumed by the header (1 or 2)
-    let headCells: string[] | null = null
-    let bestEq = 0
-    let bestMf = 0
-    let fallbackEq = -1
-    let fallbackMf = -1
-
-    for (let i = 0; i < rows.length; i++) {
-      const singleMf = looksLikeMfHeaderRow(rows[i])
-      const singleEq = looksLikeHeaderRow(rows[i])
-      if (singleMf || singleEq) {
-        headerIndex = i
-        mfMode = singleMf
-        headerRow = 1
-        headCells = fillMerged(rows[i])
-        break
+    let active: { header: NonNullable<ReturnType<typeof detectHeader>>; dataStart: number } | null = null
+    const appendRows = (end: number) => {
+      if (!active) return
+      const data = rows.slice(active.dataStart, end)
+      const { header } = active
+      if (header.mode === 'activity') return
+      const parsed = header.mode === 'mf'
+        ? parseMfRows(data, header.cols)
+        : parseEquityRows(data, header.cols)
+      positions.push(...parsed)
+      if (positions.length > MAX_IMPORT_POSITIONS) {
+        throw new Error(`Portfolio imports are limited to ${MAX_IMPORT_POSITIONS.toLocaleString()} holdings.`)
       }
-      // Two-row vertical merge (scheme export style).
+    }
+    for (let i = 0; i < rows.length; i++) {
+      let header = detectHeader(rows[i].map(headerCellText))
+      let consumed = 1
       if (i + 1 < rows.length) {
-        const combined = combineHeaderRow(rows[i], rows[i + 1])
-        const comboMf = looksLikeMfHeaderRow(combined)
-        const comboEq = looksLikeHeaderRow(combined)
-        if (comboMf || comboEq) {
-          headerIndex = i
-          mfMode = comboMf
-          headerRow = 2
-          headCells = combined
-          break
+        const combined = detectHeader(combineHeaderRow(rows[i], rows[i + 1]))
+        if (combined && (!header || fieldCount(combined.cols) > fieldCount(header.cols))) {
+          header = combined
+          consumed = 2
         }
       }
-      const eqScore = equityHeaderScore(rows[i])
-      const mfScore = mfHeaderScore(rows[i])
-      if (eqScore > bestEq) {
-        bestEq = eqScore
-        fallbackEq = i
-      }
-      if (mfScore > bestMf) {
-        bestMf = mfScore
-        fallbackMf = i
-      }
+      if (!header) continue
+      appendRows(i)
+      active = { header, dataStart: i + consumed }
+      i += consumed - 1
     }
-
-    if (headerIndex === -1) {
-      // No strict header found — use the best-scoring candidate (handles sheets
-      // whose header cells are stored oddly). Parsing below discards garbage.
-      if (bestMf >= 4 && (bestMf > bestEq || bestEq < 4)) {
-        headerIndex = fallbackMf
-        mfMode = true
-        headerRow = 1
-        headCells = fillMerged(rows[headerIndex])
-      } else if (bestEq >= 4) {
-        headerIndex = fallbackEq
-        mfMode = false
-        headerRow = 1
-        headCells = fillMerged(rows[headerIndex])
-      }
-    }
-    if (headerIndex === -1 || headCells == null) continue // try next sheet
-
-    const dataStart = headerIndex + headerRow
-    const positions = mfMode
-      ? parseMfRows(rows, dataStart, assignMfFields(headCells))
-      : parseEquityColumnRow(rows, dataStart, assignFields(headCells))
-    if (positions.length > MAX_IMPORT_POSITIONS) {
-      throw new Error(`Portfolio imports are limited to ${MAX_IMPORT_POSITIONS.toLocaleString()} holdings.`)
-    }
-    if (positions.length > 0) return positions
+    appendRows(rows.length)
   }
+  if (positions.length > 0) return positions
+
   throw new Error(
     'No recognizable holdings header found. Use Ticker or Symbol with Quantity and Buy Price for equities, or Scheme Name with Units and Invested Value for mutual funds.',
   )
