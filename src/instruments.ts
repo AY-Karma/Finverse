@@ -12,7 +12,7 @@ function canonicalSymbol(value: string): string {
 
 function inferExchange(ticker: string, exchange?: string): Exchange {
   const explicit = clean(exchange).toUpperCase()
-  if (explicit === 'NSE' || explicit === 'BSE' || explicit === 'NASDAQ' || explicit === 'NYSE' || explicit === 'LSE') {
+  if (explicit === 'NSE' || explicit === 'BSE' || explicit === 'NASDAQ' || explicit === 'NYSE' || explicit === 'LSE' || explicit === 'OTHER') {
     return explicit
   }
   if (/\.(NS|NSE)$/i.test(ticker)) return 'NSE'

@@ -160,7 +160,7 @@ function persistChat(messages: ChatMessage[]): void {
   }
 }
 
-export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) => void; onRequestImport: () => void }) {
+export function AssistantView({ onGoTo, onRequestImport, initialDraft = '' }: { onGoTo: (v: View) => void; onRequestImport: () => void; initialDraft?: string }) {
   const { positions, settings, liveQuotes: retainedQuotes, fxRate, quickMode, setQuickMode } = useStore()
   const liveQuotes = useMemo(() => visibleQuotes(settings.allowExternalData, retainedQuotes), [settings.allowExternalData, retainedQuotes])
   const [initialChat] = useState(loadChat)
@@ -168,7 +168,7 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
   const [historyOmitted, setHistoryOmitted] = useState(initialChat.omitted)
   const [conversationRevealed, setConversationRevealed] = useState(false)
   const conversationHidden = settings.hideValues && !conversationRevealed
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialDraft)
   const [chips, setChips] = useState<string[]>(QUICK_PROMPTS)
   const [loading, setLoading] = useState(false)
   const [elapsed, setElapsed] = useState(0)
@@ -451,9 +451,11 @@ export function AssistantView({ onGoTo, onRequestImport }: { onGoTo: (v: View) =
           ))}
         </div>
 
-          <div className="chat-input">
+        {initialDraft && <p className="hint">Draft from Research. Review it before sending. Your current portfolio context is included.</p>}
+        <div className="chat-input">
             <input
               className="input"
+              aria-label="Message to AI provider"
               maxLength={MAX_CHAT_MESSAGE_CHARS}
               placeholder={quickMode ? 'Quick ask…' : 'Ask your coach…'}
               value={input}
