@@ -8,14 +8,14 @@ import { UndoImportButton } from './UndoImportButton'
 
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 
-export function HoldingsView({ onRequestImport }: { onRequestImport: () => void }) {
+export function HoldingsView({ onRequestImport, initialQuery = '' }: { onRequestImport: () => void; initialQuery?: string }) {
   const { folios, positions, settings, removeFolio, undoLastImport, undoImportFolioId, exportPortfolio } = useStore()
   const [feed, setFeed] = useState<LoadedMarketFeed | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshCount, setRefreshCount] = useState(0)
   const [importOpen, setImportOpen] = useState(false)
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
-  const [activeQuery, setActiveQuery] = useState('')
+  const [activeQuery, setActiveQuery] = useState(initialQuery)
   const holdingsKey = useMemo(
     () => positions.map((position) => `${position.id}:${position.ticker}:${position.name}:${position.type}`).sort().join('|'),
     [positions],

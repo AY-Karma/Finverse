@@ -20,6 +20,17 @@ const DEFAULT_SETTINGS = loadSettings()
 afterEach(() => { localStorage.clear(); state.chat.mockReset() })
 
 describe('assistant privacy and retention', () => {
+  it('prefills a research question without sending it or including private notes', async () => {
+    state.settings = { ...DEFAULT_SETTINGS }
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<AssistantView initialDraft="Help me review TCS" onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(container.querySelector<HTMLInputElement>('input[aria-label="Message to AI provider"]')?.value).toBe('Help me review TCS')
+      expect(container.textContent).toContain('Your current portfolio context is included')
+      expect(state.chat).not.toHaveBeenCalled()
+    } finally { await act(async () => root.unmount()) }
+  })
   it('removes saved text, charts and input from visible and accessible DOM until an explicit reveal', async () => {
     state.settings = { ...DEFAULT_SETTINGS, provider: 'openai', apiKey: 'fictional-key', hideValues: true }
     localStorage.setItem('finverse:chat', JSON.stringify([{ role: 'assistant', content: 'Balance 123456', charts: [{ kind: 'bar', data: [{ label: 'Secret', value: 98765 }] }] }]))
