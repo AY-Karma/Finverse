@@ -1,4 +1,4 @@
-import { parseSpreadsheet } from './spreadsheet'
+import { parseSpreadsheetWithDiagnostics } from './spreadsheet'
 
 const workerScope = self as unknown as {
   onmessage: ((event: MessageEvent<ArrayBuffer>) => void) | null
@@ -7,7 +7,7 @@ const workerScope = self as unknown as {
 
 workerScope.onmessage = (event) => {
   try {
-    workerScope.postMessage({ ok: true, positions: parseSpreadsheet(event.data) })
+    workerScope.postMessage({ ok: true, result: parseSpreadsheetWithDiagnostics(event.data) })
   } catch (error) {
     workerScope.postMessage({
       ok: false,

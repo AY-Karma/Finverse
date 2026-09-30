@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Position } from './types'
-import { portfolioPulse } from './valuation'
+import { combinedPositionMembers, combinePositions, computePortfolioStats, portfolioPulse } from './valuation'
 
 function position(overrides: Partial<Position>): Position {
   return {
@@ -15,6 +15,37 @@ function position(overrides: Partial<Position>): Position {
     ...overrides,
   }
 }
+
+describe('valuation coverage and merge identity', () => {
+  it('calculates P&L only for priced holdings and reports missing coverage', () => {
+    const stats = computePortfolioStats([
+      position({ ticker: 'PRICED', lastPrice: 120 }),
+      position({ ticker: 'UNKNOWN', invested: 1000 }),
+    ])
+    expect(stats).toMatchObject({ invested: 1100, pricedInvested: 100, currentValue: 120, pnl: 20, pnlPct: 20, pricedCount: 1, unpricedCount: 1, valuationComplete: false })
+    expect(stats.allocations).toEqual([{ symbol: 'PRICED', value: 120, type: 'stock' }])
+  })
+
+  it('preserves canonical metadata when merging compatible holdings', () => {
+    const holding = position({ ticker: '500325', exchange: 'BSE', providerSymbol: '500325.BO', currency: 'INR', instrumentKey: 'EQ:500325', isin: 'INE002A01018', sector: 'Energy', industry: 'Refining', lastPrice: 120 })
+    expect(combinePositions([holding, { ...holding, id: 'second', quantity: 2, invested: 200 }])[0]).toMatchObject({ ...holding, id: 'merged:EQ:500325', quantity: 3, invested: 300, buyPrice: 100 })
+  })
+
+  it('does not combine conflicting canonical identity fields', () => {
+    const holding = position({ ticker: 'SAME', exchange: 'NSE', providerSymbol: 'SAME.NS', currency: 'INR', isin: 'INE000000001' })
+    for (const conflict of [{ exchange: 'BSE' as const }, { currency: 'USD' as const }, { providerSymbol: 'DIFFERENT.NS' }, { isin: 'INE000000002' }]) {
+      expect(combinePositions([holding, { ...holding, id: 'second', ...conflict }])).toHaveLength(2)
+    }
+  })
+  it('keeps each merged ledger expansion with its compatible source rows', () => {
+    const rows = [position({ id: 'nse-a', exchange: 'NSE' }), position({ id: 'nse-b', exchange: 'NSE' }), position({ id: 'bse-a', exchange: 'BSE' }), position({ id: 'bse-b', exchange: 'BSE' })]
+    const combined = combinePositions(rows)
+    const members = combinedPositionMembers(rows)
+    expect(combined).toHaveLength(2)
+    expect(members.get(combined[0].id)?.map((row) => row.id)).toEqual(['nse-a', 'nse-b'])
+    expect(members.get(combined[1].id)?.map((row) => row.id)).toEqual(['bse-a', 'bse-b'])
+  })
+})
 
 describe('portfolioPulse', () => {
   const positions = [

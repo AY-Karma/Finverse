@@ -98,9 +98,9 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     return null
   }, [holding?.id, holding?.name, holding?.providerSymbol, holding?.ticker, holding?.type])
 
-  const fetchOutcome = async (q: Query, from: Date, to: Date): Promise<FetchOutcome> => {
+  const fetchOutcome = async (q: Query, from: Date, to: Date, signal: AbortSignal): Promise<FetchOutcome> => {
     if (q.position) {
-      const pts = await marketData.history(q.position, from, to)
+      const pts = await marketData.history(q.position, from, to, signal)
       if (pts.length > 0) return { points: pts, usedLabel: q.kind === 'mf' ? 'mfapi.in' : resolveYahooSymbol(q.position) ?? q.label }
     }
     return { points: [], usedLabel: q.kind === 'mf' ? 'mfapi.in' : resolveYahooSymbol(q.position!) ?? q.label }
@@ -114,6 +114,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
       return
     }
     let alive = true
+    const controller = new AbortController()
     setLoading(true)
     setPoints([])
     setError(null)
@@ -121,7 +122,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     const from = new Date(to.getTime() - rangeDays * 24 * 60 * 60 * 1000)
     const run = async () => {
       try {
-        const out = await fetchOutcome(query, from, to)
+        const out = await fetchOutcome(query, from, to, controller.signal)
         if (!alive) return
         setPoints(out.points)
         setUsedLabel(out.usedLabel)
@@ -146,6 +147,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     void run()
     return () => {
       alive = false
+      controller.abort()
     }
   }, [query, rangeDays, retryAttempt, settings.allowExternalData])
 

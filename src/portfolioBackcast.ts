@@ -2,7 +2,7 @@ import type { HistoryPoint } from './live'
 import type { MarketDataAdapter } from './marketData'
 import type { LiveQuote, Position } from './types'
 import { downsampleSeries } from './timeSeries'
-import { positionValue } from './valuation'
+import { effectivePrice, positionValue } from './valuation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MAX_HOLDINGS = 40
@@ -36,17 +36,20 @@ async function loadHistories(
   from: Date,
   to: Date,
   source: Pick<MarketDataAdapter, 'history'>,
+  signal?: AbortSignal,
 ): Promise<PositionHistory[]> {
   const results: PositionHistory[] = []
   let next = 0
   const worker = async () => {
     while (next < positions.length) {
+      signal?.throwIfAborted()
       const position = positions[next]
       next += 1
       try {
-        const points = await source.history(position, from, to)
+        const points = await source.history(position, from, to, signal)
         if (points.length > 1) results.push({ position, points })
       } catch {
+        signal?.throwIfAborted()
         // A single unsupported symbol should not discard the usable portfolio history.
       }
     }
@@ -64,7 +67,9 @@ export async function buildPortfolioBackcast(
   quotes: Record<string, LiveQuote>,
   source: Pick<MarketDataAdapter, 'history'>,
   days = 366,
+  signal?: AbortSignal,
 ): Promise<PortfolioBackcast> {
+  signal?.throwIfAborted()
   const eligible = positions
     .filter((position) => position.quantity > 0)
     .sort((a, b) => positionValue(b, quotes) - positionValue(a, quotes))
@@ -73,7 +78,7 @@ export async function buildPortfolioBackcast(
 
   const to = new Date()
   const from = new Date(to.getTime() - days * DAY_MS)
-  const histories = await loadHistories(eligible, from, to, source)
+  const histories = await loadHistories(eligible, from, to, source, signal)
   if (histories.length === 0) return { points: [], coveragePct: 0, holdingsIncluded: 0, holdingsTotal: positions.length }
 
   const commonStart = histories.reduce((latest, item) => Math.max(latest, dateAt(item.points[0].date)), 0)
@@ -100,8 +105,8 @@ export async function buildPortfolioBackcast(
 
   const currentCoveredValue = histories.reduce((sum, item) => sum + positionValue(item.position, quotes), 0)
   const totalCurrentValue = positions.reduce((sum, position) => sum + positionValue(position, quotes), 0)
-  const latestValue = currentCoveredValue > 0 ? currentCoveredValue : rows[rows.length - 1]?.value
-  if (latestValue > 0) rows.push({ at: Date.now(), value: latestValue, invested })
+  const latestValue = histories.every((item) => effectivePrice(item.position, quotes) != null) ? currentCoveredValue : null
+  if (latestValue != null && latestValue > 0) rows.push({ at: Date.now(), value: latestValue, invested })
 
   return {
     points: downsampleSeries(rows, MAX_POINTS),

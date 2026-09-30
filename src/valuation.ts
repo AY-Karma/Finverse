@@ -7,8 +7,12 @@ export interface Allocation {
   type: Position['type']
 }
 
-interface PortfolioStats {
+export interface PortfolioStats {
   invested: number
+  pricedInvested: number
+  pricedCount: number
+  unpricedCount: number
+  valuationComplete: boolean
   currentValue: number
   pnl: number
   pnlPct: number
@@ -22,24 +26,54 @@ export function quoteKey(position: Position): string {
 
 /** A live quote is preferred over the spreadsheet's most recent reported price. */
 export function effectivePrice(position: Position, quotes: Record<string, LiveQuote> = {}): number | null {
-  return quotes[quoteKey(position)]?.price ?? position.lastPrice
+  const live = quotes[quoteKey(position)]?.price
+  if (live != null && Number.isFinite(live) && live >= 0) return live
+  return position.lastPrice != null && Number.isFinite(position.lastPrice) && position.lastPrice >= 0 ? position.lastPrice : null
 }
 
 /** Merge same-instrument rows (same mutual-fund scheme name or equity ticker)
  *  so each holding is shown once. Quantities and invested amounts are summed;
  *  cost basis becomes the weighted average (invested ÷ units); the fund XIRR is
  *  averaged across entries by their invested weight; metadata keeps the first
- *  non-empty value. Single rows pass through untouched. */
-export function combinePositions(positions: Position[]): Position[] {
-  const groups = new Map<string, Position[]>()
+ *  non-empty value. Conflicting identity metadata remains separate; descriptive
+ *  metadata uses the first non-empty value in import order. */
+const IDENTITY_FIELDS = ['type', 'exchange', 'currency', 'providerSymbol', 'isin'] as const
+
+function groupPositions(positions: Position[]) {
+  const groups = new Map<string, { rows: Position[]; identity: Partial<Position> }[]>()
   for (const p of positions) {
     const key = quoteKey(p)
-    const existing = groups.get(key)
-    if (existing) existing.push(p)
-    else groups.set(key, [p])
+    const candidates = groups.get(key) ?? []
+    const existing = candidates.find(({ identity }) => IDENTITY_FIELDS.every((field) =>
+      !p[field] || !identity[field] || identity[field] === p[field],
+    ))
+    if (existing) {
+      existing.rows.push(p)
+      existing.identity = { ...existing.identity, ...Object.fromEntries(IDENTITY_FIELDS.filter((field) => p[field]).map((field) => [field, p[field]])) }
+    } else candidates.push({ rows: [p], identity: p })
+    groups.set(key, candidates)
   }
+  return groups
+}
+
+function combinedId(rows: Position[], conflictingGroups: number): string {
+  if (rows.length === 1) return rows[0].id
+  const identity = conflictingGroups > 1 ? ':' + IDENTITY_FIELDS.map((field) => rows.find((p) => p[field])?.[field] ?? '').join(':') : ''
+  return `merged:${quoteKey(rows[0])}${identity}`
+}
+
+export function combinedPositionMembers(positions: Position[]): Map<string, Position[]> {
+  const members = new Map<string, Position[]>()
+  for (const candidates of groupPositions(positions).values()) {
+    for (const { rows } of candidates) members.set(combinedId(rows, candidates.length), rows)
+  }
+  return members
+}
+
+export function combinePositions(positions: Position[]): Position[] {
+  const groups = groupPositions(positions)
   const out: Position[] = []
-  for (const [, rows] of groups) {
+  for (const candidates of groups.values()) for (const { rows } of candidates) {
     if (rows.length === 1) {
       out.push(rows[0])
       continue
@@ -54,7 +88,8 @@ export function combinePositions(positions: Position[]): Position[] {
         ? xirrRows.reduce((s, p) => s + p.xirr! * Math.max(0, p.invested), 0) / xirrWeight
         : null
     out.push({
-      id: `merged:${quoteKey(first)}`,
+      ...first,
+      id: combinedId(rows, candidates.length),
       ticker: first.ticker,
       name: rows.find((p) => (p.name ?? '').trim() !== '')?.name ?? first.name,
       type: first.type,
@@ -69,6 +104,13 @@ export function combinePositions(positions: Position[]): Position[] {
       source: (rows.find((p) => (p.source ?? '').trim() !== '') ?? first).source,
       returns: rows.find((p) => p.returns != null)?.returns ?? first.returns,
       xirr,
+      instrumentKey: rows.find((p) => p.instrumentKey)?.instrumentKey,
+      exchange: rows.find((p) => p.exchange)?.exchange,
+      currency: rows.find((p) => p.currency)?.currency,
+      providerSymbol: rows.find((p) => p.providerSymbol)?.providerSymbol,
+      isin: rows.find((p) => p.isin)?.isin,
+      sector: rows.find((p) => p.sector?.trim())?.sector,
+      industry: rows.find((p) => p.industry?.trim())?.industry,
     })
   }
   return out
@@ -98,9 +140,11 @@ export function computePortfolioStats(
   quotes: Record<string, LiveQuote> = {},
 ): PortfolioStats {
   const invested = positions.reduce((sum, position) => sum + position.invested, 0)
-  const currentValue = positions.reduce((sum, position) => sum + positionValue(position, quotes), 0)
+  const priced = positions.filter((position) => effectivePrice(position, quotes) != null)
+  const pricedInvested = priced.reduce((sum, position) => sum + position.invested, 0)
+  const currentValue = priced.reduce((sum, position) => sum + positionValue(position, quotes), 0)
   const allocationsBySymbol = new Map<string, { value: number; type: Position['type'] }>()
-  for (const position of positions) {
+  for (const position of priced) {
     const value = positionValue(position, quotes)
     const previous = allocationsBySymbol.get(position.ticker)
     if (previous) previous.value += value
@@ -108,8 +152,9 @@ export function computePortfolioStats(
   }
   const allocations = Array.from(allocationsBySymbol, ([symbol, allocation]) => ({ symbol, ...allocation }))
     .sort((a, b) => b.value - a.value)
-  const pnl = currentValue - invested
-  return { invested, currentValue, pnl, pnlPct: invested > 0 ? (pnl / invested) * 100 : 0, allocations }
+  const pnl = currentValue - pricedInvested
+  return { invested, pricedInvested, currentValue, pnl, pnlPct: pricedInvested > 0 ? (pnl / pricedInvested) * 100 : 0,
+    pricedCount: priced.length, unpricedCount: positions.length - priced.length, valuationComplete: priced.length === positions.length, allocations }
 }
 
 export interface PortfolioPulse {
@@ -209,6 +254,7 @@ export function portfolioPulse(
 }
 
 const MINUS_SIGN = '\u2212'
+const currencyFormatters = new Map<string, Intl.NumberFormat>()
 
 /** Format INR portfolio values in the selected display currency. */
 export function formatCurrency(
@@ -222,9 +268,14 @@ export function formatCurrency(
       : null
     : amountInInr
   if (displayValue == null) return '—'
-  const formatted = new Intl.NumberFormat('en-IN', {
-    style: 'currency', currency, maximumFractionDigits: Math.abs(displayValue) >= 1000 ? 0 : 2,
-  }).format(displayValue)
+  const maximumFractionDigits = Math.abs(displayValue) >= 1000 ? 0 : 2
+  const key = `${currency}:${maximumFractionDigits}`
+  let formatter = currencyFormatters.get(key)
+  if (!formatter) {
+    formatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits })
+    currencyFormatters.set(key, formatter)
+  }
+  const formatted = formatter.format(displayValue)
   return displayValue < 0 ? formatted.replace('-', MINUS_SIGN) : formatted
 }
 

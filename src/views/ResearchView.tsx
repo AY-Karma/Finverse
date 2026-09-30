@@ -5,28 +5,19 @@ import { marketLinks, researchSource, resolveScreenerCompanyPath, screenerFallba
 import { isinLogoUrl, monogramTile, resolveIsin, tickerLogoUrl } from '../logos'
 import { privateValue, visibleQuotes } from '../privacy'
 import { useStore } from '../useStore'
-import { formatCurrency, formatPercent, positionPnl, positionPnlPct, positionValue } from '../valuation'
+import { effectivePrice, formatCurrency, formatPercent, positionPnl, positionPnlPct, positionValue } from '../valuation'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
 
-type Row = { position: Position; value: number; pnl: number | null; pnlPct: number | null }
-
-/** One in-flight resolution per ticker, however many cards/effects ask. */
-const pendingPaths = new Map<string, Promise<string>>()
-
-function resolveOnce(ticker: string): Promise<string> {
-  let pending = pendingPaths.get(ticker)
-  if (!pending) {
-    pending = resolveScreenerCompanyPath(ticker)
-    pendingPaths.set(ticker, pending)
-  }
-  return pending
-}
+type Row = { position: Position; value: number | null; pnl: number | null; pnlPct: number | null }
+const PAGE_SIZE = 24
+const LOOKUP_CONCURRENCY = 4
 
 export function ResearchView({ onOpenAssistant, onRequestImport }: { onOpenAssistant: () => void; onRequestImport: () => void }) {
   const { positions, liveQuotes, fxRate, settings } = useStore()
   const currency = settings.currency || 'INR'
   const allowExternal = settings.allowExternalData
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
   const [paths, setPaths] = useState<Record<string, string>>({})
   const quotes = useMemo(
     () => visibleQuotes(settings.allowExternalData, liveQuotes),
@@ -34,28 +25,40 @@ export function ResearchView({ onOpenAssistant, onRequestImport }: { onOpenAssis
   )
   const rows = useMemo(() => positions.map((position) => ({
     position,
-    value: positionValue(position, quotes),
+    value: effectivePrice(position, quotes) == null ? null : positionValue(position, quotes),
     pnl: positionPnl(position, quotes),
     pnlPct: positionPnlPct(position, quotes),
-  })).sort((a, b) => b.value - a.value), [positions, quotes])
-  const visibleRows = useMemo(() => filterRows(rows, query), [rows, query])
+  })).sort((a, b) => (b.value ?? -1) - (a.value ?? -1)), [positions, quotes])
+  const filteredRows = useMemo(() => filterRows(rows, query), [rows, query])
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount - 1)
+  const visibleRows = useMemo(() => filteredRows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE), [filteredRows, currentPage])
   const allocationGroups = new Set(positions.map((position) => position.sector || position.category || position.type)).size
   const aiConfigured = settings.provider === 'ollama' || Boolean(settings.provider && settings.apiKey)
 
-  // Resolve canonical Screener company pages once per holding so every card can
-  // render a plain anchor instead of a click-then-redirect dance.
+  // Only the current page starts lookups. Cancel the queue when it changes.
   useEffect(() => {
     if (!allowExternal) return
-    let cancelled = false
-    for (const ticker of uniqueEquityTickers(positions)) {
-      void resolveOnce(ticker)
-        .then((path) => {
-          if (!cancelled) setPaths((prev) => (prev[ticker] ? prev : { ...prev, [ticker]: path }))
-        })
-        .catch(() => { /* chip falls back to the site-search link */ })
+    const controller = new AbortController()
+    const tickers = uniqueEquityTickers(visibleRows.map((row) => row.position))
+    const resolvePage = async () => {
+      for (let start = 0; start < tickers.length && !controller.signal.aborted; start += LOOKUP_CONCURRENCY) {
+        const entries = await Promise.all(tickers.slice(start, start + LOOKUP_CONCURRENCY).map(async (ticker) => {
+          try {
+            return [ticker, await resolveScreenerCompanyPath(ticker, controller.signal)] as const
+          } catch {
+            return null
+          }
+        }))
+        if (!controller.signal.aborted) {
+          const resolved = Object.fromEntries(entries.filter((entry) => entry != null))
+          setPaths((prev) => ({ ...prev, ...resolved }))
+        }
+      }
     }
-    return () => { cancelled = true }
-  }, [positions, allowExternal])
+    void resolvePage()
+    return () => controller.abort()
+  }, [visibleRows, allowExternal])
 
   if (positions.length === 0) {
     return (
@@ -93,11 +96,11 @@ export function ResearchView({ onOpenAssistant, onRequestImport }: { onOpenAssis
         className="input research-search"
         type="search"
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => { setQuery(event.target.value); setPage(0) }}
         placeholder={`Filter ${rows.length} holding${rows.length === 1 ? '' : 's'} by name or ticker…`}
         aria-label="Filter research cards"
       />
-      <span className="section-index">{visibleRows.length} shown</span>
+      <span className="section-index">{visibleRows.length} of {filteredRows.length} shown</span>
     </div>
 
     {visibleRows.length === 0 ? (
@@ -125,12 +128,17 @@ export function ResearchView({ onOpenAssistant, onRequestImport }: { onOpenAssis
         ))}
       </section>
     )}
+    {pageCount > 1 && <nav className="import-actions" aria-label="Research pages">
+      <button type="button" className="btn btn--secondary btn--small" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button>
+      <span className="hint" aria-live="polite">Page {currentPage + 1} of {pageCount}</span>
+      <button type="button" className="btn btn--secondary btn--small" disabled={currentPage === pageCount - 1} onClick={() => setPage(currentPage + 1)}>Next</button>
+    </nav>}
   </>
 }
 
 function DossierCard({ position, value, pnl, pnlPct, currency, fxUsdInr, hideValues, mode, screenerPath, showLogos }: {
   position: Position
-  value: number
+  value: number | null
   pnl: number | null
   pnlPct: number | null
   currency: Currency | undefined
@@ -154,7 +162,7 @@ function DossierCard({ position, value, pnl, pnlPct, currency, fxUsdInr, hideVal
         <span className="research-tags"><span className="research-tag">{typeLabel(position)}</span>{position.exchange && <span className="research-tag">{position.exchange}</span>}</span>
       </span>
       <span className="research-value-wrap">
-        <span className="research-value">{privateValue(formatCurrency(value, currency, fxUsdInr), hideValues)}</span>
+        <span className="research-value">{privateValue(value == null ? 'Unpriced' : formatCurrency(value, currency, fxUsdInr), hideValues)}</span>
         {pnl != null && !hideValues && pnlPct != null && (
           <span className={`research-pnl ${pnl >= 0 ? 'up' : 'down'}`}>
             {pnl >= 0 ? '▲' : '▼'} {formatPercent(pnlPct)}
@@ -216,11 +224,11 @@ function LogoAvatar({ isin, tickerBase, exchange, isFund, etf, showLogos, mode }
 
   useEffect(() => {
     if (!needsLookup || resolvedIsin) return
-    let cancelled = false
-    void resolveIsin(tickerBase)
-      .then((isin) => { if (!cancelled && isin) setResolvedIsin(isin) })
+    const controller = new AbortController()
+    void resolveIsin(tickerBase, undefined, controller.signal)
+      .then((isin) => { if (!controller.signal.aborted && isin) setResolvedIsin(isin) })
       .catch(() => { /* the monogram tile covers it */ })
-    return () => { cancelled = true }
+    return () => controller.abort()
   }, [needsLookup, resolvedIsin, tickerBase])
 
   const candidates = useMemo(

@@ -86,14 +86,15 @@ function writeResolved(symbol: string, path: string): void {
  * in localStorage. Falls back to the naive slug if resolution fails so links
  * never break entirely.
  */
-export async function resolveScreenerCompanyPath(symbol: string): Promise<string> {
+export async function resolveScreenerCompanyPath(symbol: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted()
   const cached = readResolved(symbol)
   if (cached) return cached
   const fallback = toBasePath(`/company/${screenerSlug(symbol)}/`)
   try {
     const target = `https://www.screener.in/api/company/search/?q=${encodeURIComponent(symbol)}`
     const res = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(target)}`, {
-      signal: AbortSignal.timeout(12000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),
     })
     if (!res.ok) return fallback
     const json = (await res.json()) as { url?: string }[]
@@ -104,6 +105,7 @@ export async function resolveScreenerCompanyPath(symbol: string): Promise<string
     writeResolved(symbol, base)
     return base
   } catch {
+    signal?.throwIfAborted()
     return fallback
   }
 }

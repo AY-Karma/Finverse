@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
-import { parseSpreadsheet } from './spreadsheet'
+import { parseSpreadsheet, parseSpreadsheetWithDiagnostics } from './spreadsheet'
 
 function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx'): ArrayBuffer {
   const book = XLSX.utils.book_new()
@@ -11,6 +11,30 @@ function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx'): A
 }
 
 describe('holdings spreadsheet import', () => {
+  it('reports malformed required cells without changing them into zero costs', () => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Ticker', 'Quantity', 'Buy Price', 'Last Price'],
+      ['VALID', 2, 'Rs. 1,000.50', 'not available'],
+      ['BAD_COST', 10, 'abc', 120],
+      ['BAD_QTY', '10abc', 100, 120],
+      ['NO_QTY', '', 100, 120],
+      ['NEGATIVE', -1, 100, 120],
+      ['PERCENT_COST', 1, '10%', 120],
+      ['PERCENT_QTY', '10%', 100, 120],
+    ]]))
+    expect(result.positions).toHaveLength(1)
+    expect(result.positions[0]).toMatchObject({ ticker: 'VALID', quantity: 2, invested: 2001, lastPrice: null })
+    expect(result.rejectedCount).toBe(6)
+    expect(result.issues.map((issue) => [issue.row, issue.field])).toEqual([[3, 'Cost'], [4, 'Quantity'], [5, 'Quantity'], [6, 'Quantity'], [7, 'Cost'], [8, 'Quantity']])
+    expect(result.issues.every((issue) => issue.sheet === 'Sheet1')).toBe(true)
+  })
+
+  it('rejects missing fund cost even when a current valuation is supplied', () => {
+    expect(() => parseSpreadsheetWithDiagnostics(workbook([[
+      ['Scheme Name', 'Units', 'Invested Value', 'Current Value'],
+      ['Example Fund', 2, 'abc', 240],
+    ]]))).toThrow('row 2: Cost')
+  })
   it('finds mutual-fund holdings below account details and a portfolio summary', () => {
     const positions = parseSpreadsheet(workbook([[
       ['Name', 'Example Investor'],

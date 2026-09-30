@@ -3,6 +3,7 @@
 /Design.md
 .agents
 .docs
+# All docs, including audit reports, stay local and must never be committed.
 /docs/
 skills-lock.json
 

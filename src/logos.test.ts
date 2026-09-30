@@ -66,6 +66,21 @@ describe('isin resolution from the NSE equity master', () => {
     expect(await resolveIsin('WAAREEENER', fetcher)).toBe('INE377N01017')
     expect(calls).toBe(1)
   })
+  it('indexes one shared download for multiple symbols and stops it when all callers cancel', async () => {
+    const fetcher = async () => csv
+    await expect(Promise.all([resolveIsin('KRN', fetcher), resolveIsin('TCS', fetcher)])).resolves.toEqual(['INE0Q3J01015', 'INE467B01029'])
+    const controller = new AbortController()
+    let upstream!: AbortSignal
+    const pendingFetcher = (_url: string, signal?: AbortSignal) => {
+      upstream = signal!
+      return new Promise<string>((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }))
+    }
+    const pending = resolveIsin('UNKNOWN', pendingFetcher, controller.signal)
+    const failure = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    controller.abort()
+    await failure
+    expect(upstream.aborted).toBe(true)
+  })
 })
 
 describe('monogram tiles', () => {

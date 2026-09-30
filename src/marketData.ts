@@ -10,10 +10,10 @@ import {
 } from './live'
 
 export interface MarketDataAdapter {
-  refreshQuotes(positions: Position[], previous: Record<string, import('./types').LiveQuote>): Promise<LiveQuotesResult>
-  history(position: Position, from: Date, to: Date): Promise<HistoryPoint[]>
-  benchmarkHistory(symbol: string, from: Date, to: Date): Promise<HistoryPoint[]>
-  quote(symbol: string): Promise<{ price: number; change: number | null; pct: number | null; at: number } | null>
+  refreshQuotes(positions: Position[], previous: Record<string, import('./types').LiveQuote>, signal?: AbortSignal): Promise<LiveQuotesResult>
+  history(position: Position, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
+  benchmarkHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
+  quote(symbol: string, signal?: AbortSignal): Promise<{ price: number; change: number | null; pct: number | null; at: number } | null>
 }
 
 interface BenchmarkDefinition {
@@ -54,18 +54,19 @@ export const BENCHMARKS: BenchmarkDefinition[] = [
 /** Current public adapter. A licensed or first-party adapter can replace it at this seam. */
 export const marketData: MarketDataAdapter = {
   refreshQuotes: fetchLiveQuotes,
-  history(position, from, to) {
-    if (position.type === 'mutual-fund') return fetchNavHistory(position.name || position.ticker, from, to)
+  history(position, from, to, signal) {
+    if (position.type === 'mutual-fund') return fetchNavHistory(position.name || position.ticker, from, to, signal)
     return (async () => {
       for (const symbol of resolveYahooSymbolCandidates(position)) {
-        const points = await fetchHistory(symbol, from, to)
+        signal?.throwIfAborted()
+        const points = await fetchHistory(symbol, from, to, signal)
         if (points.length > 0) return points
       }
       return []
     })()
   },
-  benchmarkHistory(symbol, from, to) {
-    return fetchHistory(symbol, from, to)
+  benchmarkHistory(symbol, from, to, signal) {
+    return fetchHistory(symbol, from, to, signal)
   },
   quote: fetchYahooPrice,
 }

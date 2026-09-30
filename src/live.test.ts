@@ -46,6 +46,32 @@ describe('market status text', () => {
 })
 
 describe('market data client', () => {
+  it('coalesces overlapping refreshes and bounds parallel symbol batches', async () => {
+    let active = 0
+    let maximum = 0
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetcher = vi.fn<typeof fetch>(async (url) => {
+      active += 1
+      maximum = Math.max(maximum, active)
+      await gate
+      active -= 1
+      const symbols = new URL(String(url), 'http://localhost').searchParams.get('symbols')!.split(',')
+      return Response.json({ fetchedAt: new Date().toISOString(), quotes: symbols.map((symbol) => ({ symbol, price: 120, previousClose: 100, change: 20, changePct: 20, marketTime: new Date().toISOString(), source: 'yahoo' })), errors: [] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const positions: Position[] = Array.from({ length: 125 }, (_, i) => ({ id: String(i), ticker: `POOL${i}`, name: '', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: null }))
+    const first = fetchLiveQuotes(positions, {})
+    const second = fetchLiveQuotes(positions, {})
+    await Promise.resolve()
+    expect(fetcher).toHaveBeenCalledTimes(4)
+    release()
+    const results = await Promise.all([first, second])
+    expect(results.map((result) => result.updated)).toEqual([125, 125])
+    expect(fetcher).toHaveBeenCalledTimes(5)
+    expect(maximum).toBe(4)
+  })
+
   it('refetches history after an empty provider response', async () => {
     const stored = new Map<string, string>()
     vi.stubGlobal('localStorage', {

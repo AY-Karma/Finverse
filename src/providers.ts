@@ -181,6 +181,14 @@ const ANTHROPIC_TOOLS = TOOLS.map((t) => ({
   input_schema: t.function.parameters,
 }))
 
+function permittedTools(allowExternalData: boolean) {
+  return TOOLS.filter((tool) => allowExternalData || tool.function.name !== 'get_quote')
+}
+
+function permissionPrompt(allowExternalData: boolean): string {
+  return allowExternalData ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n\nExternal market data permission is disabled. get_quote is not permitted. Use imported prices and portfolio metrics only; explain when live prices are unavailable.`
+}
+
 const MAX_TOOL_ROUNDS = 5
 const MAX_TOKENS = 2048
 const MAX_PROVIDER_RESPONSE_BYTES = 1_000_000
@@ -189,6 +197,27 @@ const MAX_CHARTS = 8
 const MAX_CHART_ROWS = 20
 const MAX_CHART_LABEL_CHARS = 120
 const MAX_CONTEXT_CHARS = 120_000
+
+export const MAX_CHAT_MESSAGE_CHARS = 24_000
+const MAX_CHAT_MESSAGES = 100
+const MAX_CHAT_HISTORY_CHARS = 64_000
+const MAX_CHAT_STORAGE_CHARS = 200_000
+
+/** One retention policy for displayed, saved, and submitted conversations. */
+export function boundChatHistory<T extends { role: 'user' | 'assistant'; content: string }>(history: T[]): T[] {
+  const recent: T[] = []
+  let contentChars = 0
+  let storedChars = 2
+  for (let index = history.length - 1; index >= 0 && recent.length < MAX_CHAT_MESSAGES; index--) {
+    const message = { ...history[index], content: history[index].content.slice(0, MAX_CHAT_MESSAGE_CHARS) }
+    const size = JSON.stringify(message).length + 1
+    if (contentChars + message.content.length > MAX_CHAT_HISTORY_CHARS || storedChars + size > MAX_CHAT_STORAGE_CHARS) break
+    recent.push(message)
+    contentChars += message.content.length
+    storedChars += size
+  }
+  return recent.reverse()
+}
 
 // Local (Ollama) models pay per token in the KV cache, so we keep their context
 // deliberately small:
@@ -233,6 +262,9 @@ export function describeOllamaEndpoint(base?: string): OllamaDestination {
     }
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       return { endpoint, origin, isLocal, requiresConfirmation: !isLocal, error: 'Ollama Base URL must use HTTP or HTTPS.' }
+    }
+    if (url.hostname === '[::1]') {
+      return { endpoint, origin, isLocal, requiresConfirmation: false, error: 'Use localhost or 127.0.0.1 for local Ollama. IPv6 literals are not supported by the browser security policy.' }
     }
     if (!isLocal && url.protocol !== 'https:') {
       return { endpoint, origin, isLocal, requiresConfirmation: true, error: 'Remote Ollama endpoints must use HTTPS.' }
@@ -286,8 +318,10 @@ export function portfolioContext(
     '=== BEGIN UNTRUSTED PORTFOLIO DIGEST ===',
     'Source currency: INR (imported portfolio values)',
     `Invested: ${fmtMoney(invested, currency, usdInrRate)}`,
-    `Current value: ${fmtMoney(totalValue, currency, usdInrRate)}`,
-    `Unrealized P&L: ${fmtMoney(pnl, currency, usdInrRate)}${pnlPct != null ? ` (${pnlPct.toFixed(2)}%)` : ''}`,
+    `Valuation coverage: ${stats.pricedCount}/${positions.length} holdings priced. ${stats.valuationComplete ? 'Complete.' : 'Missing prices are unknown, not zero. Value, P&L, and allocation below cover priced holdings only.'}`,
+    `Current value${stats.valuationComplete ? '' : ' (priced subtotal)'}: ${stats.pricedCount > 0 ? fmtMoney(totalValue, currency, usdInrRate) : 'unknown (no prices available)'}`,
+    `Unrealized P&L${stats.valuationComplete ? '' : ' (priced holdings only)'}: ${stats.pricedCount > 0 ? `${fmtMoney(pnl, currency, usdInrRate)} (${pnlPct.toFixed(2)}%)` : 'unknown (no prices available)'}`,
+    `Cost basis of priced holdings: ${fmtMoney(stats.pricedInvested, currency, usdInrRate)}`,
     `Holdings: ${positions.length} (${equity} equity, ${mf} mutual fund${mf === 1 ? '' : 's'})`,
     `Top allocations: ${safeDataText(topAlloc) || 'none'}`,
     '',
@@ -299,13 +333,13 @@ export function portfolioContext(
     const price = livePriceOf(p, liveQuotes)
     const value = positionValue(p, liveQuotes)
     const pnlPctH = positionPnlPct(p, liveQuotes)
-    const weight = totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : '0'
+    const weight = price != null && totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : 'n/a'
     const xirr = p.xirr != null ? p.xirr.toFixed(2) + '%' : 'n/a'
     const sym = safeDataText(p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker)
     const line =
       `${sym} | ${p.type} | qty=${p.quantity} | buy=${fmtMoney(p.buyPrice, currency, usdInrRate)} | ` +
-        `last=${price != null ? fmtMoney(price, currency, usdInrRate) : 'n/a'} | value=${fmtMoney(value, currency, usdInrRate)} | ` +
-        `pnl=${pnlPctH != null ? pnlPctH.toFixed(2) + '%' : 'n/a'} | weight=${weight}% | xirr=${xirr}`
+        `last=${price != null ? fmtMoney(price, currency, usdInrRate) : 'n/a'} | value=${price != null ? fmtMoney(value, currency, usdInrRate) : 'unknown'} | ` +
+        `pnl=${pnlPctH != null ? pnlPctH.toFixed(2) + '%' : 'n/a'} | weight=${weight === 'n/a' ? weight : weight + '%'} | xirr=${xirr}`
     lines.push(line)
     contextLength += line.length + 1
     if (contextLength >= MAX_CONTEXT_CHARS) {
@@ -344,11 +378,14 @@ async function executeTool(
   positions: Position[],
   charts: ChartSpec[],
   liveQuotes: Record<string, LiveQuote> = {},
+  allowExternalData = false,
+  signal?: AbortSignal,
 ): Promise<string> {
   try {
     switch (name) {
       case 'get_quote':
-        return await getQuote(String(args.symbol ?? ''))
+        if (!allowExternalData) return 'External market data permission is disabled. Use imported portfolio values; do not fetch or invent live prices.'
+        return await getQuote(String(args.symbol ?? ''), signal)
       case 'portfolio_metrics':
         return portfolioMetrics(String(args.symbol ?? ''), positions, liveQuotes)
       case 'render_chart':
@@ -400,7 +437,7 @@ const CRYPTO_IDS: Record<string, string> = {
 }
 
 /** Live quote — crypto via CoinGecko, stocks via Yahoo Finance through a CORS proxy. */
-async function getQuote(symbol: string): Promise<string> {
+async function getQuote(symbol: string, signal?: AbortSignal): Promise<string> {
   const sym = symbol.trim().toUpperCase()
   if (!sym) return 'No symbol provided.'
   const id = CRYPTO_IDS[sym]
@@ -408,7 +445,7 @@ async function getQuote(symbol: string): Promise<string> {
     try {
       const res = await fetch(
         `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd,inr`,
-        { signal: AbortSignal.timeout(8000) },
+        { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000) },
       )
       if (!res.ok) return `Live quote for ${sym}: unavailable (HTTP ${res.status}).`
       const data = (await res.json()) as Record<string, { usd?: number; inr?: number }>
@@ -421,14 +458,14 @@ async function getQuote(symbol: string): Promise<string> {
     }
   }
 
-  const yahoo = await yahooQuote(sym)
+  const yahoo = await yahooQuote(sym, signal)
   if (yahoo) return yahoo
   return `Live quote for ${sym}: unavailable right now. Use the lastPrice/sheet values in the portfolio context.`
 }
 
-async function yahooQuote(symbol: string): Promise<string | null> {
+async function yahooQuote(symbol: string, signal?: AbortSignal): Promise<string | null> {
   const withSuffix = symbol.includes('.') ? symbol : `${symbol}.NS`
-  const q = await fetchYahooPrice(withSuffix)
+  const q = await fetchYahooPrice(withSuffix, signal)
   if (!q) return null
   const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}`
   return `LIVE quote ${symbol} (${withSuffix}): ${q.price.toFixed(2)} INR today; change ${q.change != null ? signed(q.change) : 'n/a'} (${q.pct != null ? signed(q.pct) + '%' : 'n/a'}).`
@@ -443,19 +480,21 @@ function portfolioMetrics(
   const p = positions.find((x) => (x.name || x.ticker).toLowerCase() === sym)
   if (!p) return `No holding matching "${symbol}" in the uploaded portfolio.`
   const value = positionValue(p, liveQuotes)
+  const priced = livePriceOf(p, liveQuotes) != null
   const pnlH = positionPnl(p, liveQuotes)
   const pnlPctH = positionPnlPct(p, liveQuotes)
-  const total = positions.reduce((s, x) => s + positionValue(x, liveQuotes), 0)
-  const weight = total > 0 ? (value / total) * 100 : null
+  const stats = computePortfolioStats(positions, liveQuotes)
+  const weight = priced && stats.currentValue > 0 ? (value / stats.currentValue) * 100 : null
   const label = p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker
   return [
     `Metrics for ${label}:`,
     '  sourceCurrency=INR',
-    `  value=${value.toFixed(2)}`,
+    `  value=${priced ? value.toFixed(2) : 'unknown (no price available)'}`,
     `  invested=${p.invested.toFixed(2)}`,
     `  pnl=${pnlH != null ? pnlH.toFixed(2) : 'n/a'}`,
     `  pnlPct=${pnlPctH != null ? pnlPctH.toFixed(2) + '%' : 'n/a'}`,
     `  weightInPortfolio=${weight != null ? weight.toFixed(1) + '%' : 'n/a'}`,
+    `  allocationBasis=${stats.valuationComplete ? 'complete portfolio' : `priced holdings only (${stats.pricedCount}/${positions.length})`}`,
     `  xirr=${p.xirr != null ? p.xirr.toFixed(2) + '%' : 'n/a'}`,
   ].join('\n')
 }
@@ -500,6 +539,7 @@ export async function chat({
   signal,
   quick,
   confirmRemoteOllama = false,
+  allowExternalData = false,
 }: {
   provider: string
   apiKey: string
@@ -512,15 +552,19 @@ export async function chat({
   signal: AbortSignal
   quick?: boolean
   confirmRemoteOllama?: boolean
+  allowExternalData?: boolean
 }): Promise<{ content: string; charts: ChartSpec[] }> {
   const p = getProvider(provider)
   if (!p) throw new Error('Unknown provider selected.')
   const usedModel = model || p.model
-  const userHistory = history.map((m) => ({ role: m.role, content: m.content }))
+  const userHistory = boundChatHistory(history.map((m) => ({ role: m.role, content: m.content })))
+  while (userHistory.length > 1 && userHistory[0].role !== 'user') userHistory.shift()
+  context = context.slice(0, MAX_CONTEXT_CHARS)
+  const permittedQuotes = allowExternalData ? liveQuotes : {}
   const charts: ChartSpec[] = []
 
   if (provider === 'anthropic') {
-    return anthropicChat({ apiKey, model: usedModel, userHistory, context, positions, liveQuotes, signal, charts, quick })
+    return anthropicChat({ apiKey, model: usedModel, userHistory, context, positions, liveQuotes: permittedQuotes, signal, charts, quick, allowExternalData })
   }
 
   if (isLocalProvider(provider)) {
@@ -531,17 +575,18 @@ export async function chat({
       userHistory: trimHistory(userHistory, LOCAL_MAX_HISTORY),
       context,
       positions,
-      liveQuotes,
+      liveQuotes: permittedQuotes,
       signal,
       charts,
       quick,
+      allowExternalData,
       maxToolRounds: LOCAL_MAX_TOOL_ROUNDS,
       repeatContextInFirstUserMessage: true,
     })
   }
 
   if (!apiKey) throw new Error('Add an API key in Settings before chatting.')
-  return openaiCompat({ endpoint: p.endpoint, apiKey, model: usedModel, userHistory, context, positions, liveQuotes, signal, charts, quick })
+  return openaiCompat({ endpoint: p.endpoint, apiKey, model: usedModel, userHistory, context, positions, liveQuotes: permittedQuotes, signal, charts, quick, allowExternalData })
 }
 
 /**
@@ -601,6 +646,7 @@ async function openaiCompat({
   quick,
   maxToolRounds,
   repeatContextInFirstUserMessage,
+  allowExternalData,
 }: {
   endpoint: string
   apiKey: string
@@ -614,9 +660,10 @@ async function openaiCompat({
   quick?: boolean
   maxToolRounds?: number
   repeatContextInFirstUserMessage?: boolean
+  allowExternalData: boolean
 }): Promise<{ content: string; charts: ChartSpec[] }> {
   const messages: unknown[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: permissionPrompt(allowExternalData) },
     { role: 'system', content: context },
     ...(repeatContextInFirstUserMessage ? withFirstTurnContext(userHistory, context) : userHistory),
   ]
@@ -628,7 +675,7 @@ async function openaiCompat({
       max_tokens: quick ? QUICK_MAX_TOKENS : MAX_TOKENS,
       stream: false,
     }
-    if (useTools && !quick) body.tools = TOOLS
+    if (useTools && !quick) body.tools = permittedTools(allowExternalData)
     const headers: Record<string, string> = { 'content-type': 'application/json' }
     if (apiKey) headers.authorization = `Bearer ${apiKey}`
     const res = await fetch(endpoint, {
@@ -669,7 +716,7 @@ async function openaiCompat({
       }
       messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: toolCalls })
       for (const tc of toolCalls) {
-        const result = await executeTool(tc.function?.name ?? '', safeParse(tc.function?.arguments), positions, charts, liveQuotes)
+        const result = await executeTool(tc.function?.name ?? '', safeParse(tc.function?.arguments), positions, charts, liveQuotes, allowExternalData, signal)
         messages.push({ role: 'tool', tool_call_id: tc.id, content: result })
       }
     }
@@ -699,6 +746,7 @@ async function anthropicChat({
   signal,
   charts,
   quick,
+  allowExternalData,
 }: {
   apiKey: string
   model: string
@@ -709,6 +757,7 @@ async function anthropicChat({
   signal: AbortSignal
   charts: ChartSpec[]
   quick?: boolean
+  allowExternalData: boolean
 }): Promise<{ content: string; charts: ChartSpec[] }> {
   const messages: unknown[] = [...userHistory]
 
@@ -716,10 +765,10 @@ async function anthropicChat({
     const body: Record<string, unknown> = {
       model,
       max_tokens: quick ? QUICK_MAX_TOKENS : MAX_TOKENS,
-       system: `${SYSTEM_PROMPT}\n\n${context}`,
+      system: `${permissionPrompt(allowExternalData)}\n\n${context}`,
       messages,
     }
-    if (useTools && !quick) body.tools = ANTHROPIC_TOOLS
+    if (useTools && !quick) body.tools = ANTHROPIC_TOOLS.filter((tool) => allowExternalData || tool.name !== 'get_quote')
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -758,7 +807,7 @@ async function anthropicChat({
         const results = []
         for (const b of blocks) {
           if (b.type === 'tool_use') {
-            results.push({ type: 'tool_result', tool_use_id: b.id, content: await executeTool(b.name ?? '', b.input ?? {}, positions, charts, liveQuotes) })
+            results.push({ type: 'tool_result', tool_use_id: b.id, content: await executeTool(b.name ?? '', b.input ?? {}, positions, charts, liveQuotes, allowExternalData, signal) })
           }
         }
         messages.push({ role: 'user', content: results })

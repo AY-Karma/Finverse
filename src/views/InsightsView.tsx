@@ -50,8 +50,9 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       return
     }
     let alive = true
+    const controller = new AbortController()
     setBackcastLoading(true)
-    void buildPortfolioBackcast(snapshot.positions, snapshot.quotes, marketData, backcastDays).then((result) => {
+    void buildPortfolioBackcast(snapshot.positions, snapshot.quotes, marketData, backcastDays, controller.signal).then((result) => {
       if (alive) {
         setBackcast(result)
         setBackcastLoading(false)
@@ -64,6 +65,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     })
     return () => {
       alive = false
+      controller.abort()
     }
   }, [backcastDays, backcastKey, settings.allowExternalData])
 
@@ -77,8 +79,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     dailyPriceChange: item.dailyPriceChange,
     dailyPriceChangePct: item.dailyPriceChangePct,
   })), contributionDisplay), [contributionDisplay, snapshot.contributions])
-  const exposure = useMemo(() => [...snapshot.contributions].sort((a, b) => b.value - a.value).slice(0, 16), [snapshot.contributions])
-  const topFive = useMemo(() => [...snapshot.contributions].sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
+  const exposure = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 16), [snapshot.contributions])
+  const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
   const chartHistory = useMemo(() => downsampleSeries(snapshot.history, MAX_CHART_POINTS), [snapshot.history])
   const backcastHistory = backcast?.points ?? []
   const analyticsHistory = backcastHistory.length >= 2 ? backcastHistory : chartHistory
@@ -95,6 +97,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       return
     }
     let alive = true
+    const controller = new AbortController()
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     setBenchmarkPoints([])
     setBenchmarkError(false)
@@ -104,7 +107,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     const load = async (attempt: number) => {
       let points: typeof benchmarkPoints = []
       try {
-        points = await marketData.benchmarkHistory(symbol, from, to)
+        points = await marketData.benchmarkHistory(symbol, from, to, controller.signal)
       } catch {
         // A failed provider request can be retried while this benchmark is selected.
       }
@@ -124,6 +127,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     void load(0)
     return () => {
       alive = false
+      controller.abort()
       if (retryTimer) clearTimeout(retryTimer)
     }
   }, [analyticsStartAt, benchmarkReload, selectedBenchmark.symbol, settings.allowExternalData])
@@ -214,9 +218,11 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <p className="page-sub">A visual explanation of what moved your portfolio, where your exposure sits, and how your record compares with the market.</p>
       </div>
 
+      {!snapshot.valuationComplete && <p className="panel hint" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Allocation, concentration, and current P&L cover the {snapshot.pricedCount} priced holdings only. Incomplete portfolio values are not saved to tracked history.</p>}
+
       <div className="insight-kpis enter d1">
         <div className="insight-kpi"><span className="score-label">Today’s move</span><strong className={snapshot.dailyChange != null && snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? '—' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, snapshot.fxRate?.usdInr)}`)}</strong><span className="hint">{snapshot.dailyChangePct == null ? 'Waiting for quote changes' : mask(formatPercent(snapshot.dailyChangePct))}</span></div>
-        <button type="button" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail"><span className="score-label">Top five weight</span><strong>{mask(`${snapshot.topFiveWeight.toFixed(1)}%`)}</strong><span className="hint">See the five-position split</span></button>
+        <button type="button" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail"><span className="score-label">Top five weight</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong><span className="hint">See the five-position split</span></button>
         <button type="button" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail"><span className="score-label">Worst drawdown</span><strong className={risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><span className="hint">See date and calculation</span></button>
         <div className="insight-kpi"><span className="score-label">Data health</span><strong>{snapshot.staleQuotes === 0 ? 'Fresh' : `${snapshot.staleQuotes} stale`}</strong><span className="hint">{snapshot.lastUpdatedAt ? `Last quote ${shortDate(snapshot.lastUpdatedAt)}` : 'Imported prices only'}</span></div>
       </div>
@@ -313,7 +319,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
         <section className="panel insight-panel insight-panel--wide">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · At a glance</span></div></div>
-          {hasHistory ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} usesBackcast={backcastHistory.length >= 2} /> : <div className="chart-empty">Historical prices are loading to build your risk profile.</div>}
+          {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} usesBackcast={backcastHistory.length >= 2} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : 'Historical prices are loading to build your risk profile.'}</div>}
         </section>
 
         <section className="panel insight-panel insight-panel--wide insight-panel--performance">
