@@ -16,8 +16,8 @@ vi.mock('./theme', () => ({ applyTheme: vi.fn() }))
 vi.mock('./providers', async (original) => ({ ...await original<typeof import('./providers')>(), chat: state.chat }))
 vi.mock('./views/ResearchHistory', () => ({ ResearchHistory: () => null }))
 vi.mock('./views/Overview', () => ({ Overview: () => <h1>Overview workspace</h1> }))
-vi.mock('./views/HoldingsView', () => ({
-  HoldingsView: ({ initialQuery }: { initialQuery: string }) => <section aria-label="Monitor workspace"><output>{initialQuery}</output></section>,
+vi.mock('./views/MonitorView', () => ({
+  MonitorView: ({ initialQuery }: { initialQuery: string }) => <section aria-label="Monitor workspace"><output>{initialQuery}</output></section>,
 }))
 vi.mock('./views/InsightsView', () => ({ InsightsView: () => <h1>Insights workspace</h1> }))
 vi.mock('./views/SettingsView', () => ({ SettingsView: () => <h1>Settings workspace</h1> }))

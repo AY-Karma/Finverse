@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:monitor": "vite --host 127.0.0.1 --port 5190 --open \"/app/monitor?preview=1&variant=B\"",
+    "dev:monitor": "vite --host 127.0.0.1 --port 5190 --open \"/app/monitor\"",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "preview": "vite preview"

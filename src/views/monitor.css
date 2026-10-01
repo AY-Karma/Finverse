@@ -1,4 +1,4 @@
-/* Local Timeline preview, sharing the app's palette and typography. */
+/* Portfolio timeline, sharing the app's palette and typography. */
 .mp-page {
   --mp-accent: color-mix(in srgb, var(--primary-hover) 40%, var(--ink));
   --mp-positive: color-mix(in srgb, var(--semantic-success) 70%, var(--ink));

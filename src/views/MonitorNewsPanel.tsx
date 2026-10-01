@@ -7,19 +7,26 @@ import './monitorNewsPanel.css'
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 const PAGE_SIZE = 3
 
-export function MonitorNewsPanel() {
+export function MonitorNewsPanel({ initialQuery = '' }: { initialQuery?: string }) {
   const { positions, settings } = useStore()
   const [feed, setFeed] = useState<LoadedMarketFeed | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshCount, setRefreshCount] = useState(0)
-  const [searchDraft, setSearchDraft] = useState('')
+  const [searchDraft, setSearchDraft] = useState(initialQuery)
   const [showTools, setShowTools] = useState(false)
-  const [activeQuery, setActiveQuery] = useState('')
+  const [activeQuery, setActiveQuery] = useState(initialQuery)
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
   const [filters, setFilters] = useState<NewsFeedFilters>({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
   const [page, setPage] = useState(1)
   const holdingsKey = useMemo(() => positions.map((position) => `${position.id}:${position.ticker}:${position.name}:${position.type}`).sort().join('|'), [positions])
   const monitorPositions = useMemo(() => positions, [holdingsKey])
+
+  useEffect(() => {
+    setSearchDraft(initialQuery)
+    setActiveQuery(initialQuery)
+    setFilters({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
+    setPage(1)
+  }, [initialQuery])
 
   useEffect(() => {
     setFeed(null)
@@ -72,7 +79,7 @@ export function MonitorNewsPanel() {
       <span className="mn-heading-icon"><NewsIcon /></span>
       <div>
         <h2 id="monitor-news-heading">Market news</h2>
-        <p>Your current app feed</p>
+        <p>Headlines for your portfolio</p>
       </div>
       {enabled && <div className="mn-head-actions">
         <button className="mn-icon-button" type="button" aria-label="Search and filter market news" title="Search and filter market news" aria-expanded={showTools} aria-controls="monitor-news-tools" onClick={() => setShowTools((value) => !value)}><SearchIcon /></button>
@@ -82,7 +89,7 @@ export function MonitorNewsPanel() {
 
     {!enabled ? <div className="mn-empty">
       <strong>{positions.length === 0 ? 'Add holdings to follow the wire' : 'External data is off'}</strong>
-      <p>{positions.length === 0 ? 'Import your portfolio in Settings to see its news here.' : 'Enable external market data in Settings to load the same news shown in Monitor.'}</p>
+      <p>{positions.length === 0 ? 'Import your portfolio in Settings to see its news here.' : 'Enable external market data in Settings to load news.'}</p>
       <a className="mn-settings" href="/app/settings">Open Settings <ArrowIcon /></a>
     </div> : <>
       <div id="monitor-news-tools" hidden={!showTools}>
@@ -115,7 +122,7 @@ export function MonitorNewsPanel() {
         {pageEvents.map((item) => <NewsStory key={item.id} item={item} onDismiss={() => setDismissed((value) => new Set(value).add(item.id))} />)}
       </div> : <div className="mn-empty"><p>{activeQuery && events.length === 0 ? `No fresh stories found for ${activeQuery}. Try another spelling or return to the wire.` : events.length ? 'No stories match these filters.' : 'No fresh stories right now. Refresh to scan the wire again.'}</p></div>}
       <footer className="mn-footer">
-        <span>Live sources · separate from demo events</span>
+        <span>Publisher sources · latest headlines</span>
         {pages > 1 && <nav aria-label="Market news pages"><button className="mn-icon-button" type="button" aria-label="Previous news page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronIcon direction="left" /></button><span>{currentPage} / {pages}</span><button className="mn-icon-button" type="button" aria-label="Next news page" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}><ChevronIcon direction="right" /></button></nav>}
       </footer>
     </>}
