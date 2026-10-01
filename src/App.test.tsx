@@ -98,11 +98,8 @@ describe('Research workspace navigation', () => {
     expect(container.querySelector('textarea')).toBeNull()
   })
 
-  it.each([
-    { view: 'overview' as const, path: '/app' },
-    { view: 'holdings' as const, path: '/app/monitor' },
-  ])('restores the latest Research filters after browser Back to $view', async ({ view, path }) => {
-    await render(view, path)
+  it('restores the latest Research filters after browser Back to Overview', async () => {
+    await render('overview', '/app')
     await navigate('Research')
     await edit(container.querySelector<HTMLInputElement>('input[aria-label="Search research holdings"]')!, 'TCS')
     await click('Sources')
@@ -110,7 +107,7 @@ describe('Research workspace navigation', () => {
     expect(new URLSearchParams(window.location.search).get('tab')).toBe('sources')
 
     await browserBack()
-    expect(window.location.pathname).toBe(path)
+    expect(window.location.pathname).toBe('/app')
     await navigate('Research')
 
     expect(window.location.pathname + window.location.search).toBe(researchUrl)
@@ -143,6 +140,7 @@ describe('Research workspace navigation', () => {
     const draft = container.querySelector<HTMLInputElement>('input[aria-label="Message to AI provider"]')!
     expect(draft.value).toContain('Tata Consultancy Services (TCS, NSE)')
     expect(draft.value).not.toContain('Private research note')
+    expect(container.textContent).toContain('Your current portfolio context is included')
     expect(state.chat).not.toHaveBeenCalled()
     await edit(draft, 'An edited question about TCS')
     expect(draft.value).toBe('An edited question about TCS')

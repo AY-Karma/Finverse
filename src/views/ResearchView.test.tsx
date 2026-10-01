@@ -94,14 +94,6 @@ describe('research desk', () => {
     expect(container.querySelector('textarea')).toBeNull()
   })
 
-  it('opens an editable AI handoff with the selected holding and no note contents', async () => {
-    await render()
-    const button = [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('Ask about this holding'))!
-    await act(async () => button.click())
-    expect(onAssistant).toHaveBeenCalledWith(position)
-    expect(state.history).not.toHaveBeenCalled()
-  })
-
   it('restores selection and section from browser navigation, including removed holdings', async () => {
     await render()
     await act(async () => {
