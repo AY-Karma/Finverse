@@ -2641,6 +2641,7 @@ body {
 .insight-panel--performance .panel-head { margin-bottom: 8px; }
 .performance-method-note { margin: 0 0 16px; color: var(--ink-subtle); font-size: 11.5px; line-height: 1.4; }
 .risk-profile { display: grid; }
+.insight-panel--risk { overflow: visible; }
 
 .risk-bars {
   display: grid;
@@ -2726,6 +2727,7 @@ body {
 
 .risk-help {
   display: inline-grid;
+  flex: none;
   place-items: center;
   width: 19px;
   height: 19px;

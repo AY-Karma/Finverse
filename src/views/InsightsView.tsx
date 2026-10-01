@@ -317,7 +317,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           {hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty">The next market refresh will show which holdings moved your portfolio.</div>}
         </section>
 
-        <section className="panel insight-panel insight-panel--wide">
+        <section className="panel insight-panel insight-panel--wide insight-panel--risk">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · At a glance</span></div></div>
           {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} usesBackcast={backcastHistory.length >= 2} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : 'Historical prices are loading to build your risk profile.'}</div>}
         </section>
