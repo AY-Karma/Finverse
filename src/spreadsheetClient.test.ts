@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSpreadsheetInWorker } from './spreadsheetClient'
+import { parseSpreadsheetPreviewInWorker } from './spreadsheetClient'
 
 describe('spreadsheet client', () => {
   it('keeps parsing available when Web Workers are unavailable', async () => {
@@ -8,7 +8,7 @@ describe('spreadsheet client', () => {
       'INFY,2,100,125',
     ].join('\n')).buffer
 
-    const positions = await parseSpreadsheetInWorker(csv)
+    const { positions } = await parseSpreadsheetPreviewInWorker(csv)
 
     expect(positions).toHaveLength(1)
     expect(positions[0]).toMatchObject({ ticker: 'INFY', quantity: 2, buyPrice: 100, lastPrice: 125 })
@@ -21,7 +21,7 @@ describe('spreadsheet client', () => {
     ].join('\n')).buffer
 
     try {
-      await parseSpreadsheetInWorker(csv)
+      await parseSpreadsheetPreviewInWorker(csv)
       throw new Error('Expected the import to fail')
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)

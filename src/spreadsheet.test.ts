@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
-import { parseSpreadsheet, parseSpreadsheetWithDiagnostics } from './spreadsheet'
+import { parseSpreadsheetWithDiagnostics } from './spreadsheet'
+
+function parsePositions(file: ArrayBuffer) {
+  return parseSpreadsheetWithDiagnostics(file).positions
+}
 
 function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx', sheetNames?: string[]): ArrayBuffer {
   const book = XLSX.utils.book_new()
@@ -36,7 +40,7 @@ describe('holdings spreadsheet import', () => {
 
   it('keeps Kite fund and ETF types and preserves rows from unrelated sheets', () => {
     const header = ['Symbol', 'ISIN', 'Instrument Type', 'Quantity Available', 'Average Price', 'Previous Closing Price']
-    const positions = parseSpreadsheet(workbook([
+    const positions = parsePositions(workbook([
       [header, ['EXAMPLE FUND', 'INF000000001', 'MF', 2, 100, 120], ['EXAMPLE ETF', 'INF000000002', 'Exchange Traded Fund', 3, 100, 120]],
       [['Symbol', 'Quantity', 'Buy Price'], ['EXAMPLE ETF', 3, 100]],
     ], 'xlsx', ['Combined', 'Other folio']))
@@ -52,7 +56,7 @@ describe('holdings spreadsheet import', () => {
     const sheets = [[header, ['EXAMPLE', 'INE000000001', '-', 10, 100, 120]], [header, ['EXAMPLE FUND', 'INF000000001', '-', 2, 100, 120]]]
     const names = ['Equity', 'Mutual Funds']
     if (emptyCombined) { sheets.push([header]); names.push('Combined') }
-    const positions = parseSpreadsheet(workbook(sheets, 'xlsx', names))
+    const positions = parsePositions(workbook(sheets, 'xlsx', names))
     expect(positions.map(position => position.type)).toEqual(['stock', 'mutual-fund'])
     expect(positions.map(position => position.quantity)).toEqual([10, 2])
   })
@@ -82,7 +86,7 @@ describe('holdings spreadsheet import', () => {
     ]]))).toThrow('row 2: Cost')
   })
   it('finds mutual-fund holdings below account details and a portfolio summary', () => {
-    const positions = parseSpreadsheet(workbook([[
+    const positions = parsePositions(workbook([[
       ['Name', 'Example Investor'],
       ['Mobile Number', '9000000000'],
       ['PAN', 'ABCDE1234F'],
@@ -104,7 +108,7 @@ describe('holdings spreadsheet import', () => {
   })
 
   it.each(['xlsx', 'biff8'] as const)('reads reordered stock columns and ignores metadata, totals and invalid rows in %s', (format) => {
-    const positions = parseSpreadsheet(workbook([[
+    const positions = parsePositions(workbook([[
       ['Client ID', 'EXAMPLE-CLIENT'],
       ['Summary', 'Investment Value', 'Current Value'],
       ['Portfolio', 200, 240],
@@ -122,7 +126,7 @@ describe('holdings spreadsheet import', () => {
   })
 
   it('reads holdings on later worksheets and multiple holdings tables', () => {
-    const positions = parseSpreadsheet(workbook([
+    const positions = parsePositions(workbook([
       [['STOCK', 'SYMBOL', 'PRICE', 'Change (%)'], ['Example Stock', 'EXAMPLE', 125, 2]],
       [
         ['Portfolio instructions'], [],
@@ -141,7 +145,7 @@ describe('holdings spreadsheet import', () => {
   })
 
   it('combines split headers without assigning blank columns to a previous field', () => {
-    const positions = parseSpreadsheet(workbook([[
+    const positions = parsePositions(workbook([[
       ['Scheme Name', null, 'Units', 'Invested', 'Current'],
       [null, null, null, 'Value', 'Value'],
       ['Example Fund', 'Ignore this column', 2, 200, 240],
@@ -151,7 +155,7 @@ describe('holdings spreadsheet import', () => {
   })
 
   it('skips repeated headers and summary/footer rows with numeric cells', () => {
-    const positions = parseSpreadsheet(workbook([[
+    const positions = parsePositions(workbook([[
       ['Ticker', 'Quantity', 'Avg. Cost', 'LTP'],
       ['EXAMPLE', 2, 100, 125],
       ['Ticker', 'Quantity', 'Avg. Cost', 'LTP'],
@@ -163,14 +167,14 @@ describe('holdings spreadsheet import', () => {
   })
 
   it('does not import a stock tradebook as holdings', () => {
-    expect(() => parseSpreadsheet(workbook([[
+    expect(() => parsePositions(workbook([[
       ['Symbol', 'Quantity', 'Price', 'Buy/Sell', 'Order ID'],
       ['EXAMPLE', 2, 100, 'BUY', 'ORDER-1'],
     ]]))).toThrow('No recognizable holdings header found')
   })
 
   it('stops importing holdings when a trade section follows on the same sheet', () => {
-    const positions = parseSpreadsheet(workbook([[
+    const positions = parsePositions(workbook([[
       ['Symbol', 'Quantity', 'Price'],
       ['EXAMPLE', 2, 100],
       ['Symbol', 'Quantity', 'Price', 'Buy/Sell'],
@@ -180,7 +184,7 @@ describe('holdings spreadsheet import', () => {
   })
 
   it('keeps optional last prices empty instead of turning placeholders into zero', () => {
-    const positions = parseSpreadsheet(workbook([[
+    const positions = parsePositions(workbook([[
       ['Symbol', 'Qty', 'Avg. Cost', 'LTP'],
       ['EXAMPLE', '1,000', '1.5', '-'],
       ['SECOND', 1, '₹10', 'N/A'],
@@ -190,7 +194,7 @@ describe('holdings spreadsheet import', () => {
   })
 
   it('reads fund NAV columns and fund names identified by XIRR', () => {
-    const positions = parseSpreadsheet(workbook([
+    const positions = parsePositions(workbook([
       [['Fund Name', 'Units', 'Average NAV', 'Current NAV'], ['Example Fund', 2, 100, 120]],
       [['Name', 'Units', 'Invested Value', 'Current Value', 'XIRR'], ['Second Fund', 3, 300, 360, '12%']],
     ]))
@@ -200,7 +204,7 @@ describe('holdings spreadsheet import', () => {
   })
 
   it('preserves security names that start with summary words', () => {
-    const positions = parseSpreadsheet(workbook([[
+    const positions = parsePositions(workbook([[
       ['Stock Name', 'Shares', 'Purchase Price'],
       ['Total Energy Services', 2, 100],
     ]]))
@@ -209,7 +213,7 @@ describe('holdings spreadsheet import', () => {
 
   it('enforces the holdings limit across worksheets', () => {
     const rows = Array.from({ length: 2501 }, (_, index) => [`STOCK${index}`, 1, 10])
-    expect(() => parseSpreadsheet(workbook([
+    expect(() => parsePositions(workbook([
       [['Ticker', 'Quantity', 'Buy Price'], ...rows],
       [['Ticker', 'Quantity', 'Buy Price'], ...rows],
     ]))).toThrow('limited to 5,000 holdings')

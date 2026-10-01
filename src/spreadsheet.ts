@@ -560,8 +560,3 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
     'No recognizable holdings header found. Use Ticker or Symbol with Quantity and Buy Price for equities, or Scheme Name with Units and Invested Value for mutual funds.',
   )
 }
-
-/** Legacy positions-only seam; import previews use diagnostics to expose rejected rows. */
-export function parseSpreadsheet(file: ArrayBuffer): Position[] {
-  return parseSpreadsheetWithDiagnostics(file).positions
-}

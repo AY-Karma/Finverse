@@ -1,4 +1,3 @@
-import type { Position } from './types'
 import type { SpreadsheetParseResult } from './spreadsheet'
 
 /** Parse outside the UI thread while retaining a fallback for environments without Web Workers. */
@@ -19,8 +18,4 @@ export function parseSpreadsheetPreviewInWorker(file: ArrayBuffer): Promise<Spre
     }
     worker.postMessage(file, [file])
   })
-}
-
-export async function parseSpreadsheetInWorker(file: ArrayBuffer): Promise<Position[]> {
-  return (await parseSpreadsheetPreviewInWorker(file)).positions
 }
