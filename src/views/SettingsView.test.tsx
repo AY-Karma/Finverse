@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { loadSettings } from '../store'
 import { SettingsView } from './SettingsView'
 
-const state = vi.hoisted(() => ({ settings: {} as Record<string, unknown>, setSettings: vi.fn() }))
+const state = vi.hoisted(() => ({ settings: {} as Record<string, unknown>, setSettings: vi.fn(), folios: [], positions: [], removeFolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null, exportPortfolio: vi.fn() }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const DEFAULT_SETTINGS = loadSettings()
@@ -18,8 +18,10 @@ describe('provider settings', () => {
     const root = createRoot(container)
     try {
       await act(async () => root.render(<SettingsView />))
+      expect(container.querySelector('.settings-detail > .settings-group')?.nextElementSibling?.getAttribute('aria-label')).toBe('Manage holdings')
       const ai = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('AI connection'))
       await act(async () => ai?.click())
+      expect(container.querySelector('[aria-label="Manage holdings"]')).toBeNull()
       const provider = container.querySelector<HTMLSelectElement>('#provider')!
       await act(async () => {
         provider.value = 'anthropic'

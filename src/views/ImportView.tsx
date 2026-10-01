@@ -3,6 +3,7 @@ import { IMPORT_SOURCES } from '../importSources'
 import { MAX_IMPORT_FILES } from '../importLimits'
 import { useStore, type ImportPreview } from '../useStore'
 import { UndoImportButton } from './UndoImportButton'
+import { RemoveFolioButton } from './RemoveFolioButton'
 
 interface ImportViewProps {
   compact?: boolean
@@ -88,7 +89,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
                 <span className="sym">{folio.name}</span>
                 <span className="hint">{folio.positions.length} position{folio.positions.length === 1 ? '' : 's'} · {new Date(folio.importedAt).toLocaleString()}</span>
               </div>
-              <button className="btn-remove" aria-label={`Remove ${folio.name}`} title="Remove folio" onClick={() => removeFolio(folio.id)}>×</button>
+              <RemoveFolioButton folio={folio} onConfirm={removeFolio} />
             </div>
           ))}
           <div className="import-actions">

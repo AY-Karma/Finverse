@@ -5,6 +5,7 @@ import { describeOllamaEndpoint, isLocalProvider, LOCAL_MODEL_PRESETS, PROVIDERS
 import { ACCENTS, ACCENT_KEYS, normalizeHex } from '../theme'
 import type { Accent, Density, Mode } from '../types'
 import { useStore } from '../useStore'
+import { ManageHoldings } from './ManageHoldings'
 
 const STORAGE_HINT =
   'Keys stay in this browser tab and go directly to the provider you choose. Finverse has no backend. Use a low-limit key and do not share this device.'
@@ -225,6 +226,8 @@ export function SettingsView() {
               />
             </div>
           )}
+
+          {activeSection === 'preferences' && <ManageHoldings />}
 
           {activeSection === 'privacy' && (
             <SettingsSectionHeader

@@ -2,18 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { loadMarketFeed, type LoadedMarketFeed, type NewsItem } from '../marketNews'
 import { filterNewsEvents, pageCount, pagedEvents, sentimentForTitle, titleParts, type NewsFeedFilters } from '../monitorFeed'
 import { useStore } from '../useStore'
-import { ImportView } from './ImportView'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
-import { UndoImportButton } from './UndoImportButton'
 
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 
 export function HoldingsView({ onRequestImport, initialQuery = '' }: { onRequestImport: () => void; initialQuery?: string }) {
-  const { folios, positions, settings, removeFolio, undoLastImport, undoImportFolioId, exportPortfolio } = useStore()
+  const { positions, settings } = useStore()
   const [feed, setFeed] = useState<LoadedMarketFeed | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshCount, setRefreshCount] = useState(0)
-  const [importOpen, setImportOpen] = useState(false)
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
   const [activeQuery, setActiveQuery] = useState(initialQuery)
   const holdingsKey = useMemo(
@@ -114,17 +111,6 @@ export function HoldingsView({ onRequestImport, initialQuery = '' }: { onRequest
           />
         </>
       )}
-
-      <ManageHoldings
-        folios={folios}
-        hasPositions={positions.length > 0}
-        importOpen={importOpen}
-        onToggleImport={() => setImportOpen((open) => !open)}
-        onExport={exportPortfolio}
-        onUndoImport={undoLastImport}
-        undoImportFolioId={undoImportFolioId}
-        onRemoveFolio={removeFolio}
-      />
     </>
   )
 }
@@ -295,32 +281,3 @@ function FilterIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="curr
 function ChevronIcon({ direction }: { direction: 'left' | 'right' }) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d={direction === 'left' ? 'm14 6-6 6 6 6' : 'm10 6 6 6-6 6'} strokeLinecap="round" strokeLinejoin="round" /></svg> }
 function ExternalIcon() { return <svg className="news-external-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" strokeLinecap="round" strokeLinejoin="round" /></svg> }
 function CloseIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" strokeLinejoin="round" /></svg> }
-
-function ManageHoldings({ folios, hasPositions, importOpen, onToggleImport, onExport, onUndoImport, undoImportFolioId, onRemoveFolio }: {
-  folios: ReturnType<typeof useStore>['folios']
-  hasPositions: boolean
-  importOpen: boolean
-  onToggleImport: () => void
-  onExport: ReturnType<typeof useStore>['exportPortfolio']
-  onUndoImport: () => void
-  undoImportFolioId: string | null
-  onRemoveFolio: (id: string) => void
-}) {
-  return <section className="panel holdings-manage enter d4">
-    <div className="panel-head">
-      <span className="panel-title">Manage holdings</span>
-    </div>
-    <div className="manage-actions">
-      <button className="btn btn--secondary btn--small" type="button" aria-expanded={importOpen} title={importOpen ? 'Hide the import area.' : 'Choose spreadsheet files to add holdings.'} onClick={onToggleImport}>{importOpen ? 'Close import' : 'Import holdings'}</button>
-      <button className="btn btn--secondary btn--small" type="button" title="Download all holdings as a CSV file." disabled={!hasPositions} onClick={() => onExport('csv')}>Export CSV</button>
-      <button className="btn btn--secondary btn--small" type="button" title="Download a JSON backup of your folios." disabled={!hasPositions} onClick={() => onExport('json')}>Backup JSON</button>
-      <UndoImportButton targetId={undoImportFolioId} onConfirm={onUndoImport} />
-    </div>
-    {importOpen && <div className="holdings-import"><ImportView compact /></div>}
-    {folios.length > 0 && <div className="folio-list">{folios.map((folio) => <div className="folio-row" key={folio.id}>
-      <div className="folio-marker" />
-      <div className="folio-copy"><span className="sym">{folio.name}</span><span className="hint">{folio.positions.length} holding{folio.positions.length === 1 ? '' : 's'} · {new Date(folio.importedAt).toLocaleDateString()}</span></div>
-      <button className="btn-remove" type="button" aria-label={`Remove ${folio.name}`} onClick={() => onRemoveFolio(folio.id)}>×</button>
-    </div>)}</div>}
-  </section>
-}
