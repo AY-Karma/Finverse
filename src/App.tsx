@@ -18,6 +18,9 @@ const ResearchView = lazy(() => loadResearchView().then((module) => ({ default: 
 const AssistantView = lazy(() => loadAssistantView().then((module) => ({ default: module.AssistantView })))
 const SettingsView = lazy(() => loadSettingsView().then((module) => ({ default: module.SettingsView })))
 const InsightsView = lazy(() => loadInsightsView().then((module) => ({ default: module.InsightsView })))
+const MonitorPrototypeView = import.meta.env.DEV
+  ? lazy(() => import('./views/MonitorPrototypeView').then((module) => ({ default: module.MonitorPrototypeView })))
+  : null
 
 const NAV: { id: View; label: string; index: string }[] = [
   { id: 'overview', label: 'Overview', index: '01' },
@@ -33,6 +36,7 @@ export default function App({ initialView }: { initialView: View }) {
   const [researchVisited, setResearchVisited] = useState(initialView === 'research')
   const [assistantDraft, setAssistantDraft] = useState('')
   const [monitorQuery, setMonitorQuery] = useState('')
+  const [monitorPreview, setMonitorPreview] = useState(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get('preview') === '1')
   const [researchReturn, setResearchReturn] = useState(false)
   const researchUrl = useRef(initialView === 'research' ? window.location.pathname + window.location.search : '/app/research')
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
@@ -46,6 +50,7 @@ export default function App({ initialView }: { initialView: View }) {
     if (nextView === 'holdings') setMonitorQuery('')
     if (nextView === 'assistant') setAssistantDraft('')
     setResearchReturn(false)
+    setMonitorPreview(false)
     setView(nextView)
   }, [])
 
@@ -70,6 +75,7 @@ export default function App({ initialView }: { initialView: View }) {
       }
       if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
       if (route.view === 'research') setResearchVisited(true)
+      setMonitorPreview(import.meta.env.DEV && new URLSearchParams(window.location.search).get('preview') === '1')
       setView(route.view)
     }
     window.addEventListener('popstate', onPopState)
@@ -119,7 +125,7 @@ export default function App({ initialView }: { initialView: View }) {
 
         <div className="sidebar-foot">
           <span className="hint">
-            {positions.length > 0
+            {view === 'holdings' && monitorPreview ? 'Sample portfolio preview' : positions.length > 0
               ? `${positions.length} position${positions.length === 1 ? '' : 's'} tracked`
               : 'No portfolio loaded'}
           </span>
@@ -132,7 +138,9 @@ export default function App({ initialView }: { initialView: View }) {
         {researchVisited && <div hidden={view !== 'research'}><Suspense fallback={<div className="view-loading">Loading research...</div>}><ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onOpenAssistant={(position) => openFromResearch('assistant', position)} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} /></Suspense></div>}
         {view !== 'overview' && (
           <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
-            {view === 'holdings' && <HoldingsView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
+            {view === 'holdings' && (monitorPreview && MonitorPrototypeView
+              ? <MonitorPrototypeView onExit={() => navigate('holdings')} />
+              : <><HoldingsView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />{import.meta.env.DEV && <a className="btn btn--ghost btn--small" href="/app/monitor?preview=1&variant=B">Preview new Monitor</a>}</>)}
             {view === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
             {view === 'assistant' && <AssistantView initialDraft={assistantDraft} onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
             {view === 'settings' && <SettingsView />}
