@@ -1,30 +1,30 @@
 import { useState } from 'react'
 import { assetTypeLabel } from '../instruments'
 import { monogramTile } from '../logos'
+import { quoteKey } from '../valuation'
 import { useMonitor, type MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
+import { MonitorToast } from './MonitorToast'
 import { MonitorNewsPanel } from './MonitorNewsPanel'
 import { ReminderAction, RulesPanel } from './monitorPanels'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
 import './monitor.css'
 
-type IconName = 'up' | 'down' | 'bank' | 'fund' | 'portfolio' | 'notice' | 'results' | 'dividend' | 'bell' | 'check' | 'clock' | 'refresh' | 'calendar' | 'source'
+type IconName = 'up' | 'down' | 'fund' | 'portfolio' | 'results' | 'bell' | 'check' | 'clock' | 'refresh' | 'calendar'
 const iconPaths: Record<IconName, string> = {
   up: 'M3 17l6-6 4 4 8-10M15 5h6v6',
   down: 'M3 7l6 6 4-4 8 10M15 19h6v-6',
-  bank: 'M3 9l9-6 9 6H3M5 9v10m5-10v10m4-10v10m5-10v10M3 21h18',
   fund: 'M4 20V10m5 10V6m6 14V12m5 8V3M2 21h20',
   portfolio: 'M8 7V4h8v3M3 7h18v14H3V7m0 6h18m-11 0v3h4v-3',
-  notice: 'M7 3h8l4 4v14H5V3h2m8 0v5h4M9 12h6m-6 4h6',
   results: 'M4 20V4h16v16H4m4-4v-4m4 4V8m4 8v-6',
-  dividend: 'M12 3v18m4-14h-6a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H8',
   bell: 'M6 17h12l-2-3V9a4 4 0 0 0-8 0v5l-2 3m4 3a2 2 0 0 0 4 0',
   check: 'M5 12l4 4L19 6',
   clock: 'M12 8v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',
   refresh: 'M20 7a9 9 0 1 0 1 9M20 3v5h-5',
   calendar: 'M4 5h16v16H4V5m4-3v6m8-6v6M4 10h16m-12 4h2m4 0h2m-8 3h2',
-  source: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2m3 6a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',
 }
+
+const quoteSourceLabels = { yahoo: 'Yahoo Finance', 'nse-close': 'NSE close', nav: 'published NAV' }
 
 function Icon({ name }: { name: IconName }) {
   return (
@@ -88,9 +88,9 @@ function MonitorTimeline({ controller, initialQuery }: { controller: MonitorCont
   const [visibleCount, setVisibleCount] = useState(12)
   const dates = [...new Set(controller.events.map((event) => event.date))].sort()
   const alerts = controller.alerts.filter((alert) => filter === 'all' || (filter === 'open' ? alert.state === 'open' : alert.state !== 'open'))
-  const activity = [...alerts, ...(filter === 'all' ? controller.quoteRecords : [])].sort((a, b) => b.at - a.at)
+  const activity = [...alerts, ...(filter === 'all' ? controller.quoteRecords : [])].sort((left, right) => right.at - left.at)
   const visibleActivity = activity.slice(0, visibleCount)
-  const activityDates = [...new Set(visibleActivity.map((item) => dateKey(item.at)))].sort().reverse()
+  const activityDates = [...new Set(visibleActivity.map((record) => dateKey(record.at)))].sort().reverse()
   const selectFilter = (next: typeof filter) => { setFilter(next); setVisibleCount(12) }
   return (
     <div className="mp-timeline-layout">
@@ -107,15 +107,15 @@ function MonitorTimeline({ controller, initialQuery }: { controller: MonitorCont
         {activityDates.map((date) => <div className="mp-timeline-group" key={date}>
           <div className="mp-timeline-date"><span className="mp-timeline-dot" /><strong>{activityDate(date)}</strong><span>Portfolio activity</span></div>
           <div className="mp-timeline-items">
-            {visibleActivity.filter((item) => dateKey(item.at) === date).map((alert) => {
-              const isQuote = alert.kind === 'quote'
-              const state = isQuote ? undefined : alert.state
-              const trend = alert.metrics?.find((metric) => metric.trend === 'up' || metric.trend === 'down')?.trend
+            {visibleActivity.filter((record) => dateKey(record.at) === date).map((record) => {
+              const isQuote = record.kind === 'quote'
+              const state = record.kind === 'price' ? record.state : undefined
+              const trend = record.metrics.find((metric) => metric.trend === 'up' || metric.trend === 'down')?.trend
               const tone = trend ?? 'neutral'
               return (
-                <article className={`mp-timeline-item mp-timeline-item--${state ?? 'quote'}`} data-tone={tone} key={alert.id}>
+                <article className={`mp-timeline-item mp-timeline-item--${state ?? 'quote'}`} data-tone={tone} key={record.id}>
                   <div className="mp-item-header">
-                    <HoldingIdentity holding={alert.holding} holdingId={alert.holdingId} />
+                    <HoldingIdentity holding={record.holding} holdingId={record.holdingId} />
                     {state && <span className="mp-badge" data-state={state}>
                       <Icon name={state === 'reviewed' ? 'check' : state === 'snoozed' ? 'clock' : 'bell'} />
                       {state === 'open' ? 'To review' : state === 'reviewed' ? 'Reviewed' : 'Snoozed'}
@@ -124,13 +124,12 @@ function MonitorTimeline({ controller, initialQuery }: { controller: MonitorCont
                   <div className="mp-item-category" data-tone={tone}>
                     <Icon name={trend === 'down' ? 'down' : trend === 'up' ? 'up' : 'clock'} />
                     <strong>{isQuote ? 'Latest price / NAV' : 'Watch rule triggered'}</strong>
-                    <time dateTime={new Date(alert.at).toISOString()}>{alert.time}</time>
+                    <time dateTime={new Date(record.at).toISOString()}>{record.time}</time>
                   </div>
-                  <h3>{alert.title}</h3>
-                  {isQuote && <p className="mp-timeline-reason">{alert.reason}</p>}
-                  {alert.metrics && (
+                  <h3>{record.title}</h3>
+                  {record.metrics.length > 0 && (
                     <dl className="mp-metrics">
-                      {alert.metrics.map((metric) => (
+                      {record.metrics.map((metric) => (
                         <div className="mp-metric" data-trend={metric.trend ?? 'neutral'} key={metric.label}>
                           <dt>{metric.label}</dt>
                           <dd>{(metric.trend === 'up' || metric.trend === 'down') && <Icon name={metric.trend} />}{metric.value}</dd>
@@ -138,17 +137,14 @@ function MonitorTimeline({ controller, initialQuery }: { controller: MonitorCont
                       ))}
                     </dl>
                   )}
-                  <div className="mp-item-bottom">
-                    <details className="mp-source-details"><summary><Icon name="source" />{isQuote ? 'Source & timestamp' : 'Rule evidence'}</summary><p>{alert.evidence}</p></details>
-                    {!isQuote && <div className="mp-actions">
-                      {state === 'open' ? (
-                        <>
-                          <button type="button" className="mp-button mp-button--small" onClick={() => controller.setAlertState(alert.id, 'reviewed')}><Icon name="check" />Mark reviewed</button>
-                          <button type="button" className="mp-text-button" onClick={() => controller.setAlertState(alert.id, 'snoozed')}><Icon name="clock" />Snooze</button>
-                        </>
-                      ) : <button type="button" className="mp-text-button" onClick={() => controller.setAlertState(alert.id, 'open')}>Reopen item</button>}
-                    </div>}
-                  </div>
+                  {!isQuote && <div className="mp-actions">
+                    {state === 'open' ? (
+                      <>
+                        <button type="button" className="mp-button mp-button--small" onClick={() => controller.setAlertState(record.id, 'reviewed')}><Icon name="check" />Mark reviewed</button>
+                        <button type="button" className="mp-text-button" onClick={() => controller.setAlertState(record.id, 'snoozed')}><Icon name="clock" />Snooze</button>
+                      </>
+                    ) : <button type="button" className="mp-text-button" onClick={() => controller.setAlertState(record.id, 'open')}>Reopen item</button>}
+                  </div>}
                 </article>
               )
             })}
@@ -180,7 +176,6 @@ function MonitorTimeline({ controller, initialQuery }: { controller: MonitorCont
             </div>
           </div>
         ))}
-        <p className="mp-data-note">Reminders appear here when you open Monitor.</p>
       </section>
       <aside className="mp-timeline-sidebar" aria-label="Watch rules and news">
         <div className="mp-panel"><RulesPanel controller={controller} /></div>
@@ -192,6 +187,16 @@ function MonitorTimeline({ controller, initialQuery }: { controller: MonitorCont
 
 export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestImport: () => void; initialQuery?: string }) {
   const controller = useMonitor()
+  const { liveQuotes } = useStore()
+  const sources = controller.allowExternalData
+    ? [...new Set(controller.positions.flatMap((position) => {
+      const source = liveQuotes[quoteKey(position)]?.source
+      return source ? [quoteSourceLabels[source]] : []
+    }))]
+    : []
+  const sourceNote = sources.length === 0
+    ? 'Timeline cards show fetched price data when available.'
+    : `Timeline cards show data fetched from ${sources.length === 1 ? sources[0] : `${sources.slice(0, -1).join(', ')} and ${sources[sources.length - 1]}`}.`
   if (controller.positions.length === 0) {
     return <PortfolioRequiredState area="02 · Monitor" description="Bring in your holdings to follow price updates, create watch rules, and read portfolio news." onImport={onRequestImport} />
   }
@@ -201,7 +206,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
       <header className="mp-hero">
         <div className="mp-hero-top">
           <p className="mp-eyebrow">02 · Monitor</p>
-          <div className="mp-preview-disclosure"><span className="mp-preview-dot" />{controller.allowExternalData ? 'Market data enabled' : <><span>Market data off</span><a href="/app/settings">Settings</a></>}</div>
+          <div className="mp-data-status"><span className="mp-data-dot" />{controller.allowExternalData ? 'Market data enabled' : <><span>Market data off</span><a href="/app/settings">Settings</a></>}</div>
         </div>
         <div className="mp-hero-main">
           <div><h1>Portfolio watch</h1><p>Follow the changes. Plan what comes next.</p></div>
@@ -216,10 +221,10 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
             <span><Icon name="calendar" /><strong>{controller.counts.upcoming}</strong> upcoming reminders</span>
           </div>
         </div>
-        <p className="mp-data-note">Quotes show their source time. Watch rules are checked when prices refresh.</p>
       </header>
       <MonitorTimeline controller={controller} initialQuery={initialQuery} />
-      <footer className="mp-preview-state"><p aria-live="polite" role="status">{controller.statusMessage}</p><span>{controller.counts.reviewed} reviewed · {controller.counts.snoozed} snoozed</span></footer>
+      <p className="mp-source-note">{sourceNote}</p>
+      <footer className="mp-status-footer"><MonitorToast message={controller.statusMessage} revision={controller.statusRevision} /><span>{controller.counts.reviewed} reviewed · {controller.counts.snoozed} snoozed</span></footer>
     </div>
   )
 }

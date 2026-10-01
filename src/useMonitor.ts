@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useStore } from './useStore'
 import { privateValue } from './privacy'
 import {
-  evaluateMonitorRules, holdingIdentity, latestQuoteRecords, loadMonitorState, reconcileMonitorRules, saveMonitorState, validReminderDate,
+  evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, latestQuoteRecords, loadMonitorState, reconcileMonitorRules, saveMonitorState, validReminderDate,
   type AlertState, type MonitorAlert, type MonitorRecord, type RuleCondition,
 } from './monitor'
 
@@ -15,10 +15,14 @@ export function useMonitor() {
   const { positions, liveQuotes, settings, refreshNow, marketDataRefreshing, marketDataResult } = useStore()
   const [loaded] = useState(loadMonitorState)
   const [state, setState] = useState(loaded.state)
-  const [statusMessage, setStatusMessage] = useState(() => settings.allowExternalData ? '' : 'External market data is off. Enable it in Settings to load quote updates.')
+  const [status, setStatus] = useState(() => ({ message: settings.allowExternalData ? '' : 'External market data is off. Enable it in Settings to load quote updates.', revision: 0 }))
   const [storageError, setStorageError] = useState(loaded.error)
   const [refreshing, setRefreshing] = useState(false)
   const [now, setNow] = useState(Date.now)
+
+  const setStatusMessage = useCallback((message: string) => {
+    setStatus((current) => ({ message, revision: current.revision + 1 }))
+  }, [])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000)
@@ -51,10 +55,6 @@ export function useMonitor() {
       setStatusMessage('Choose a current holding and enter a positive, finite watch level.')
       return false
     }
-    if (!input.id && state.rules.length >= 200) {
-      setStatusMessage('You can save up to 200 watch rules. Remove one before adding another.')
-      return false
-    }
     const rule = {
       id: input.id ?? crypto.randomUUID(),
       holdingId: position.id,
@@ -64,8 +64,16 @@ export function useMonitor() {
       threshold: input.threshold,
       active: existing?.active ?? true,
     }
+    if (hasDuplicateMonitorRule(state.rules, rule, input.id)) {
+      setStatusMessage('A watch rule with this holding, condition, and level already exists. Edit the existing rule instead.')
+      return false
+    }
+    if (!input.id && state.rules.length >= 200) {
+      setStatusMessage('You can save up to 200 watch rules. Remove one before adding another.')
+      return false
+    }
     setState((current) => ({ ...current, rules: input.id ? current.rules.map((item) => item.id === input.id ? rule : item) : [...current.rules, rule] }))
-    setStatusMessage('Watch rule saved. Matching recent provider observations appear in the timeline.')
+    setStatusMessage('Watch rule saved.')
     return true
   }
 
@@ -154,7 +162,8 @@ export function useMonitor() {
       activeRules: rules.filter((rule) => rule.active).length,
       upcoming: state.events.filter((event) => event.reminder && event.date >= currentDate).length,
     },
-    statusMessage: storageError || statusMessage,
+    statusMessage: storageError || status.message,
+    statusRevision: status.revision,
     refreshing: refreshing || marketDataRefreshing,
     refresh,
     setAlertState,

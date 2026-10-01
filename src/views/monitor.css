@@ -17,11 +17,12 @@
 .mp-page button:disabled { cursor: default; color: var(--ink-muted); }
 .mp-page button:focus-visible, .mp-page a:focus-visible, .mp-page input:focus-visible, .mp-page select:focus-visible, .mp-page textarea:focus-visible, .mp-page summary:focus-visible { outline: 2px solid var(--mp-accent); outline-offset: 3px; }
 .mp-hero { margin-bottom: 18px; }
-.mp-hero-top, .mp-hero-main, .mp-hero-actions, .mp-watch-status, .mp-watch-summary, .mp-sample-controls, .mp-preview-disclosure { display: flex; align-items: center; }
+.mp-hero-top, .mp-hero-main, .mp-hero-actions, .mp-watch-status, .mp-watch-summary, .mp-data-status { display: flex; align-items: center; }
 .mp-hero-top { justify-content: space-between; gap: 16px; margin-bottom: 9px; }
 .mp-eyebrow, .mp-kicker { color: var(--ink-muted); font-family: var(--font-mono); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; }
-.mp-preview-disclosure { gap: 8px; border: 1px solid var(--hairline-strong); border-radius: 20px; padding: 5px 11px; color: var(--ink-muted); font-size: 13px; }
-.mp-preview-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mp-accent); flex-shrink: 0; }
+.mp-data-status { gap: 8px; border: 1px solid var(--hairline-strong); border-radius: 20px; padding: 5px 11px; color: var(--ink-muted); font-size: 13px; }
+.mp-data-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mp-accent); flex-shrink: 0; }
+.mp-data-status a { color: var(--mp-accent); text-underline-offset: 3px; }
 .mp-hero-main { justify-content: space-between; gap: 24px; align-items: end; }
 .mp-hero h1 { font-size: clamp(30px, 3vw, 38px); font-weight: 550; letter-spacing: -.045em; line-height: 1.2; }
 .mp-hero-main p { margin-top: 7px; color: var(--ink-muted); font-size: 16px; }
@@ -38,8 +39,6 @@
 .mp-watch-summary > span { display: inline-flex; align-items: center; gap: 5px; }
 .mp-watch-summary strong { margin-right: 3px; color: var(--ink); font-family: var(--font-mono); font-size: 17px; font-weight: 600; }
 .mp-watch-summary svg { color: var(--mp-accent); }
-.mp-sample-controls { gap: 16px; font-size: 13px; }
-.mp-sample-controls .mp-text-button { font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
 .mp-panel { min-width: 0; overflow: hidden; border: 1px solid var(--hairline-strong); border-radius: 11px; background: var(--surface-1); }
 .mp-panel > section { min-width: 0; }
 .mp-section-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 20px 16px; }
@@ -59,9 +58,9 @@
 .mp-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; margin-top: 14px; }
 .mp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 30px 20px; text-align: center; color: var(--ink-muted); font-size: 15px; }
 .mp-empty h3 { color: var(--ink); font-size: 18px; font-weight: 550; }
-.mp-preview-state { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px 24px; margin-top: 22px; padding-top: 15px; border-top: 1px solid var(--hairline); color: var(--ink-muted); font-size: 13px; }
-.mp-preview-state p { max-width: 600px; }
-.mp-preview-state > span { font-family: var(--font-mono); }
+.mp-page .mp-source-note { margin: 28px 0 0; padding: 15px 0 0; border-top: 1px solid var(--hairline); color: var(--ink-muted); font-size: 13px; line-height: 1.5; }
+.mp-status-footer { display: flex; justify-content: flex-end; margin-top: 8px; color: var(--ink-muted); font-size: 13px; }
+.mp-status-footer > span { font-family: var(--font-mono); }
 
 /* Holding identities and a colored rail make the chronology easy to scan. */
 .mp-timeline-layout { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(320px, 1fr); align-items: start; gap: 24px; }
@@ -80,7 +79,6 @@
 .mp-timeline-item { --mp-item-tone: var(--mp-accent); min-width: 0; margin-bottom: 12px; padding: 19px 20px; border: 1px solid var(--hairline-strong); border-left: 3px solid var(--mp-item-tone); border-radius: 10px; background: var(--surface-1); }
 .mp-timeline-item:last-child { margin-bottom: 0; }
 .mp-timeline-item h3 { margin: 13px 0 6px; font-size: 18px; line-height: 1.45; font-weight: 550; letter-spacing: -.018em; }
-.mp-timeline-reason { color: var(--ink-muted); font-size: 16px; line-height: 1.6; }
 .mp-timeline-sidebar { display: flex; min-width: 0; flex-direction: column; gap: 20px; }
 .mp-item-header { display: flex; align-items: center; gap: 12px; }
 .mp-item-header > .mp-badge, .mp-item-header > button { margin-left: auto; }
@@ -108,21 +106,9 @@
 .mp-metric { min-width: 0; padding: 10px 11px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); }
 .mp-metric dt { display: block; margin-bottom: 4px; color: var(--ink-muted); font-size: 13px; line-height: 1.5; }
 .mp-metric dd { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--ink); font-family: var(--font-mono); font-size: 18px; font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; }
-.mp-timeline-item[data-tone='disclosure'] .mp-metric dd { font-family: var(--font-body); font-size: 16px; }
 .mp-metric svg { width: 16px; height: 16px; flex-shrink: 0; }
 .mp-metric[data-trend='up'] dd { color: var(--mp-positive); }
 .mp-metric[data-trend='down'] dd { color: var(--mp-negative); }
-.mp-source-details { margin-top: 13px; color: var(--ink-muted); font-size: 14px; }
-.mp-source-details summary { display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; list-style: none; }
-.mp-source-details summary::-webkit-details-marker { display: none; }
-.mp-source-details summary::after { content: '+'; margin-left: auto; color: var(--ink-muted); font-family: var(--font-mono); font-size: 17px; }
-.mp-source-details[open] summary::after { content: '-'; }
-.mp-source-details p { padding-top: 6px; font-size: 14px; line-height: 1.65; }
-.mp-item-bottom { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 20px; margin-top: 12px; }
-.mp-item-bottom .mp-source-details { flex: 1 1 150px; margin-top: 0; }
-.mp-item-bottom .mp-source-details[open] { flex-basis: 100%; }
-.mp-item-bottom .mp-actions { margin-top: 0; }
-.mp-data-note { margin-top: 6px !important; color: var(--ink-muted); font-size: 13px; line-height: 1.6; }
 .mp-event-details { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 11px; color: var(--ink-muted); font-size: 14px; }
 .mp-event-details > span { display: inline-flex; align-items: center; gap: 6px; }
 .mp-event-details svg { width: 16px; height: 16px; }
@@ -134,6 +120,8 @@
 
 /* Watch rules stay compact without shrinking or fading their text. */
 .mp-rules-panel > .mp-section-head { padding-top: 14px; padding-bottom: 12px; }
+.mp-rule-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 9px; }
+.mp-rule-capacity { display: inline-flex; flex-shrink: 0; align-items: center; padding: 3px 8px; border: 1px solid var(--hairline-strong); border-radius: 20px; background: var(--surface-2); color: var(--ink); font-family: var(--font-mono); font-size: 12px; font-weight: 550; line-height: 1.5; white-space: nowrap; }
 .mp-timeline-sidebar > .mp-panel:has(.mp-rules-panel) { overflow: visible; }
 .mp-rule-row { position: relative; padding: 10px 20px; border-top: 1px solid var(--hairline); }
 .mp-rule-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -183,12 +171,11 @@
 }
 @media (max-width: 640px) {
   .mp-hero-top { align-items: start; gap: 10px; }
-  .mp-preview-disclosure { padding: 5px 9px; font-size: 13px; }
+  .mp-data-status { padding: 5px 9px; font-size: 13px; }
   .mp-hero h1 { font-size: 32px; }
   .mp-hero-actions { width: 100%; justify-content: space-between; gap: 12px; }
   .mp-watch-status { align-items: start; gap: 10px; }
   .mp-watch-summary { gap: 7px 15px; }
-  .mp-sample-controls { width: 100%; justify-content: space-between; gap: 8px; }
   .mp-timeline > .mp-section-head { gap: 10px; align-items: start; flex-wrap: wrap; }
   .mp-timeline-sidebar { grid-template-columns: minmax(0, 1fr); }
   .mp-timeline-group { padding-left: 17px; margin-left: 5px; }
@@ -204,7 +191,6 @@
   .mp-page button { min-height: 40px; }
   .mp-rule-menu summary { width: 40px; height: 40px; }
   .mp-actions { gap: 8px 16px; }
-  .mp-source-details summary { min-height: 40px; }
   .mp-dialog { padding: 20px; }
   .mp-dialog .mp-section-head { gap: 10px; }
   .mp-dialog h2 { font-size: 21px; }

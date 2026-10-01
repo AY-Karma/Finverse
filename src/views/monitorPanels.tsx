@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react'
-import { freshQuote, usableQuote, type MonitorRule, type RuleCondition, validReminderDate } from '../monitor'
+import { freshQuote, hasDuplicateMonitorRule, holdingIdentity, usableQuote, type MonitorRule, type RuleCondition, validReminderDate } from '../monitor'
 import type { MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
 import { privateValue, visibleQuotes } from '../privacy'
@@ -107,6 +107,7 @@ export function RulesPanel({ controller }: PanelProps) {
   const selected = controller.positions.find((position) => position.id === holdingId)
   const availableRules = controller.rules.filter((rule) => controller.positions.some((position) => position.id === rule.holdingId))
   const unavailableRules = controller.rules.filter((rule) => !controller.positions.some((position) => position.id === rule.holdingId))
+  const remainingRules = Math.max(0, MAX_RULES - controller.rules.length)
 
   function defaultThreshold(id: string, nextCondition: RuleCondition) {
     if (nextCondition === 'daily_move') return '3'
@@ -138,7 +139,8 @@ export function RulesPanel({ controller }: PanelProps) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const value = Number(threshold)
-    if (!controller.positions.some((position) => position.id === holdingId)) {
+    const position = controller.positions.find((item) => item.id === holdingId)
+    if (!position) {
       setError('Choose a holding currently in your portfolio.')
       return
     }
@@ -146,8 +148,12 @@ export function RulesPanel({ controller }: PanelProps) {
       setError('Enter a threshold greater than zero.')
       return
     }
+    if (hasDuplicateMonitorRule(controller.rules, { instrumentIdentity: holdingIdentity(position), condition, threshold: value }, editing?.id)) {
+      setError('A watch rule with this holding, condition and threshold already exists.')
+      return
+    }
     if (!controller.saveRule({ id: editing?.id, holdingId, condition, threshold: value })) {
-      setError(controller.statusMessage || 'Could not save this rule. Check the holding and threshold.')
+      setError(!editing && remainingRules === 0 ? 'Remove a watch rule before adding another.' : 'Could not save this rule. Check the holding and threshold.')
       return
     }
     setError('')
@@ -156,7 +162,10 @@ export function RulesPanel({ controller }: PanelProps) {
 
   return <section className="mp-rules-panel">
     <div className="mp-section-head">
-      <h2>Your watch rules</h2>
+      <div className="mp-rule-heading">
+        <h2>Your watch rules</h2>
+        <span className="mp-rule-capacity" aria-label={`${remainingRules} of ${MAX_RULES} watch rules available`} title={`${remainingRules} of ${MAX_RULES} watch rules available`}>{remainingRules} left</span>
+      </div>
       <button type="button" disabled={!controller.positions.length || controller.rules.length >= MAX_RULES} onClick={() => open()}>+ New rule</button>
     </div>
     <div className="mp-rule-list">
@@ -208,8 +217,7 @@ export function RulesPanel({ controller }: PanelProps) {
       </article>)}
     </div>
     {!controller.rules.length && <p className="mp-empty">{controller.positions.length ? 'Add a watch rule to follow a price or daily move.' : 'Import your holdings to add watch rules.'}</p>}
-    <p className="mp-muted">Checked against consented, available quotes while Monitor is open. Saved in this browser. {MAX_RULES - controller.rules.length} of {MAX_RULES} rule slots available.</p>
-    <p className="mp-panel-status" role="status" aria-live="polite">{controller.statusMessage}</p>
+    <p className="mp-muted">Checked against available quotes while Monitor is open.</p>
     <dialog className="mp-dialog" ref={dialog} aria-labelledby="mp-rule-title">
       <form className="mp-form" onSubmit={submit}>
         <div className="mp-section-head">

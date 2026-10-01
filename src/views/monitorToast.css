@@ -1,0 +1,12 @@
+.mp-toast { position: fixed; right: max(24px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); z-index: 110; display: flex; align-items: center; gap: 12px; width: max-content; max-width: min(440px, calc(100vw - 32px)); padding: 14px 14px 14px 17px; border: 1px solid color-mix(in srgb, var(--mp-accent) 38%, var(--hairline-strong)); border-radius: 14px; background: var(--surface-2); color: var(--ink); box-shadow: 0 12px 36px #0003, 0 2px 8px #0002; animation: mp-toast-in 260ms cubic-bezier(.2, .8, .2, 1) both; }
+.mp-toast-icon { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: color-mix(in srgb, var(--mp-accent) 14%, var(--surface-2)); color: var(--mp-accent); }
+.mp-toast-icon svg { width: 21px; height: 21px; }
+.mp-page .mp-toast-message { flex: 1; min-width: 0; margin: 0; color: var(--ink); font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.mp-page .mp-toast-dismiss { display: grid; place-items: center; flex-shrink: 0; width: 40px; min-height: 40px; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-muted); cursor: pointer; }
+.mp-page .mp-toast-dismiss:hover { background: var(--surface-3); color: var(--ink); }
+.mp-toast-dismiss svg { width: 18px; height: 18px; }
+.mp-toast--closing { animation: mp-toast-out 240ms cubic-bezier(.4, 0, 1, 1) both; pointer-events: none; }
+@keyframes mp-toast-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes mp-toast-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(8px); } }
+@media (max-width: 560px) { .mp-toast { right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); } }
+@media (prefers-reduced-motion: reduce) { .mp-toast, .mp-toast--closing { animation: none; } .mp-toast--closing { opacity: 0; } }

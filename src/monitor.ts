@@ -61,6 +61,13 @@ export function holdingIdentity(position: Position): string {
   return [quoteKey(position), position.type, position.exchange ?? '', position.currency ?? '', position.providerSymbol ?? '', position.isin ?? ''].join('|')
 }
 
+export function hasDuplicateMonitorRule(rules: MonitorRule[], candidate: Pick<MonitorRule, 'instrumentIdentity' | 'condition' | 'threshold'>, excludeId?: string): boolean {
+  return rules.some((rule) => rule.id !== excludeId
+    && rule.instrumentIdentity === candidate.instrumentIdentity
+    && rule.condition === candidate.condition
+    && rule.threshold === candidate.threshold)
+}
+
 export function sanitizeMonitorState(value: unknown): MonitorState {
   if (!record(value) || value.version !== 1) return emptyMonitorState()
   const unique = <T extends { id: string }>(items: T[]) => [...new Map(items.map((item) => [item.id, item])).values()]
