@@ -9,6 +9,7 @@ import {
   quoteRefreshIssueText,
 } from '../live'
 import { AllocationCard } from './AllocationCard'
+import { MarketCalendar } from './MarketCalendar'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
 const LEDGER_PAGE_SIZE = 100
@@ -328,19 +329,13 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           <div className="overview-meta">
             <div className={`market-status ${marketOpen ? 'market-open' : 'market-closed'}`} role="status" aria-live="polite">
               <span className={marketDotClass} aria-hidden="true" />
-              <span className="market-status-copy">
-                <span>{marketStatusText(marketOpen, settings.allowExternalData, fxReady, fetchingMarketData)}</span>
-                {liveCount > 0 && (
-                  <span className="market-status-time">{quoteSourceLabel(live)} as of {lastRefreshTime(live)}</span>
-                )}
+              <span className="market-status-copy" title={liveCount > 0 ? quoteSourceLabel(live) : undefined}>
+                {marketStatusText(marketOpen, settings.allowExternalData, fxReady, fetchingMarketData, liveCount > 0 ? `${lastRefreshTime(live)} IST` : undefined)}
               </span>
             </div>
             {refreshError && <span className="hint down" role="alert">{refreshError}</span>}
             {!refreshError && marketDataIssue && <span className="hint down" role="status">{marketDataIssue}</span>}
-            <div className="overview-net-position">
-              Net position across {scopePositions.length} holding{scopePositions.length === 1 ? '' : 's'}
-              {scope === 'mutual' ? ' · mutual funds' : ''}
-            </div>
+            <MarketCalendar now={marketNow} />
           </div>
         </div>
       </div>

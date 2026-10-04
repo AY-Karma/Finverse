@@ -1,6 +1,7 @@
 import type { FxRate, LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
 import { createSharedRequest } from './sharedRequest'
+import { isRegularMarketOpen } from './marketCalendar'
 import {
   MAX_MARKET_SYMBOLS,
   isMarketSymbol,
@@ -15,49 +16,13 @@ import {
 // market is actually open so we don't hammer the quote APIs off-hours.
 // ---------------------------------------------------------------------------
 
-/** NSE trading holidays 2026 (weekday closures only; weekends are closed anyway). */
-const NSE_HOLIDAYS_2026: ReadonlySet<string> = new Set([
-  '2026-01-15', // Municipal Corporation Election — Maharashtra
-  '2026-01-26', // Republic Day
-  '2026-03-03', // Holi
-  '2026-03-26', // Shri Ram Navami
-  '2026-03-31', // Shri Mahavir Jayanti
-  '2026-04-03', // Good Friday
-  '2026-04-14', // Dr. Baba Saheb Ambedkar Jayanti
-  '2026-05-01', // Maharashtra Day
-  '2026-05-28', // Bakri Id
-  '2026-06-26', // Muharram
-  '2026-09-14', // Ganesh Chaturthi
-  '2026-10-02', // Mahatma Gandhi Jayanti
-  '2026-10-20', // Dussehra
-  '2026-11-10', // Diwali-Balipratipada
-  '2026-11-24', // Prakash Gurpurb Sri Guru Nanak Dev
-  '2026-12-25', // Christmas
-])
-
-const NSE_HOLIDAYS_BY_YEAR: Readonly<Record<string, ReadonlySet<string>>> = {
-  '2026': NSE_HOLIDAYS_2026,
-}
-
-const MARKET_OPEN_MIN = 9 * 60 + 15 // 09:15 IST
-const MARKET_CLOSE_MIN = 15 * 60 + 30 // 15:30 IST
-
 /** Dev/test override: ?live=1 forces the market to be treated as open. */
 const FORCE_LIVE =
   typeof location !== 'undefined' && /[?&]live=1(\b|&|$)/.test(location.search)
 
 /** True while the NSE cash market is trading (IST weekdays, 09:15–15:30, non-holiday). */
 export function isMarketOpen(date: Date = new Date()): boolean {
-  if (FORCE_LIVE) return true
-  const ist = new Date(date.getTime() + (5 * 60 + 30) * 60 * 1000) // IST = UTC+5:30
-  const day = ist.getUTCDay()
-  if (day === 0 || day === 6) return false
-  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes()
-  if (minutes < MARKET_OPEN_MIN || minutes >= MARKET_CLOSE_MIN) return false
-  const calendarDate = ist.toISOString().slice(0, 10)
-  const holidays = NSE_HOLIDAYS_BY_YEAR[calendarDate.slice(0, 4)]
-  if (holidays?.has(calendarDate)) return false
-  return true
+  return FORCE_LIVE || isRegularMarketOpen(date)
 }
 
 /** The IST calendar date (YYYY-MM-DD) for "has this NAV already been fetched today?" checks. */
@@ -70,17 +35,17 @@ export function marketStatusText(
   externalEnabled = true,
   fxReady = true,
   isRefreshing = false,
+  pricesAsOf?: string,
 ): string {
   if (!externalEnabled) {
     return fxReady
       ? 'External market data off · showing imported prices'
       : 'External market data off · enable it for USD display'
   }
-  if (open && isRefreshing) return 'Market open - fetching latest available data'
-  if (!open && isRefreshing) return 'Market closed - fetching latest available data'
+  const marketLabel = open ? 'Market Open' : 'Market Closed'
+  if (isRefreshing) return `${marketLabel} - fetching latest available data`
   if (!fxReady) return 'Waiting for USD/INR rate…'
-  if (open) return 'Market open - showing latest available prices'
-  return 'Market closed - showing latest available prices'
+  return `${marketLabel} - ${pricesAsOf ? `showing prices as of ${pricesAsOf}` : 'showing latest available prices'}`
 }
 
 // ---------------------------------------------------------------------------
