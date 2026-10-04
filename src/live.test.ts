@@ -15,6 +15,10 @@ afterEach(() => {
 })
 
 describe('market status text', () => {
+  it('does not claim latest provider prices before any quote is available', () => {
+    expect(marketStatusText(true)).toBe('Market Open - no provider prices yet')
+    expect(marketStatusText(false)).toBe('Market Closed - no provider prices yet')
+  })
   it('describes the initial fetch while the market is open', () => {
     expect(marketStatusText(true, true, true, true)).toBe('Market Open - fetching latest available data')
   })

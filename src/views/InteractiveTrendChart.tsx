@@ -26,6 +26,7 @@ interface TrendMarker {
   value: number
   color: string
   label?: string
+  description?: string
   comparable?: boolean
 }
 
@@ -161,7 +162,7 @@ export function InteractiveTrendChart({
     () => chartRows.flatMap((row) => lines.map((line) => row[line.key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))),
     [chartRows, lines],
   )
-  const domain = yDomain(values, includeZero)
+  const domain = yDomain([...values, ...markers.filter((marker) => Number.isFinite(marker.at) && Number.isFinite(marker.value)).map((marker) => marker.value)], includeZero)
   const labels = domain.ticks.map(axisFormatter)
   const isPriceChart = appearance === 'price'
   const isRightScaleChart = isPriceChart || appearance === 'insight'
@@ -485,6 +486,7 @@ export function InteractiveTrendChart({
             }
           } : undefined}
         >
+          {marker.description && <title>{marker.description}</title>}
           {appearance !== 'minimal' && <line x1={x} y1={PLOT_TOP} x2={x} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-marker-line" />}
           <circle cx={x} cy={y} r={active ? 8 : 6} fill={marker.color} className="interactive-trend-marker-dot" />
           {marker.label && <g className="interactive-trend-marker-label"><rect x={labelX} y={labelY} width={labelWidth} height="24" rx="12" /><circle cx={labelX + 12} cy={labelY + 12} r="3" fill={marker.color} /><text x={labelX + 21} y={labelY + 15.5}>{marker.label}</text></g>}

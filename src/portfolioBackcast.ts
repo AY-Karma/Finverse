@@ -1,18 +1,17 @@
 import type { HistoryPoint } from './live'
 import type { MarketDataAdapter } from './marketData'
 import type { LiveQuote, Position } from './types'
-import { downsampleSeries } from './timeSeries'
 import { effectivePrice, positionValue } from './valuation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MAX_HOLDINGS = 40
 const HISTORY_CONCURRENCY = 4
-const MAX_POINTS = 780
 
 interface PortfolioBackcastPoint {
   at: number
   value: number
   invested: number
+  isCurrent?: boolean
 }
 
 export interface PortfolioBackcast {
@@ -106,10 +105,10 @@ export async function buildPortfolioBackcast(
   const currentCoveredValue = histories.reduce((sum, item) => sum + positionValue(item.position, quotes), 0)
   const totalCurrentValue = positions.reduce((sum, position) => sum + positionValue(position, quotes), 0)
   const latestValue = histories.every((item) => effectivePrice(item.position, quotes) != null) ? currentCoveredValue : null
-  if (latestValue != null && latestValue > 0) rows.push({ at: Date.now(), value: latestValue, invested })
+  if (latestValue != null && latestValue > 0) rows.push({ at: Date.now(), value: latestValue, invested, isCurrent: true })
 
   return {
-    points: downsampleSeries(rows, MAX_POINTS),
+    points: rows,
     coveragePct: totalCurrentValue > 0 ? Math.min(100, currentCoveredValue / totalCurrentValue * 100) : 0,
     holdingsIncluded: histories.length,
     holdingsTotal: positions.length,

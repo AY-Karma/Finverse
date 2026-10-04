@@ -45,7 +45,7 @@ export function marketStatusText(
   const marketLabel = open ? 'Market Open' : 'Market Closed'
   if (isRefreshing) return `${marketLabel} - fetching latest available data`
   if (!fxReady) return 'Waiting for USD/INR rate…'
-  return `${marketLabel} - ${pricesAsOf ? `showing prices as of ${pricesAsOf}` : 'showing latest available prices'}`
+  return `${marketLabel} - ${pricesAsOf ? `showing prices as of ${pricesAsOf}` : 'no provider prices yet'}`
 }
 
 // ---------------------------------------------------------------------------
