@@ -122,7 +122,7 @@ function MonitorTimeline({ controller, initialQuery }: { controller: MonitorCont
                     </span>}
                   </div>
                   <div className="mp-item-category" data-tone={tone}>
-                    <Icon name={trend === 'down' ? 'down' : trend === 'up' ? 'up' : 'clock'} />
+                    {!controller.hideValues && <Icon name={trend === 'down' ? 'down' : trend === 'up' ? 'up' : 'clock'} />}
                     <strong>{isQuote ? 'Latest price / NAV' : 'Watch rule triggered'}</strong>
                     <time dateTime={new Date(record.at).toISOString()}>{record.time}</time>
                   </div>

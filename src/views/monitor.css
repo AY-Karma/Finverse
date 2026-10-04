@@ -97,11 +97,13 @@
 .mp-item-category time { margin-left: auto; color: var(--ink-muted); font-weight: 400; font-size: 13px; }
 .mp-item-category[data-tone='up'] { color: var(--mp-positive); }
 .mp-item-category[data-tone='down'] { color: var(--mp-negative); }
+.mp-item-category[data-tone='neutral'] { color: var(--ink-muted); }
 .mp-item-category[data-tone='dividend'] { color: var(--mp-positive); }
 .mp-item-category[data-tone='results'] { color: var(--mp-amber); }
 .mp-timeline-item:has(.mp-item-category[data-tone='up']), .mp-timeline-item:has(.mp-item-category[data-tone='dividend']) { --mp-item-tone: var(--mp-positive); }
 .mp-timeline-item:has(.mp-item-category[data-tone='down']) { --mp-item-tone: var(--mp-negative); }
 .mp-timeline-item:has(.mp-item-category[data-tone='results']) { --mp-item-tone: var(--mp-amber); }
+.mp-timeline-item[data-tone='neutral'] { --mp-item-tone: var(--hairline-strong); }
 .mp-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 15px 0 0; }
 .mp-metric { min-width: 0; padding: 10px 11px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); }
 .mp-metric dt { display: block; margin-bottom: 4px; color: var(--ink-muted); font-size: 13px; line-height: 1.5; }

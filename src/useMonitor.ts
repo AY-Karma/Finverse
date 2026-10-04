@@ -144,7 +144,13 @@ export function useMonitor() {
     if (marketDataResult?.failed && !marketDataResult.updated) setStatusMessage('Latest quotes could not be reached. Showing previous provider observations where available.')
   }, [marketDataResult, settings.allowExternalData])
 
-  const redact = <T extends MonitorRecord | MonitorAlert>(item: T): T => !settings.hideValues ? item : ({ ...item, reason: 'Values are hidden.', evidence: 'Provider observation details are hidden while Hide values is enabled.', metrics: item.metrics.map((metric) => ({ ...metric, value: privateValue(metric.value, true) })) })
+  const redact = <T extends MonitorRecord | MonitorAlert>(item: T): T => !settings.hideValues ? item : ({
+    ...item,
+    title: item.kind === 'price' ? 'Watch observation hidden' : item.title,
+    reason: 'Values are hidden.',
+    evidence: 'Provider observation details are hidden while Hide values is enabled.',
+    metrics: item.metrics.map((metric) => ({ ...metric, value: privateValue(metric.value, true), trend: 'neutral' })),
+  })
   const quoteRecords = useMemo(() => latestQuoteRecords(positions, liveQuotes, now, settings.allowExternalData), [positions, liveQuotes, now, settings.allowExternalData])
   const currentDate = today(now)
   return {

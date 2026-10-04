@@ -2,7 +2,7 @@ import { useRef, useState, type FormEvent } from 'react'
 import { freshQuote, hasDuplicateMonitorRule, holdingIdentity, usableQuote, type MonitorRule, type RuleCondition, validReminderDate } from '../monitor'
 import type { MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
-import { privateValue, visibleQuotes } from '../privacy'
+import { visibleQuotes } from '../privacy'
 import { quoteKey } from '../valuation'
 
 type PanelProps = { controller: MonitorController }
@@ -119,11 +119,12 @@ export function RulesPanel({ controller }: PanelProps) {
   }
 
   function conditionLabel(rule: MonitorRule) {
+    if (controller.hideValues) return 'Watch level hidden'
     const position = controller.positions.find((item) => item.id === rule.holdingId)
     const amount = rule.condition === 'daily_move'
       ? `${rule.threshold}%`
       : new Intl.NumberFormat('en-IN', { style: 'currency', currency: position?.currency || 'INR', maximumFractionDigits: 2 }).format(rule.threshold)
-    return `${conditions[rule.condition]} ${privateValue(amount, controller.hideValues)}`
+    return `${conditions[rule.condition]} ${amount}`
   }
 
   function open(rule: MonitorRule | null = null) {
@@ -176,20 +177,20 @@ export function RulesPanel({ controller }: PanelProps) {
             <span className={`mp-kind mp-rule-state mp-rule-state--${rule.active ? 'active' : 'paused'}`}>{rule.active ? 'Active' : 'Paused'}</span>
           </div>
           <div className="mp-rule-controls">
-            <p className="mp-rule-condition" aria-label={`${rule.holding}: ${controller.hideValues ? `${conditions[rule.condition]}, value hidden` : conditionLabel(rule)}`}>
-              <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <p className="mp-rule-condition" aria-label={`${rule.holding}: ${conditionLabel(rule)}`}>
+              {!controller.hideValues && <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d={rule.condition === 'price_above' ? 'M4 17l6-6 4 4 6-10M14 5h6v6' : rule.condition === 'price_below' ? 'M4 7l6 6 4-4 6 10M14 19h6v-6' : 'M3 12h4l3-7 4 14 3-7h4'} />
-              </svg>
+              </svg>}
               {conditionLabel(rule)}
             </p>
             <details className="mp-rule-menu" onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute('open')
+              if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute('open')
             }} onKeyDown={(event) => {
               if (event.key !== 'Escape') return
               event.currentTarget.removeAttribute('open')
               event.currentTarget.querySelector('summary')?.focus()
             }}>
-              <summary aria-label={`Manage ${rule.holding} ${controller.hideValues ? `${conditions[rule.condition]} rule` : `${conditionLabel(rule)} rule`}`} title="Manage rule">
+              <summary aria-label={`Manage ${rule.holding} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} title="Manage rule">
                 <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
               </summary>
               <div className="mp-rule-menu-actions">
@@ -201,7 +202,7 @@ export function RulesPanel({ controller }: PanelProps) {
                   event.currentTarget.closest('details')?.removeAttribute('open')
                   controller.toggleRule(rule.id)
                 }}>{rule.active ? 'Pause' : 'Resume'}</button>
-                <button type="button" aria-label={`Delete ${rule.holding} ${controller.hideValues ? `${conditions[rule.condition]} rule` : `${conditionLabel(rule)} rule`}`} onClick={() => controller.deleteRule(rule.id)}>Delete</button>
+                <button type="button" aria-label={`Delete ${rule.holding} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} onClick={() => controller.deleteRule(rule.id)}>Delete</button>
               </div>
             </details>
           </div>
