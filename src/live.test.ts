@@ -16,15 +16,24 @@ afterEach(() => {
 
 describe('market status text', () => {
   it('describes the initial fetch while the market is open', () => {
-    expect(marketStatusText(true, true, true, true)).toBe('Market open - fetching latest available data')
+    expect(marketStatusText(true, true, true, true)).toBe('Market Open - fetching latest available data')
   })
 
   it('describes the initial fetch outside market hours', () => {
-    expect(marketStatusText(false, true, true, true)).toBe('Market closed - fetching latest available data')
+    expect(marketStatusText(false, true, true, true)).toBe('Market Closed - fetching latest available data')
   })
 
   it('keeps the fetch message visible while USD conversion is still loading', () => {
-    expect(marketStatusText(true, true, false, true)).toBe('Market open - fetching latest available data')
+    expect(marketStatusText(true, true, false, true)).toBe('Market Open - fetching latest available data')
+  })
+
+  it('combines the market state and quote timestamp while preserving loading and disabled states', () => {
+    const timestamp = '01 Oct, 15:15:00 IST'
+    expect(marketStatusText(false, true, true, false, timestamp)).toBe(`Market Closed - showing prices as of ${timestamp}`)
+    expect(marketStatusText(true, true, true, false, timestamp)).toBe(`Market Open - showing prices as of ${timestamp}`)
+    expect(marketStatusText(false, true, true, true, timestamp)).toBe('Market Closed - fetching latest available data')
+    expect(marketStatusText(false, false, true, false, timestamp)).toBe('External market data off · showing imported prices')
+    expect(marketStatusText(false, true, false, false, timestamp)).toBe('Waiting for USD/INR rate…')
   })
 
   it('continues polling on weekdays when a future holiday calendar is unavailable', () => {

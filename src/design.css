@@ -626,7 +626,7 @@ body {
   display: grid;
   justify-items: end;
   gap: 12px;
-  width: min(560px, 100%);
+  width: min(440px, 100%);
 }
 .overview-actions {
   display: flex;
@@ -636,9 +636,9 @@ body {
 }
 .overview-meta {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 10px 12px;
   text-align: left;
   background: var(--surface-1);
   border: 1px solid var(--hairline);
@@ -653,7 +653,7 @@ body {
   font-size: 12.5px;
 }
 .market-status .live-dot { margin-top: 7px; }
-.market-status-copy { display: grid; gap: 2px; min-width: 0; }
+.market-status-copy { min-width: 0; overflow-wrap: anywhere; }
 .market-status.market-open .live-dot::before {
   background: var(--pct-up);
 }
@@ -664,15 +664,57 @@ body {
   width: 7px;
   height: 7px;
 }
-.market-status-time {
-  color: var(--ink-subtle);
+.market-calendar {
+  display: grid;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hairline);
   font-size: 11.5px;
+  line-height: 1.45;
+}
+.market-sessions {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+}
+.market-session { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+.market-calendar-label { color: var(--ink-subtle); }
+.market-session dt { color: var(--ink-muted); flex-shrink: 0; }
+.market-session dd { margin: 0; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.market-session-time { display: inline-block; }
+.market-session-time::before { content: '· '; }
+.market-calendar-toggle-hint { color: var(--ink-subtle); font-size: 10.5px; text-align: right; }
+.market-calendar-toggle-hint--holiday, .market-calendar-holiday { color: var(--market-closed); }
+.market-calendar-holiday { margin: 0; }
+.market-holiday {
+  margin: 0;
+  color: var(--ink-muted);
   overflow-wrap: anywhere;
 }
-.overview-net-position {
-  padding-top: 9px;
-  border-top: 1px solid var(--hairline);
-  color: var(--ink-muted);
+.market-holiday time { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.market-holiday-name { color: var(--ink); }
+.market-holiday-countdown { white-space: nowrap; }
+.market-holiday--today { color: var(--market-closed); }
+.market-calendar-details summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 10px;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ink-subtle);
+  cursor: pointer;
+  list-style: none;
+}
+.market-calendar-details summary::-webkit-details-marker { display: none; }
+.market-calendar-details summary::after { content: '+'; text-align: right; }
+.market-calendar-details[open] summary::after { content: '−'; }
+.market-calendar-details summary:hover { color: var(--ink); }
+.market-calendar-expanded { display: grid; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hairline); }
+.market-calendar-note { margin: 0; color: var(--ink-subtle); font-size: 10.5px; }
+.market-calendar summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 2px;
 }
 @keyframes pulse {
   0% { opacity: 1; }
