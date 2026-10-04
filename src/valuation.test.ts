@@ -17,6 +17,14 @@ function position(overrides: Partial<Position>): Position {
 }
 
 describe('valuation coverage and merge identity', () => {
+  it('preserves imported fund XIRR on one row and leaves merged XIRR unavailable', () => {
+    const first = position({ type: 'mutual-fund', ticker: 'Fund', xirr: 12 })
+    const second = { ...first, id: 'second', invested: 900, xirr: 24 }
+    expect(combinePositions([first])[0].xirr).toBe(12)
+    expect(combinePositions([first, second])[0].xirr).toBeNull()
+    expect(combinedPositionMembers([first, second]).values().next().value?.map((row) => row.xirr)).toEqual([12, 24])
+  })
+
   it('calculates P&L only for priced holdings and reports missing coverage', () => {
     const stats = computePortfolioStats([
       position({ ticker: 'PRICED', lastPrice: 120 }),

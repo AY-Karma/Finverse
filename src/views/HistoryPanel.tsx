@@ -6,6 +6,7 @@ import { marketData } from '../marketData'
 import type { Position } from '../types'
 import { useStore } from '../useStore'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
+import { HiddenValuesState } from './HiddenValuesState'
 
 type ScopeFilter = 'all' | 'equity' | 'mutual'
 
@@ -18,16 +19,12 @@ const RANGES: { label: string; days: number }[] = [
 ]
 
 const LINE_COLOR = '#5e6ad2'
-const PURCHASE_DOT = '#f2b53c'
+const COST_MARKER_COLOR = '#f2b53c'
 
 function fmtY(v: number): string {
   return Math.abs(v) >= 1000
     ? v.toLocaleString('en-IN', { maximumFractionDigits: 0 })
     : v.toFixed(2)
-}
-
-function fmtDay(ts: number): string {
-  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(ts))
 }
 
 function norm(s: string): string {
@@ -168,32 +165,18 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     return { last, change: last - first, pct: ((last - first) / first) * 100 }
   }, [points])
 
-  /** Purchase marker + "since you bought" stat, inferred from the cost basis
-   *  (the closest daily close to buyPrice pins the date; growth is always
-   *  computed from buyPrice against the latest close). */
-  const purchase = useMemo(() => {
+  const costComparison = useMemo(() => {
     if (!holding || points.length === 0) return null
     const buy = holding.buyPrice
     if (!Number.isFinite(buy) || buy <= 0) return null
-    let best = -1
-    let bestDiff = Infinity
-    for (let i = 0; i < points.length; i++) {
-      const d = Math.abs(points[i].close - buy) / buy
-      if (d < bestDiff) {
-        bestDiff = d
-        best = i
-      }
-    }
-    const pinned = best >= 0 ? points[best] : points[0]
     const last = points[points.length - 1].close
     const pct = ((last - buy) / buy) * 100
+    const closest = points.reduce((nearest, point) => Math.abs(point.close - buy) < Math.abs(nearest.close - buy) ? point : nearest, points[0])
     return {
       buy,
       last,
       pct,
-      close: pinned.close,
-      date: pinned.date,
-      pinned: bestDiff <= 0.25,
+      markerAt: +new Date(`${closest.date}T00:00:00`),
     }
   }, [holding, points])
 
@@ -219,7 +202,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
           <span className="panel-title">Holding Price History</span>
           <span className="section-index">03 · Trends</span>
         </div>
-        <div className="history-tools">
+        {!settings.hideValues && <div className="history-tools">
           <div className="history-picker">
             <input
               ref={inputRef}
@@ -255,11 +238,13 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
       </div>
 
       <div className="history-body">
-        {!settings.allowExternalData ? (
+        {settings.hideValues ? (
+          <HiddenValuesState />
+        ) : !settings.allowExternalData ? (
           <p className="hint muted">Enable external market data in Settings to fetch price history.</p>
         ) : !query ? (
           <p className="hint muted">Select a holding from your portfolio to plot its history.</p>
@@ -292,12 +277,12 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                         valueFormatter={fmtY}
                         yAxisLabel={isMf ? 'NAV' : 'Price'}
                         appearance="price"
-                        markers={purchase && purchase.pinned ? [{
-                          at: +new Date(`${purchase.date}T00:00:00`),
-                          value: purchase.close,
-                          color: PURCHASE_DOT,
-                          label: `Bought ${new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short' }).format(new Date(`${purchase.date}T00:00:00`))}`,
-                          comparable: true,
+                        markers={costComparison ? [{
+                          at: costComparison.markerAt,
+                          value: costComparison.buy,
+                          color: COST_MARKER_COLOR,
+                          label: 'Avg cost',
+                          description: `Average cost: ${fmtY(costComparison.buy)}. Positioned by the closest historical close for reference, not a purchase date.`,
                         }] : undefined}
                       />
                     ) : (
@@ -311,17 +296,17 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                   )}
                 </div>
 
-                {purchase && !loading && (
-                  <div className={`history-purchase history-purchase--${purchase.pct >= 0 ? 'up' : 'down'}`}>
+                {costComparison && !loading && (
+                  <div className={`history-purchase history-purchase--${costComparison.pct >= 0 ? 'up' : 'down'}`}>
                     <span className="history-purchase-badge" aria-hidden="true">
-                      {purchase.pct >= 0 ? '▲' : '▼'}
+                      {costComparison.pct >= 0 ? '▲' : '▼'}
                     </span>
                     <span>
-                      Your <strong>{query.label}</strong> is {purchase.pct >= 0 ? 'up' : 'down'}{' '}
-                      <span className="history-purchase-change">{Math.abs(purchase.pct).toFixed(1)}%</span> since you{' '}
-                      {isMf ? 'started this investment' : 'bought'}
-                      {purchase.pinned ? <> (≈ {fmtDay(+new Date(`${purchase.date}T00:00:00`))})</> : null} —{' '}
-                      {fmtY(purchase.buy)} → <span className="history-current-price">{fmtY(purchase.last)}</span>.
+                      The latest {isMf ? 'NAV' : 'close'} for <strong>{query.label}</strong> is{' '}
+                      <span className="history-purchase-change">{Math.abs(costComparison.pct).toFixed(1)}%</span>{' '}
+                      {costComparison.pct >= 0 ? 'above' : 'below'} your average cost.{' '}
+                      {fmtY(costComparison.buy)} → <span className="history-current-price">{fmtY(costComparison.last)}</span>.{' '}
+                      The Avg cost marker uses the closest historical close for placement, not a purchase date.
                     </span>
                   </div>
                 )}

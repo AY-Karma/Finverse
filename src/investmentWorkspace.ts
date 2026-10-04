@@ -40,10 +40,14 @@ export interface InvestmentSnapshot {
   pnlPct: number
   dailyChange: number | null
   dailyChangePct: number | null
+  /** Provider date in IST. Aggregate movement requires every holding on this date. */
+  dailyChangeDate: string | null
+  dailyChangeCount: number
   contributions: Contribution[]
   sectors: SectorAllocation[]
   topFiveWeight: number
   staleQuotes: number
+  quotedCount: number
   lastUpdatedAt: number | null
   history: PortfolioSnapshot[]
 }
@@ -78,20 +82,35 @@ function sectorOf(position: Position): string {
 
 function quoteChange(position: Position, quotes: Record<string, LiveQuote>): number | null {
   const quote = quotes[quoteKey(position)]
-  if (quote?.change != null && Number.isFinite(quote.change)) return quote.change * position.quantity
+  if (quote?.change != null && Number.isFinite(quote.change)) {
+    const change = quote.change * position.quantity
+    return Number.isFinite(change) ? change : null
+  }
   return null
+}
+
+const IST_OFFSET_MS = 330 * 60_000
+
+function quoteDate(at: number): string {
+  return new Date(at + IST_OFFSET_MS).toISOString().slice(0, 10)
+}
+
+function validQuote(quote: LiveQuote | undefined): quote is LiveQuote {
+  return !!quote && Number.isFinite(quote.price) && quote.price >= 0 && Number.isFinite(quote.at) && quote.at > 0
+    && Number.isFinite(new Date(quote.at + IST_OFFSET_MS).getTime())
 }
 
 function quoteIsStale(quote: LiveQuote): boolean {
   return Date.now() - quote.at > 24 * 60 * 60 * 1000
 }
 
-function buildContributions(positions: Position[], quotes: Record<string, LiveQuote>, currentValue: number): Contribution[] {
+function buildContributions(positions: Position[], quotes: Record<string, LiveQuote>, currentValue: number, sessionDate: string | null): Contribution[] {
   return positions
     .map((position) => {
       const value = positionValue(position, quotes)
-      const dailyChange = quoteChange(position, quotes)
       const quote = quotes[quoteKey(position)]
+      const inSession = quote != null && quoteDate(quote.at) === sessionDate
+      const dailyChange = inSession ? quoteChange(position, quotes) : null
       return {
         symbol: instrumentLabel(position),
         type: position.type,
@@ -101,8 +120,8 @@ function buildContributions(positions: Position[], quotes: Record<string, LiveQu
         pnl: positionPnl(position, quotes),
         dailyChange,
         dailyContribution: dailyChange,
-        dailyPriceChange: quote?.change ?? null,
-        dailyPriceChangePct: quote?.changePct ?? null,
+        dailyPriceChange: inSession && Number.isFinite(quote.change) ? quote.change! : null,
+        dailyPriceChangePct: inSession && Number.isFinite(quote.changePct) ? quote.changePct! : null,
         sector: sectorOf(position),
       }
     })
@@ -143,16 +162,26 @@ export const investmentWorkspace: InvestmentWorkspace = {
     // reuse the same position objects without rebuilding their identity.
     const rawPositions = input.folios.flatMap((folio) => folio.positions)
     const positions = combinePositions(rawPositions)
-    const stats = computePortfolioStats(positions, input.quotes)
-    const contributions = buildContributions(positions, input.quotes, stats.currentValue)
+    const quotes = Object.fromEntries(positions.flatMap((position) => {
+      const key = quoteKey(position)
+      const quote = input.quotes[key]
+      return validQuote(quote) ? [[key, quote]] : []
+    }))
+    const quoteValues = positions.flatMap((position) => quotes[quoteKey(position)] ?? [])
+    const changeTimes = quoteValues.filter((quote) => Number.isFinite(quote.change) || Number.isFinite(quote.changePct)).map((quote) => quote.at)
+    const dailyChangeDate = changeTimes.length ? quoteDate(Math.max(...changeTimes)) : null
+    const stats = computePortfolioStats(positions, quotes)
+    const contributions = buildContributions(positions, quotes, stats.currentValue, dailyChangeDate)
     const dailyChangeValues = contributions.map((item) => item.dailyChange).filter((value): value is number => value != null)
-    const dailyChange = dailyChangeValues.length ? dailyChangeValues.reduce((sum, value) => sum + value, 0) : null
-    const quoteValues = Object.values(input.quotes)
+    const dailyChangeCount = dailyChangeValues.length
+    const dailyChange = positions.length > 0 && dailyChangeCount === positions.length
+      ? dailyChangeValues.reduce((sum, value) => sum + value, 0) : null
+    const previousValue = dailyChange == null ? null : stats.currentValue - dailyChange
     return {
       folios: input.folios,
       rawPositions,
       positions,
-      quotes: input.quotes,
+      quotes,
       fxRate: input.fxRate,
       invested: stats.invested,
       pricedInvested: stats.pricedInvested,
@@ -163,12 +192,15 @@ export const investmentWorkspace: InvestmentWorkspace = {
       pnl: stats.pnl,
       pnlPct: stats.pnlPct,
       dailyChange,
-      dailyChangePct: dailyChange != null && stats.currentValue > 0 ? (dailyChange / (stats.currentValue - dailyChange)) * 100 : null,
+      dailyChangePct: dailyChange != null && previousValue != null && previousValue > 0 ? (dailyChange / previousValue) * 100 : null,
+      dailyChangeDate,
+      dailyChangeCount,
       contributions,
       sectors: buildSectors(contributions, stats.currentValue),
       topFiveWeight: [...contributions].sort((a, b) => b.value - a.value).slice(0, 5).reduce((sum, item) => sum + item.weight, 0),
       staleQuotes: quoteValues.filter(quoteIsStale).length,
-      lastUpdatedAt: lastUpdated(input.quotes),
+      quotedCount: quoteValues.length,
+      lastUpdatedAt: lastUpdated(quotes),
       history: input.history ?? [],
     }
   },

@@ -3,6 +3,24 @@ import { describe, expect, it } from 'vitest'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 
 describe('interactive trend chart', () => {
+  it('keeps an average-cost pointer within the chart even when it is outside the historical price range', () => {
+    const at = +new Date('2026-09-21T00:00:00')
+    const markup = renderToStaticMarkup(<InteractiveTrendChart
+      rows={[{ at, close: 150 }, { at: at + 86_400_000, close: 160 }]}
+      lines={[{ key: 'close', label: 'Close', color: '#5e6ad2' }]}
+      valueFormatter={(value) => value.toFixed(2)}
+      yAxisLabel="Price"
+      appearance="price"
+      markers={[{ at, value: 100, color: '#f2b53c', label: 'Avg cost', description: 'Average cost reference, not a purchase date.' }]}
+    />)
+    const markerY = Number(markup.match(/<circle[^>]*cy="([^"]+)"[^>]*class="interactive-trend-marker-dot"/)?.[1])
+    expect(markerY).toBeGreaterThanOrEqual(28)
+    expect(markerY).toBeLessThanOrEqual(292)
+    expect(markup).toContain('<title>Average cost reference, not a purchase date.</title>')
+    expect(markup).toContain('Avg cost')
+    expect(markup).not.toContain('Select buy point')
+  })
+
   it('shows the full selected range and keeps an early purchase marker visible', () => {
     const start = new Date('2025-01-01T00:00:00').getTime()
     const rows = Array.from({ length: 250 }, (_, index) => ({

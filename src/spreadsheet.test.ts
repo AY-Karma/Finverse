@@ -15,6 +15,23 @@ function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx', sh
 }
 
 describe('holdings spreadsheet import', () => {
+  it.each(['xlsx', 'biff8'] as const)('preserves native Excel percentage XIRRs in %s without guessing from magnitude', (bookType) => {
+    const book = XLSX.utils.book_new()
+    const sheet = XLSX.utils.aoa_to_sheet([])
+    XLSX.utils.sheet_add_aoa(sheet, [
+      ['Scheme Name', 'Units', 'Invested Value', 'XIRR'],
+      ['Native percent', 1, 100, { t: 'n', v: 0.123456, z: '0.00%' }],
+      ['Negative percent', 1, 100, { t: 'n', v: -0.08, z: '0%' }],
+      ['Plain points', 1, 100, 12],
+      ['Small points', 1, 100, 0.12],
+      ['Text percent', 1, 100, '12%'],
+      ['Literal percent', 1, 100, { t: 'n', v: 0.12, z: '0.00"%"' }],
+    ], { origin: 'C5' })
+    XLSX.utils.book_append_sheet(book, sheet, 'Funds')
+    const positions = parsePositions(XLSX.write(book, { type: 'array', bookType }))
+    expect(positions.map((position) => position.xirr)).toEqual([12.3456, -8, 12, 0.12, 12, 0.12])
+  })
+
   it('reads Kite quantities without using discrepant, long-term or pledged quantity columns', () => {
     const result = parseSpreadsheetWithDiagnostics(workbook([[
       ['Symbol', 'ISIN', 'Sector', 'Quantity Available', 'Quantity Discrepant', 'Quantity Long Term', 'Quantity Pledged (Margin)', 'Quantity Pledged (Loan)', 'Average Price', 'Previous Closing Price', 'Unrealized P&L', 'Unrealized P&L Pct.'],

@@ -4,11 +4,14 @@ import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
 import { buildPortfolioBackcast, type PortfolioBackcast } from '../portfolioBackcast'
 import { downsampleSeries } from '../timeSeries'
+import { calculatePortfolioRisk } from '../portfolioRisk'
 import { useStore } from '../useStore'
+import { portfolioDataLabels } from '../portfolioDataLabels'
 import { assetTypeLabel } from '../instruments'
 import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
+import { HiddenValuesState } from './HiddenValuesState'
 
 // Same muted family as the overview allocation card so charts read as one system.
 const EXPO_PALETTE = ['#7c89e8', '#5fae9b', '#d0a35c', '#c97b84', '#6aa9c9', '#a685c9', '#96b862', '#8a93a6']
@@ -83,10 +86,11 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
   const chartHistory = useMemo(() => downsampleSeries(snapshot.history, MAX_CHART_POINTS), [snapshot.history])
   const backcastHistory = backcast?.points ?? []
-  const analyticsHistory = backcastHistory.length >= 2 ? backcastHistory : chartHistory
+  const analyticsHistory = backcastHistory
+  const backcastChartHistory = useMemo(() => downsampleSeries(backcast?.points ?? [], MAX_CHART_POINTS), [backcast])
   const analyticsStartAt = analyticsHistory[0]?.at ?? null
   const trackedAvailable = chartHistory.length >= 2
-  const performanceHistory = performanceMode === 'tracked' && trackedAvailable ? chartHistory : backcastHistory
+  const performanceHistory = performanceMode === 'tracked' ? chartHistory : backcastChartHistory
 
   useEffect(() => {
     const symbol = selectedBenchmark.symbol
@@ -140,7 +144,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     let benchmarkIndex = 0
     while (benchmarkIndex + 1 < benchmarkTimes.length && benchmarkTimes[benchmarkIndex + 1] <= history[0].at) benchmarkIndex += 1
     const firstBenchmark = benchmarkPoints[benchmarkIndex]?.close
-    return history.map((point) => {
+    return downsampleSeries(history, MAX_CHART_POINTS).map((point) => {
       while (benchmarkIndex + 1 < benchmarkTimes.length && benchmarkTimes[benchmarkIndex + 1] <= point.at) benchmarkIndex += 1
       const matching = benchmarkPoints[benchmarkIndex]
       return {
@@ -158,33 +162,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     ? performanceGap / performanceLatest.invested * 100
     : null
 
-  const risk = useMemo(() => {
-    let peak = 0
-    let peakAt: number | null = null
-    let worst = 0
-    let worstAt: number | null = null
-    let worstPeakAt: number | null = null
-    const returns: number[] = []
-    for (let index = 0; index < analyticsHistory.length; index += 1) {
-      const point = analyticsHistory[index]
-      const previous = analyticsHistory[index - 1]
-      if (previous?.value > 0) returns.push((point.value - previous.value) / previous.value)
-      if (point.value >= peak) {
-        peak = point.value
-        peakAt = point.at
-      }
-      const drawdown = peak > 0 ? ((point.value - peak) / peak) * 100 : 0
-      if (drawdown < worst) {
-        worst = drawdown
-        worstAt = point.at
-        worstPeakAt = peakAt
-      }
-    }
-    const average = returns.length ? returns.reduce((sum, item) => sum + item, 0) / returns.length : 0
-    const variance = returns.length > 1 ? returns.reduce((sum, item) => sum + (item - average) ** 2, 0) / (returns.length - 1) : 0
-    const currentValue = analyticsHistory[analyticsHistory.length - 1]?.value ?? peak
-    return { worst, current: peak > 0 ? ((currentValue - peak) / peak) * 100 : 0, volatility: Math.sqrt(variance) * Math.sqrt(252) * 100, worstAt, worstPeakAt }
-  }, [analyticsHistory])
+  const risk = useMemo(() => calculatePortfolioRisk(analyticsHistory), [analyticsHistory])
 
   if (snapshot.positions.length === 0) {
     return (
@@ -207,6 +185,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
   const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
+  const dataLabels = portfolioDataLabels(snapshot)
 
   return (
     <div className="insights-page">
@@ -221,10 +200,10 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       {!snapshot.valuationComplete && <p className="panel hint" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Allocation, concentration, and current P&L cover the {snapshot.pricedCount} priced holdings only. Incomplete portfolio values are not saved to tracked history.</p>}
 
       <div className="insight-kpis enter d1">
-        <div className="insight-kpi"><span className="score-label">Today’s move</span><strong className={snapshot.dailyChange != null && snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? '—' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, snapshot.fxRate?.usdInr)}`)}</strong><span className="hint">{snapshot.dailyChangePct == null ? 'Waiting for quote changes' : mask(formatPercent(snapshot.dailyChangePct))}</span></div>
+        <div className="insight-kpi"><span className="score-label">{dataLabels.sessionLabel}</span><strong className={hide || snapshot.dailyChange == null ? '' : snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? 'Unavailable' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, snapshot.fxRate?.usdInr)}`)}</strong><span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span></div>
         <button type="button" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail"><span className="score-label">Top five weight</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong><span className="hint">See the five-position split</span></button>
         <button type="button" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail"><span className="score-label">Worst drawdown</span><strong className={risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><span className="hint">See date and calculation</span></button>
-        <div className="insight-kpi"><span className="score-label">Data health</span><strong>{snapshot.staleQuotes === 0 ? 'Fresh' : `${snapshot.staleQuotes} stale`}</strong><span className="hint">{snapshot.lastUpdatedAt ? `Last quote ${shortDate(snapshot.lastUpdatedAt)}` : 'Imported prices only'}</span></div>
+        <div className="insight-kpi"><span className="score-label">Data health</span><strong>{dataLabels.healthLabel}</strong><span className="hint">{dataLabels.healthDetail}</span></div>
       </div>
 
       {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail"><div><span className="score-label">Largest five holdings</span><strong>{mask(`${snapshot.topFiveWeight.toFixed(1)}% of portfolio`)}</strong></div><div className="kpi-split-list">{topFive.map((item) => <div key={item.symbol}><span>{item.symbol}</span><span className="kpi-split-bar"><i style={{ width: `${item.weight / Math.max(...topFive.map((holding) => holding.weight), 1) * 100}%` }} /></span><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div></div>}
@@ -270,7 +249,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
             <div className="insight-chart-metric insight-chart-metric--portfolio">
               <span><i aria-hidden="true" />Portfolio</span>
               <strong>{benchmarkLatest ? mask(`${benchmarkLatest.portfolio >= 0 ? '+' : ''}${benchmarkLatest.portfolio.toFixed(1)}%`) : '—'}</strong>
-              <small>Since comparison start</small>
+              <small>Current holdings since comparison start</small>
             </div>
             <div className="insight-chart-metric insight-chart-metric--benchmark">
               <span><i aria-hidden="true" />{selectedBenchmark.label}</span>
@@ -297,14 +276,14 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
                 appearance="insight"
                 onReachStart={backcast ? requestMoreBackcast : undefined}
               />
-            ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (settings.allowExternalData ? 'Building your comparison' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
+            ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (backcastLoading ? 'Building your comparison' : settings.allowExternalData ? 'Historical comparison unavailable' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
           </div>
-          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : trackedAvailable ? 'Tracked portfolio history' : 'Historical market data is unavailable')}</span>
+          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : 'Historical market data is unavailable')}</span>
         </section>
 
         <section className="panel insight-panel">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">02 · Exposure</span></div></div>
-          <AllocationMap items={exposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} hideValues={hide} formatValue={value} />
+          {hide ? <HiddenValuesState /> : <AllocationMap items={exposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} formatValue={value} />}
         </section>
 
         <section className="panel insight-panel insight-panel--exposure">
@@ -313,18 +292,19 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">What moved today?</span><span className="section-index">04 · Contribution waterfall</span></div><div className="segmented-control" aria-label="Mover display"><button type="button" className={contributionDisplay === 'price' ? 'is-active' : ''} onClick={() => setContributionDisplay('price')} aria-pressed={contributionDisplay === 'price'}>Price Δ</button><button type="button" className={contributionDisplay === 'percent' ? 'is-active' : ''} onClick={() => setContributionDisplay('percent')} aria-pressed={contributionDisplay === 'percent'}>% Δ</button></div></div>
-          {hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty">The next market refresh will show which holdings moved your portfolio.</div>}
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Latest price movers</span><span className="section-index">04 · Holding price changes</span></div><div className="segmented-control" aria-label="Mover display"><button type="button" className={contributionDisplay === 'price' ? 'is-active' : ''} onClick={() => setContributionDisplay('price')} aria-pressed={contributionDisplay === 'price'}>Price Δ</button><button type="button" className={contributionDisplay === 'percent' ? 'is-active' : ''} onClick={() => setContributionDisplay('percent')} aria-pressed={contributionDisplay === 'percent'}>% Δ</button></div></div>
+          {!hide && <p className="hint">{dataLabels.sessionLabel} · {dataLabels.coverageLabel}. Bars show each holding's price change.</p>}
+          {hide ? <HiddenValuesState /> : hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty">{settings.allowExternalData ? 'No price changes reported for this measure. Refresh quotes to try again.' : 'Enable external market data in Settings to see holding-level price changes.'}</div>}
         </section>
 
         <section className="panel insight-panel insight-panel--wide insight-panel--risk">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · At a glance</span></div></div>
-          {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} usesBackcast={backcastHistory.length >= 2} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : 'Historical prices are loading to build your risk profile.'}</div>}
+          {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : backcastLoading ? 'Historical prices are loading to build your risk profile.' : 'Historical risk is unavailable. Tracked balance changes include account changes and cash flows.'}</div>}
         </section>
 
         <section className="panel insight-panel insight-panel--wide insight-panel--performance">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Performance story</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio values' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
-          <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Saved daily portfolio values on this device.'}</p>
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">{performanceMode === 'tracked' ? 'Tracked balances' : 'Performance story'}</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio balances' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
+          <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Balance history, not investment returns. Account additions, removals and cash flows can change these values.'}</p>
           {performanceHistory.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--value">
               <span><i aria-hidden="true" />Portfolio value</span>
@@ -334,7 +314,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
             <div className="insight-chart-metric insight-chart-metric--invested">
               <span><i aria-hidden="true" />Invested capital</span>
               <strong>{performanceLatest ? value(performanceLatest.invested) : '—'}</strong>
-              <small>Cost of today's holdings</small>
+              <small>{performanceMode === 'tracked' ? 'Cost recorded at each snapshot' : "Cost of today's holdings"}</small>
             </div>
             <div className="insight-chart-metric insight-chart-metric--gap">
               <span>Value − invested</span>
@@ -423,13 +403,11 @@ function AllocationMap({
   items,
   selected,
   onSelect,
-  hideValues,
   formatValue,
 }: {
   items: { symbol: string; value: number; weight: number; pnl: number | null }[]
   selected: string | null
   onSelect: (symbol: string) => void
-  hideValues: boolean
   formatValue: (amount: number) => string
 }) {
   const active = items.find((item) => item.symbol === selected) ?? items[0]
@@ -438,12 +416,12 @@ function AllocationMap({
       {items.map((item) => {
         const span = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12)))
         const isActive = item.symbol === active?.symbol
-        return <button key={item.symbol} type="button" className={`allocation-tile allocation-tile--${item.pnl != null && item.pnl < 0 ? 'down' : 'up'}${isActive ? ' allocation-tile--active' : ''}`} style={{ gridColumn: `span ${span}` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${hideValues ? 'allocation hidden' : `${item.weight.toFixed(1)}% of portfolio`}`}>
-          <strong>{item.symbol}</strong><span>{hideValues ? '••••' : `${item.weight.toFixed(1)}%`}</span>
+        return <button key={item.symbol} type="button" className={`allocation-tile allocation-tile--${item.pnl != null && item.pnl < 0 ? 'down' : 'up'}${isActive ? ' allocation-tile--active' : ''}`} style={{ gridColumn: `span ${span}` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio`}>
+          <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
         </button>
       })}
     </div>
-    {active && <div className="allocation-detail" aria-live="polite"><div><span className="score-label">Selected holding</span><strong>{active.symbol}</strong></div><div><span className="score-label">Portfolio weight</span><strong>{hideValues ? '••••' : `${active.weight.toFixed(1)}%`}</strong></div><div><span className="score-label">Current value</span><strong>{formatValue(active.value)}</strong></div><div><span className="score-label">P&L</span><strong className={active.pnl != null && active.pnl < 0 ? 'down' : 'up'}>{active.pnl == null ? '—' : formatValue(active.pnl)}</strong></div></div>}
+    {active && <div className="allocation-detail" aria-live="polite"><div><span className="score-label">Selected holding</span><strong>{active.symbol}</strong></div><div><span className="score-label">Portfolio weight</span><strong>{active.weight.toFixed(1)}%</strong></div><div><span className="score-label">Current value</span><strong>{formatValue(active.value)}</strong></div><div><span className="score-label">P&L</span><strong className={active.pnl != null && active.pnl < 0 ? 'down' : 'up'}>{active.pnl == null ? '—' : formatValue(active.pnl)}</strong></div></div>}
   </div>
 }
 
@@ -462,8 +440,7 @@ function ContributionBars({
   formatValue: (amount: number) => string
   formatPercent: (amount: number) => string
 }) {
-  const values = data.length ? data : [{ label: 'No movement', metric: 0, width: 4 }]
-  return <div className="contribution-chart"><div className="contribution-title">{title}</div><div className="contribution-bars">{values.map((item) => {
+  return <div className="contribution-chart"><div className="contribution-title">{title}</div><div className="contribution-bars">{data.length === 0 && <span className="hint">No reported {positive ? 'gains' : 'declines'}.</span>}{data.map((item) => {
     const displayValue = display === 'percent' ? formatPercent(item.metric) : formatValue(item.metric)
     return <div className="contribution-row" key={item.label}><div><span title={item.label}>{item.label}</span><strong className={positive ? 'up' : 'down'}>{displayValue}</strong></div><div className="contribution-track" aria-label={`${item.label}: ${displayValue}`}><span className={positive ? 'contribution-fill contribution-fill--up' : 'contribution-fill contribution-fill--down'} style={{ width: `${item.width}%` }} /></div></div>
   })}</div></div>
@@ -477,10 +454,10 @@ function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus 
   return 'lower'
 }
 
-function RiskProfile({ current, worst, volatility, concentration, hideValues, usesBackcast }: { current: number; worst: number; volatility: number; concentration: number; hideValues: boolean; usesBackcast: boolean }) {
+function RiskProfile({ current, worst, volatility, concentration, hideValues }: { current: number; worst: number; volatility: number | null; concentration: number; hideValues: boolean }) {
   const [openDefinition, setOpenDefinition] = useState<string | null>(null)
   const mask = (text: string) => hideValues ? '••••' : text
-  const historyBasis = usesBackcast ? "Today's holdings at past prices." : 'Saved daily portfolio values.'
+  const historyBasis = "Today's holdings at past prices. Uses every historical observation."
   const riskRows = [
     {
       id: 'below-high',
@@ -510,13 +487,13 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues, us
       id: 'yearly-movement',
       label: 'Yearly swings',
       value: volatility,
-      summary: 'How much daily percentage returns varied, shown as a yearly estimate.',
+      summary: volatility == null ? 'Daily closes are required for a yearly estimate.' : 'How much daily percentage returns varied, shown as a yearly estimate.',
       scaleMax: 40,
       watchAt: 15,
       highAt: 25,
       formula: 'Value = daily return standard deviation × √252 × 100.',
       definition: 'Estimates the size of return swings. Gains and losses both count; this is not a loss probability.',
-      basis: historyBasis,
+      basis: "Today's holdings at past prices. Longer gaps and the latest app valuation are excluded.",
     },
     {
       id: 'top-five-share',
@@ -532,8 +509,8 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues, us
     },
   ].map((row) => ({
     ...row,
-    width: Math.min(100, (row.value / row.scaleMax) * 100),
-    status: riskStatus(row.value, row.watchAt, row.highAt),
+    width: row.value == null ? 0 : Math.min(100, (row.value / row.scaleMax) * 100),
+    status: row.value == null ? null : riskStatus(row.value, row.watchAt, row.highAt),
   }))
 
   return (
@@ -542,8 +519,9 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues, us
         {riskRows.map((row) => {
           const tooltipId = `risk-definition-${row.id}`
           const isOpen = openDefinition === row.id
-          const statusLabel = row.status === 'lower' ? 'Lower concern' : row.status === 'watch' ? 'Watch' : 'High concern'
-          const displayedStatus = hideValues ? 'hidden' : row.status
+          const statusLabel = row.status == null ? 'Unavailable' : row.status === 'lower' ? 'Lower concern' : row.status === 'watch' ? 'Watch' : 'High concern'
+          const displayedStatus = hideValues || row.status == null ? 'hidden' : row.status
+          const reading = row.value == null ? 'Unavailable' : `${row.value.toFixed(1)}%`
           return (
             <article className={`risk-bar risk-bar--${displayedStatus}`} key={row.id}>
               <div className="risk-bar-head">
@@ -571,12 +549,12 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues, us
                   <span className="risk-summary">{row.summary}</span>
                 </div>
                 <div className="risk-reading">
-                  <strong>{mask(`${row.value.toFixed(1)}%`)}</strong>
+                  <strong>{mask(row.value == null ? '—' : reading)}</strong>
                   <span className={`risk-status risk-status--${displayedStatus}`}>{hideValues ? 'Hidden' : statusLabel}</span>
                 </div>
               </div>
 
-              <div className="risk-track" role="img" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${row.value.toFixed(1)}%, ${statusLabel}. Bar scale 0 to ${row.scaleMax}%.`}>
+              <div className="risk-track" role="img" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${reading}, ${statusLabel}. Bar scale 0 to ${row.scaleMax}%.`}>
                 <span className="risk-track-zone risk-track-zone--lower" style={{ width: `${row.watchAt / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--watch" style={{ width: `${(row.highAt - row.watchAt) / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--high" style={{ width: `${(row.scaleMax - row.highAt) / row.scaleMax * 100}%` }} />

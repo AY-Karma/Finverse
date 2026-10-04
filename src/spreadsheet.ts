@@ -489,7 +489,7 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
     throw new Error('Portfolio files must be 10 MB or smaller.')
   }
   preflightZip(file)
-  const wb = XLSX.read(file, { type: 'array' })
+  const wb = XLSX.read(file, { type: 'array', cellNF: true })
   if (wb.SheetNames.length > MAX_IMPORT_SHEETS) {
     throw new Error(`Spreadsheets are limited to ${MAX_IMPORT_SHEETS} worksheets.`)
   }
@@ -503,6 +503,16 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
       defval: null,
       raw: true,
     })
+    const sheet = wb.Sheets[sheetName]
+    if (sheet['!ref']) {
+      const range = XLSX.utils.decode_range(sheet['!ref'])
+      for (const [rowIndex, row] of rows.entries()) for (const [columnIndex, value] of row.entries()) {
+        if (typeof value !== 'number') continue
+        const cell = sheet[XLSX.utils.encode_cell({ r: range.s.r + rowIndex, c: range.s.c + columnIndex })]
+        // Excel stores percentage cells as fractions. Ignore quoted or escaped percent signs.
+        if (cell?.z?.replace(/"[^"]*"|\\.|_.|\*./g, '').includes('%')) row[columnIndex] = `${value * 100}%`
+      }
+    }
     if (rows.length > MAX_IMPORT_ROWS) {
       throw new Error(`Each sheet must contain ${MAX_IMPORT_ROWS.toLocaleString()} rows or fewer.`)
     }

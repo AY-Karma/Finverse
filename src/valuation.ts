@@ -33,8 +33,8 @@ export function effectivePrice(position: Position, quotes: Record<string, LiveQu
 
 /** Merge same-instrument rows (same mutual-fund scheme name or equity ticker)
  *  so each holding is shown once. Quantities and invested amounts are summed;
- *  cost basis becomes the weighted average (invested ÷ units); the fund XIRR is
- *  averaged across entries by their invested weight; metadata keeps the first
+ *  cost basis becomes the weighted average (invested ÷ units); merged XIRR is
+ *  unavailable without dated cash flows; metadata keeps the first
  *  non-empty value. Conflicting identity metadata remains separate; descriptive
  *  metadata uses the first non-empty value in import order. */
 const IDENTITY_FIELDS = ['type', 'exchange', 'currency', 'providerSymbol', 'isin'] as const
@@ -81,12 +81,6 @@ export function combinePositions(positions: Position[]): Position[] {
     const quantity = rows.reduce((s, p) => s + (Number.isFinite(p.quantity) ? p.quantity : 0), 0)
     const invested = rows.reduce((s, p) => s + (Number.isFinite(p.invested) ? p.invested : 0), 0)
     const first = rows[0]
-    const xirrRows = rows.filter((p) => Number.isFinite(p.xirr))
-    const xirrWeight = xirrRows.reduce((s, p) => s + Math.max(0, p.invested), 0)
-    const xirr =
-      xirrWeight > 0
-        ? xirrRows.reduce((s, p) => s + p.xirr! * Math.max(0, p.invested), 0) / xirrWeight
-        : null
     out.push({
       ...first,
       id: combinedId(rows, candidates.length),
@@ -103,7 +97,7 @@ export function combinePositions(positions: Position[]): Position[] {
       folio: (rows.find((p) => (p.folio ?? '').trim() !== '') ?? first).folio,
       source: (rows.find((p) => (p.source ?? '').trim() !== '') ?? first).source,
       returns: rows.find((p) => p.returns != null)?.returns ?? first.returns,
-      xirr,
+      xirr: null,
       instrumentKey: rows.find((p) => p.instrumentKey)?.instrumentKey,
       exchange: rows.find((p) => p.exchange)?.exchange,
       currency: rows.find((p) => p.currency)?.currency,

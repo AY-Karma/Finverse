@@ -1,6 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse } from '../valuation'
 import { useStore } from '../useStore'
+import { portfolioDataLabels } from '../portfolioDataLabels'
 import type { Currency, LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
 import {
@@ -31,7 +32,7 @@ interface LedgerRow {
 }
 
 export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => void; onRequestImport: () => void }) {
-  const { positions, rawPositions, settings, setSettings, liveQuotes, fxRate, refreshNow, snapshot, marketDataRefreshing, marketDataResult } = useStore()
+  const { positions, rawPositions, settings, setSettings, fxRate, refreshNow, snapshot, marketDataRefreshing, marketDataResult } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
@@ -83,7 +84,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
     }
   }
 
-  const live = settings.allowExternalData ? liveQuotes : EMPTY_QUOTES
+  const live = settings.allowExternalData ? snapshot.quotes : EMPTY_QUOTES
   const liveCount = Object.keys(live).length
   const fetchingMarketData = refreshing || marketDataRefreshing
   const marketOpen = isMarketOpen(marketNow)
@@ -177,10 +178,8 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
 
   const mfSummary = useMemo(() => {
     if (scope !== 'mutual') return null
-    const xirrs = scopePositions.map((p) => p.xirr).filter((x): x is number => x != null)
-    const xirrAvg = xirrs.length ? xirrs.reduce((s, x) => s + x, 0) / xirrs.length : null
-    return { invested: stats.invested, current: stats.currentValue, pnl: stats.pnl, pnlPct: stats.pnlPct, xirrAvg }
-  }, [scope, scopePositions, stats])
+    return { invested: stats.invested, current: stats.currentValue, pnl: stats.pnl, pnlPct: stats.pnlPct }
+  }, [scope, stats])
 
   if (positions.length === 0) {
     return (
@@ -230,11 +229,17 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
   const best = rankedPerformers[0] ?? null
   const worst = rankedPerformers[rankedPerformers.length - 1] ?? null
   const dailyMove = snapshot.dailyChange
+  const dataLabels = portfolioDataLabels(snapshot)
   const dailyMoveText = dailyMove == null
     ? '—'
     : `${dailyMove >= 0 ? '+' : ''}${formatCurrency(dailyMove, currency, fxRate?.usdInr)}`
   const dailyMoveDirection = dailyMove == null || dailyMove === 0 ? '' : dailyMove > 0 ? 'up' : 'down'
   const dailyMoveArrow = dailyMove == null || hideValues ? '' : dailyMove > 0 ? '↑' : dailyMove < 0 ? '↓' : '→'
+  const sessionSummary = dailyMove == null
+    ? snapshot.dailyChangeCount ? 'Portfolio move unavailable.' : 'Waiting for change amounts.'
+    : currency === 'USD' && !fxRate?.usdInr ? 'Session move unavailable in USD.'
+    : dailyMove === 0 ? 'Your portfolio is unchanged in this session.'
+    : `Your portfolio ${dailyMove > 0 ? 'gained' : 'lost'} ${formatCurrency(Math.abs(dailyMove), currency, fxRate?.usdInr)} in this session.`
 
   const toggleSort = (field: SortField) => {
     setSort((prev) => {
@@ -349,11 +354,11 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           <div className="score-value">{mask(stats.pricedCount ? formatCurrency(stats.currentValue, currency, fxRate?.usdInr) : 'Unpriced')}</div>
           {dailyMove != null && (
             <div className="score-foot score-move">
-              <span>Today</span>
+              <span>{dataLabels.sessionLabel}</span>
               <span
                 className={`current-value-move${hideValues || !dailyMoveDirection ? ' current-value-move--flat' : ` ${dailyMoveDirection}`}`}
-                aria-label={hideValues ? "Today's portfolio move hidden" : `Today's portfolio move: ${dailyMoveText}`}
-                title="Today's portfolio move"
+                aria-label={hideValues ? 'Portfolio session move hidden' : `${dataLabels.sessionLabel} portfolio move: ${dailyMoveText}`}
+                title={dataLabels.coverageLabel}
               >
                 <span className="current-value-move-arrow" aria-hidden="true">{dailyMoveArrow}</span>
                 <span>{mask(dailyMoveText)}</span>
@@ -400,13 +405,13 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
 
       <div className="daily-brief enter d2">
         <div className="daily-brief-copy">
-          <span className="page-eyebrow">Daily read</span>
-          <strong>{snapshot.dailyChange == null ? 'Waiting for the market read.' : snapshot.dailyChange >= 0 ? 'Your portfolio is catching a tailwind.' : 'Your portfolio is facing a headwind.'}</strong>
-          <span className="hint">{snapshot.dailyChange == null ? 'Refresh prices to see what moved your portfolio today.' : `${snapshot.contributions.filter((item) => item.dailyChange != null).length} holdings reported a daily move. Open Insights for the full contribution story.`}</span>
+          <span className="page-eyebrow">Session read</span>
+          <strong>{hideValues ? 'Session movement hidden.' : sessionSummary}</strong>
+          <span className="hint">Open Insights to understand more.</span>
         </div>
         <div className="daily-brief-stat">
-          <span className="score-label">Today</span>
-          <strong className={dailyMoveDirection}>{dailyMove == null ? '—' : mask(dailyMoveText)}</strong>
+          <span className="score-label">{dataLabels.sessionLabel}</span>
+          <strong className={hideValues ? '' : dailyMoveDirection}>{dailyMove == null ? 'Unavailable' : mask(dailyMoveText)}</strong>
         </div>
         <button type="button" className="btn btn--secondary" onClick={() => onGoTo('insights')}>Open Insights →</button>
       </div>
@@ -458,8 +463,9 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
                 </span>
               </div>
               <div className="mf-sum-item">
-                <span className="mf-sum-label">XIRR</span>
-                <span className="mf-sum-value">{mfSummary.xirrAvg != null ? mask(formatPercent(mfSummary.xirrAvg)) : '—'}</span>
+                <span className="mf-sum-label">Portfolio XIRR</span>
+                <span className="mf-sum-value">—</span>
+                <span className="hint">Requires dated cash flows</span>
               </div>
             </div>
           )}
@@ -790,7 +796,7 @@ function MFLedger({
                 <td className={livePriceOf(p, live) == null ? 'muted' : value >= p.invested ? 'up' : 'down'}>
                   {returns == null ? '—' : mask(formatPercent(returns))}
                 </td>
-                <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'}>
+                <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'} title={expandable ? 'Merged XIRR requires dated cash flows. Expand to view imported entry XIRRs.' : undefined}>
                   {p.xirr != null ? mask(formatPercent(p.xirr)) : '—'}
                 </td>
                 <td className="muted">
@@ -872,9 +878,11 @@ function LedgerMembers({
 }) {
   const mask = (s: string) => (hideValues ? '••••••' : s)
   const anyFolio = members.some((m) => (m.folio ?? '').trim() !== '')
+  const hasFundEntries = members.some((m) => m.type === 'mutual-fund')
   return (
     <div className="ledger-members">
       <div className="ledger-members-title">Merged {members.length} entries</div>
+      {hasFundEntries && <p className="hint">Imported XIRRs belong to individual entries. A merged XIRR requires dated cash flows.</p>}
       <table className="table table--nested">
         <thead>
           <tr>
@@ -883,6 +891,7 @@ function LedgerMembers({
             <th>Invested</th>
             <th>Value</th>
             <th>P&L</th>
+            {hasFundEntries && <th>XIRR</th>}
             {anyFolio && <th>Folio</th>}
           </tr>
         </thead>
@@ -900,6 +909,7 @@ function LedgerMembers({
                 <td data-label="P&L" className={pnl != null ? (up ? 'up' : 'down') : 'muted'}>
                   {pnl != null ? mask(`${up ? '+' : ''}${formatCurrency(pnl, currency, usdInrRate)}`) : '—'}
                 </td>
+                {hasFundEntries && <td data-label="XIRR" className={m.xirr == null ? 'muted' : m.xirr >= 0 ? 'up' : 'down'}>{m.xirr == null ? '—' : mask(formatPercent(m.xirr))}</td>}
                 {anyFolio && <td data-label="Folio" className="muted">{mask((m.folio ?? '').trim() || '—')}</td>}
               </tr>
             )
