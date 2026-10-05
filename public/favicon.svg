@@ -1,10 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5e6ad2"/>
-      <stop offset="1" stop-color="#828fff"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="14" fill="url(#g)"/>
-  <path d="M40 4 L12 38 h18 L20 60 L52 26 H31 L46 4 Z" fill="#ffffff"/>
+  <title>Finverse</title>
+  <rect width="64" height="64" rx="15" fill="#131312"/>
+  <rect x=".75" y=".75" width="62.5" height="62.5" rx="14.25" fill="none" stroke="#343438" stroke-width="1.5"/>
+  <ellipse cx="32" cy="32" rx="26" ry="12.5" transform="rotate(-30 32 32)" fill="none" stroke="#828fff" stroke-width="4.5"/>
+  <path d="M21 14h26l-4 8H29v8h12l-4 8h-8v12h-8z" fill="#f4f4f2"/>
+  <path d="M9.483 45A26 12.5 -30 0 0 54.517 19" fill="none" stroke="#828fff" stroke-width="4.5"/>
 </svg>
