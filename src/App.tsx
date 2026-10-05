@@ -90,7 +90,7 @@ export default function App({ initialView }: { initialView: View }) {
     <div className="app-shell">
       <aside className="sidebar">
         <button className="brand brand--home" type="button" onClick={() => navigate('overview')} aria-label="Go to Overview">
-          <div className="brand-mark">₹</div>
+          <img className="brand-mark" src="/favicon.svg?v=2" alt="" width={30} height={30} />
           <div>
             <div className="brand-name">Finverse</div>
             <div className="brand-sub">Portfolio workspace</div>

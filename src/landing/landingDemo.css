@@ -2,7 +2,7 @@
 .demo-shell { display: grid; grid-template-columns: 136px minmax(0, 1fr); min-height: 540px; }
 .demo-sidebar { display: flex; flex-direction: column; gap: 19px; padding: 17px 10px; border-right: 1px solid rgba(255,255,255,.07); background: #090a0b; }
 .demo-brand { display: flex; align-items: center; gap: 7px; font-size: 12px; }
-.demo-brand > span { display: grid; place-items: center; flex: none; width: 21px; height: 21px; border-radius: 5px; background: #6875f5; font-size: 12px; font-weight: 800; }
+.demo-brand > img { display: block; flex: none; width: 21px; height: 21px; }
 .demo-brand strong { display: grid; gap: 1px; line-height: 1.15; }
 .demo-brand small { color: #989da7; font-size: 9px; font-weight: 400; }
 .demo-sidebar-label { margin: 23px 3px 0; color: #888e99; font: 500 9px "JetBrains Mono", monospace; letter-spacing: .1em; }

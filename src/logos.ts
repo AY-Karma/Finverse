@@ -10,7 +10,8 @@ export function tickerHue(ticker: string): number {
 }
 
 export function monogramTile(tickerBase: string, label?: string, mode: 'dark' | 'light' = 'dark'): string {
-  const letters = (label ?? tickerBase).replace(/[^A-Z0-9]/g, '').slice(0, 3) || '₹'
+  const letters = (label ?? tickerBase).replace(/[^A-Z0-9]/g, '').slice(0, 3)
+  if (!letters) return '/favicon.svg?v=2'
   const hue = tickerHue(tickerBase)
   const fontSize = letters.length > 2 ? 11 : 15
   const bg = mode === 'light' ? `hsl(${hue} 45% 88%)` : `hsl(${hue} 28% 16%)`

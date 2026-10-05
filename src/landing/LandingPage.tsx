@@ -37,7 +37,7 @@ export function LandingPage() {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <a className={`lp-brand${compact ? ' lp-brand--compact' : ''}`} href="/" aria-label="Finverse home">
-      <span>₹</span>
+      <img src="/favicon.svg?v=2" alt="" width={34} height={34} />
       <strong>Finverse</strong>
     </a>
   )

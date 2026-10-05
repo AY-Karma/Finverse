@@ -224,14 +224,8 @@ body {
 .brand-mark {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
-  background: var(--primary);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-family: var(--font-body);
-  font-size: 15px;
-  font-weight: 700;
+  flex-shrink: 0;
+  display: block;
 }
 .brand-name {
   font-family: var(--font-display);

@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { monogramTile, tickerHue } from './logos'
 
 describe('monogram tiles', () => {
+  it('uses the favicon when no monogram characters are available', () => {
+    expect(monogramTile('')).toBe('/favicon.svg?v=2')
+    expect(monogramTile('INFY', '₹')).toBe('/favicon.svg?v=2')
+  })
+
   it('produces stable data-uris per ticker', () => {
     expect(monogramTile('INFY')).toBe(monogramTile('INFY'))
     expect(monogramTile('INFY')).not.toBe(monogramTile('KRN'))

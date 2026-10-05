@@ -74,7 +74,7 @@ export function LandingDemo() {
       <div className="shot-chrome"><span><i /><i /><i /></span><strong>Finverse workspace · Try the preview</strong><small>SAMPLE DATA / NO LIVE REQUESTS</small></div>
       <div className="demo-shell">
         <aside className="demo-sidebar">
-          <div className="demo-brand"><span>₹</span><strong>Finverse<small>Portfolio workspace</small></strong></div>
+          <div className="demo-brand"><img src="/favicon.svg?v=2" alt="" width={21} height={21} /><strong>Finverse<small>Portfolio workspace</small></strong></div>
           <span className="demo-sidebar-label">WORKSPACE</span>
           <nav aria-label="Preview sections">
             {TABS.map(({ id, label }, index) => <button type="button" key={id} className={tab === id ? 'is-active' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><span>{label}</span><i>0{index + 1}</i></button>)}

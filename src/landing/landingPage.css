@@ -16,9 +16,9 @@
 .lp-container { width: min(1240px, calc(100% - 48px)); margin-inline: auto; }
 
 .lp-brand { display: inline-flex; align-items: center; gap: 10px; width: max-content; color: inherit; }
-.lp-brand > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #6471ed; color: #fff; font-size: 16px; font-weight: 700; box-shadow: 0 10px 32px rgba(100, 113, 237, .26); }
+.lp-brand > img { display: block; flex: none; width: 34px; height: 34px; }
 .lp-brand > strong { font-size: 15px; letter-spacing: -.03em; }
-.lp-brand--compact > span { width: 27px; height: 27px; border-radius: 8px; font-size: 12px; }
+.lp-brand--compact > img { width: 27px; height: 27px; }
 .lp-brand--compact > strong { font-size: 13px; }
 
 .lp-kicker { display: inline-flex; align-items: center; gap: 9px; color: #92969f; font: 600 12px/1.2 "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
