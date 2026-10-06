@@ -60,4 +60,64 @@ it('does not annualize sparse monthly observations as daily returns', async () =
 it('shows the full-history trough even when chart rows are sampled', async () => {
   await renderInsights(Array.from({ length: 1000 }, (_, index) => ({ at: Date.UTC(2023, 0, 1 + index) - 5.5 * 3600000, value: index === 2 ? 50 : 100, invested: 100 })))
   expect(container.querySelector('.insight-kpi[aria-controls="drawdown-detail"] strong')?.textContent).toBe('-50.0%')
+  await act(async () => container.querySelector<HTMLButtonElement>('#drawdown-kpi')!.click())
+  expect(container.querySelector('#drawdown-detail [role="img"]')).not.toBeNull()
+  expect(container.querySelector('#drawdown-detail')?.textContent).toContain('-50.0%')
+})
+
+it('orders the four cards and switches or collapses their dropdowns', async () => {
+  await renderInsights([100, 80].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: 100 })))
+  const cards = [...container.querySelectorAll<HTMLButtonElement>('.insight-kpi')]
+  expect(cards.map((card) => card.querySelector('.score-label')?.textContent)).toEqual([
+    'Session move', 'Worst drawdown', 'Top five weight', 'Data health',
+  ])
+  for (const card of cards) {
+    await act(async () => card.click())
+    expect(card.getAttribute('aria-expanded')).toBe('true')
+    const detail = container.querySelector(`#${card.getAttribute('aria-controls')}`)
+    expect(detail?.getAttribute('aria-labelledby')).toBe(card.id)
+    expect(container.querySelectorAll('.insight-kpi-detail')).toHaveLength(1)
+    expect(cards.filter((item) => item.getAttribute('aria-expanded') === 'true')).toHaveLength(1)
+  }
+  expect(container.querySelector('#data-health-detail')?.textContent).toContain('Older quotes')
+  expect(container.querySelector('#data-health-detail')?.textContent).toContain('No prices')
+  await act(async () => cards[3].click())
+  expect(cards[3].getAttribute('aria-expanded')).toBe('false')
+  expect(container.querySelector('.insight-kpi-detail')).toBeNull()
+})
+
+it('hides the drawdown geometry and holding identities in all value dropdowns', async () => {
+  await renderInsights([100, 80].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: 100 })))
+  state.store.settings.hideValues = true
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  for (const id of ['session', 'drawdown', 'top-five']) {
+    await act(async () => container.querySelector<HTMLButtonElement>(`#${id}-kpi`)!.click())
+    const detail = container.querySelector(`#${id}-detail`)!
+    expect(detail.textContent).toContain('Values are hidden')
+    expect(detail.innerHTML).not.toMatch(/AAA|\b80\b|-20\.0%/)
+    expect(detail.querySelector('svg, [style], .up, .down')).toBeNull()
+  }
+  expect(container.querySelector('#drawdown-kpi .down')).toBeNull()
+})
+
+it('explains unavailable drawdown without claiming completed requests are loading', async () => {
+  await renderInsights([])
+  await act(async () => container.querySelector<HTMLButtonElement>('#drawdown-kpi')!.click())
+  const detail = container.querySelector('#drawdown-detail')!
+  expect(detail.textContent).toContain('Historical prices are unavailable')
+  expect(detail.textContent).not.toContain('loading')
+  state.store.settings.allowExternalData = false
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(detail.textContent).toContain('Enable external market data in Settings')
+})
+
+it('clears the drawdown loading state when external data is switched off', async () => {
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcast>(() => {}))
+  await renderInsights([])
+  await act(async () => container.querySelector<HTMLButtonElement>('#drawdown-kpi')!.click())
+  expect(container.querySelector('#drawdown-detail')?.textContent).toContain('Historical prices are loading')
+  state.store.settings.allowExternalData = false
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(container.querySelector('#drawdown-detail')?.textContent).toContain('Enable external market data in Settings')
+  expect(container.querySelector('#drawdown-detail')?.textContent).not.toContain('loading')
 })

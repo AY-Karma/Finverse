@@ -1610,6 +1610,7 @@ body {
 }
 .insight-kpi {
   display: grid;
+  align-content: start;
   gap: 6px;
   padding: 14px 16px;
   border: 1px solid var(--hairline);
@@ -1637,9 +1638,30 @@ body {
   background: var(--surface-2);
   outline: none;
 }
+.insight-kpi--interactive:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
 .insight-kpi--open {
   border-color: var(--primary);
 }
+.insight-kpi-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.insight-kpi-chevron {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: -3px 2px 0 0;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 120ms ease;
+}
+.insight-kpi--open .insight-kpi-chevron { transform: rotate(225deg); margin-top: 3px; }
 .insight-kpi-detail {
   display: grid;
   grid-template-columns: minmax(180px, 0.55fr) minmax(0, 1fr);
@@ -1652,6 +1674,8 @@ body {
   background: var(--surface-1);
 }
 .insight-kpi-detail > div:first-child { display: grid; gap: 6px; }
+.insight-kpi-detail > div:first-child > p { margin: 0; line-height: 1.6; }
+.insight-kpi-detail--health { grid-template-columns: minmax(0, 1fr); }
 .insight-kpi-detail > p { margin: 0; color: var(--ink-muted); font-size: 12.5px; line-height: 1.6; }
 .kpi-split-list { display: grid; gap: 8px; }
 .kpi-split-list > div {

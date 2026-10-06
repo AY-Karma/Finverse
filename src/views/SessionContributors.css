@@ -1,0 +1,102 @@
+.session-contributors {
+  display: grid;
+  gap: 12px;
+}
+
+.session-contributors-empty p,
+.session-contributors-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.session-contributors-empty {
+  display: grid;
+  gap: 6px;
+}
+
+.session-contributors-total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+}
+
+.session-contributors-total strong,
+.session-contributors-row > strong,
+.session-contributors-remainder strong {
+  font: 500 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.session-contributors-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-contributors-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(64px, 0.8fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-contributors-name {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.session-contributors-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-contributors-name small,
+.session-contributors-remainder small {
+  color: var(--ink-subtle);
+  font-size: 10px;
+}
+
+.session-contributors-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+}
+
+.session-contributors-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.session-contributors-row--up .session-contributors-track i { background: var(--semantic-success); }
+.session-contributors-row--down .session-contributors-track i { background: var(--semantic-danger); }
+
+.session-contributors-remainder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+}
+
+.session-contributors-remainder > span { display: grid; gap: 2px; }
+
+@media (max-width: 560px) {
+  .session-contributors-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+  .session-contributors-track { grid-column: 1 / -1; grid-row: 2; }
+}

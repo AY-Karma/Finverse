@@ -12,19 +12,18 @@ import { buildContributionColumns, type ContributionDisplay } from '../contribut
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
 import { HiddenValuesState } from './HiddenValuesState'
+import { SessionContributors } from './SessionContributors'
+import { WorstDrawdownChart } from './WorstDrawdownChart'
+import { DataHealthGuide } from './DataHealthGuide'
 
 // Same muted family as the overview allocation card so charts read as one system.
 const EXPO_PALETTE = ['#7c89e8', '#5fae9b', '#d0a35c', '#c97b84', '#6aa9c9', '#a685c9', '#96b862', '#8a93a6']
-const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short' })
 const MAX_CHART_POINTS = 180
 const INITIAL_BACKCAST_DAYS = 366
 const BACKCAST_PAGE_DAYS = 366
 const MAX_BACKCAST_DAYS = 3 * 366
 
 type BenchmarkPoint = { ts: number; portfolio: number; benchmark?: number }
-function shortDate(value: number): string {
-  return SHORT_DATE_FORMATTER.format(new Date(value))
-}
 
 export function InsightsView({ onRequestImport }: { onRequestImport: () => void }) {
   const { snapshot, settings } = useStore()
@@ -36,7 +35,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [benchmarkReload, setBenchmarkReload] = useState(0)
   const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
-  const [openKpi, setOpenKpi] = useState<'top-five' | 'drawdown' | null>(null)
+  const [openKpi, setOpenKpi] = useState<'session' | 'drawdown' | 'top-five' | 'data-health' | null>(null)
   const [backcast, setBackcast] = useState<PortfolioBackcast | null>(null)
   const [backcastLoading, setBackcastLoading] = useState(false)
   const [backcastDays, setBackcastDays] = useState(INITIAL_BACKCAST_DAYS)
@@ -49,6 +48,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   useEffect(() => {
     if (!settings.allowExternalData || snapshot.positions.length === 0) {
       setBackcast(null)
+      setBackcastLoading(false)
       setBackcastDays(INITIAL_BACKCAST_DAYS)
       return
     }
@@ -200,14 +200,43 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       {!snapshot.valuationComplete && <p className="panel hint" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Allocation, concentration, and current P&L cover the {snapshot.pricedCount} priced holdings only. Incomplete portfolio values are not saved to tracked history.</p>}
 
       <div className="insight-kpis enter d1">
-        <div className="insight-kpi"><span className="score-label">{dataLabels.sessionLabel}</span><strong className={hide || snapshot.dailyChange == null ? '' : snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? 'Unavailable' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, snapshot.fxRate?.usdInr)}`)}</strong><span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span></div>
-        <button type="button" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail"><span className="score-label">Top five weight</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong><span className="hint">See the five-position split</span></button>
-        <button type="button" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail"><span className="score-label">Worst drawdown</span><strong className={risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><span className="hint">See date and calculation</span></button>
-        <div className="insight-kpi"><span className="score-label">Data health</span><strong>{dataLabels.healthLabel}</strong><span className="hint">{dataLabels.healthDetail}</span></div>
+        <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
+          <span className="score-label insight-kpi-label">{dataLabels.sessionLabel}<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+          <strong className={hide || snapshot.dailyChange == null ? '' : snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? 'Unavailable' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, snapshot.fxRate?.usdInr)}`)}</strong>
+          <span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span>
+        </button>
+        <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">
+          <span className="score-label insight-kpi-label">Worst drawdown<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+          <strong className={!hide && risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong>
+          <span className="hint">See the peak-to-trough chart</span>
+        </button>
+        <button type="button" id="top-five-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail">
+          <span className="score-label insight-kpi-label">Top five weight<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+          <strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong>
+          <span className="hint">See the five-position split</span>
+        </button>
+        <button type="button" id="data-health-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'data-health' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'data-health' ? null : 'data-health')} aria-expanded={openKpi === 'data-health'} aria-controls="data-health-detail">
+          <span className="score-label insight-kpi-label">Data health<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+          <strong>{dataLabels.healthLabel}</strong>
+          <span className="hint">{dataLabels.healthDetail}</span>
+        </button>
       </div>
 
-      {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail"><div><span className="score-label">Largest five holdings</span><strong>{mask(`${snapshot.topFiveWeight.toFixed(1)}% of portfolio`)}</strong></div><div className="kpi-split-list">{topFive.map((item) => <div key={item.symbol}><span>{item.symbol}</span><span className="kpi-split-bar"><i style={{ width: `${item.weight / Math.max(...topFive.map((holding) => holding.weight), 1) * 100}%` }} /></span><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div></div>}
-      {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail"><div><span className="score-label">How this was calculated</span><strong>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong></div><p>{hasHistory && risk.worstAt && risk.worstPeakAt ? <>The reconstructed value fell from its high on <strong>{shortDate(risk.worstPeakAt)}</strong> to its lowest point on <strong>{shortDate(risk.worstAt)}</strong>. This uses today’s holdings across historical market prices and does not claim a news or event caused the move.</> : 'Historical prices are still loading for this calculation.'}</p></div>}
+      {openKpi === 'session' && <div className="insight-kpi-detail enter" id="session-detail" role="region" aria-labelledby="session-kpi">
+        <div><span className="score-label">What contributed to the session move</span><strong>{dataLabels.sessionLabel}</strong><p className="hint">{dataLabels.coverageLabel}. Each amount is the price change multiplied by the quantity you hold.</p></div>
+        {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
+      </div>}
+      {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
+        <div><span className="score-label">How this was calculated</span><strong>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of current value covered.</>}</p></div>
+        {hide ? <HiddenValuesState /> : hasHistory ? <WorstDrawdownChart points={analyticsHistory} risk={risk} formatValue={value} /> : <p>{backcastLoading ? 'Historical prices are loading for this calculation.' : settings.allowExternalData ? 'Historical prices are unavailable. Try again later.' : 'Enable external market data in Settings to calculate historical drawdown.'}</p>}
+      </div>}
+      {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
+        <div><span className="score-label">Largest five holdings</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}% of priced portfolio`) : 'Unpriced'}</strong></div>
+        {hide ? <HiddenValuesState /> : topFive.length === 0 ? <p>No priced holdings are available for this split.</p> : <div className="kpi-split-list">{topFive.map((item) => <div key={`${item.type}:${item.symbol}`}><span>{item.symbol}</span><span className="kpi-split-bar"><i style={{ width: `${item.weight / Math.max(...topFive.map((holding) => holding.weight), 1) * 100}%` }} /></span><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div>}
+      </div>}
+      {openKpi === 'data-health' && <div className="insight-kpi-detail insight-kpi-detail--health enter" id="data-health-detail" role="region" aria-labelledby="data-health-kpi">
+        <DataHealthGuide healthLabel={dataLabels.healthLabel} allowExternalData={settings.allowExternalData} />
+      </div>}
 
       <div className="insight-grid enter d2">
         <section className="panel insight-panel insight-panel--wide insight-panel--benchmark">

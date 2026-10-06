@@ -1,0 +1,108 @@
+.data-health-guide {
+  min-width: 0;
+}
+
+.data-health-guide-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.data-health-guide-head p,
+.data-health-guide-list p,
+.data-health-guide-off {
+  margin: 5px 0 0;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.data-health-guide-off {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--primary-hover);
+  background: var(--surface-2);
+}
+
+.data-health-guide-off a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.data-health-guide-off a:focus-visible {
+  outline: 2px solid var(--primary-focus);
+  outline-offset: 3px;
+}
+
+.data-health-guide-list {
+  display: grid;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.data-health-guide-list > li {
+  display: grid;
+  grid-template-columns: minmax(120px, .45fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 20px;
+  padding: 15px 16px;
+}
+
+.data-health-guide-list > li + li {
+  border-top: 1px solid var(--hairline);
+}
+
+.data-health-guide-list > li[aria-current='true'] {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 var(--primary-hover);
+}
+
+.data-health-guide-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.data-health-guide-label > strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.data-health-guide-current {
+  padding: 3px 7px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.data-health-guide-caption {
+  color: var(--ink-subtle);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .data-health-guide-list > li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .data-health-guide-label {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
