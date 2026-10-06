@@ -24,7 +24,7 @@ import {
   recordManualRefresh,
 } from './live'
 
-export type View = 'overview' | 'holdings' | 'insights' | 'research' | 'assistant' | 'settings'
+export type View = 'overview' | 'holdings' | 'insights' | 'research' | 'settings'
 
 type RefreshResult =
   | { ok: true; retryInMs: number }
@@ -68,8 +68,6 @@ interface Store {
   undoImportFolioId: string | null
   exportPortfolio: (format: 'json' | 'csv') => void
   refreshNow: () => Promise<RefreshResult>
-  quickMode: boolean
-  setQuickMode: (v: boolean) => void
 }
 
 const StoreContext = createContext<Store | null>(null)
@@ -80,7 +78,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>({})
   const [fxRate, setFxRateState] = useState<FxRate | null>(null)
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
-  const [quickMode, setQuickModeState] = useState(false)
   const [marketDataRefreshing, setMarketDataRefreshing] = useState(settings.allowExternalData)
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
   const [folioSaveFailed, setFolioSaveFailed] = useState(false)
@@ -106,8 +103,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setSettings = useCallback((s: Settings) => setSettingsState(s), [])
-
-  const setQuickMode = useCallback((v: boolean) => setQuickModeState(v), [])
 
   const snapshot = useMemo(
     () => investmentWorkspace.readSnapshot({ folios, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, fxRate, history: portfolioHistory }),
@@ -358,8 +353,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     undoImportFolioId: folios.some((folio) => folio.id === lastImportedFolioId.current) ? lastImportedFolioId.current : null,
     exportPortfolio,
     refreshNow,
-    quickMode,
-    setQuickMode,
   }
 
   return <StoreContext.Provider value={value}>

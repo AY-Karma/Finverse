@@ -23,7 +23,7 @@ describe('deployment security headers', () => {
     const html = readFileSync('index.html', 'utf8')
     expect(html).toContain(`content="${csp.replace("frame-ancestors 'none'; ", '')}"`)
     expect(csp).toContain('img-src \'self\' data: https://cdn.jsdelivr.net https://eodhd.com;')
-    expect(csp).toContain('connect-src \'self\' https: http://localhost:* http://127.0.0.1:*;')
+    expect(csp).toContain('connect-src \'self\' https://api.frankfurter.app https://api.mfapi.in https://corsproxy.io;')
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'")
   })
 })

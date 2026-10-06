@@ -1,7 +1,67 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sanitizeFolios, saveFolios } from './store'
+import { loadSettings, sanitizeFolios, saveFolios, saveSettings } from './store'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  localStorage.clear()
+  sessionStorage.clear()
+})
+
+describe('settings persistence', () => {
+  it('removes retired connection settings and browser data while preserving preferences and portfolios', () => {
+    const preferences = {
+      currency: 'USD', allowExternalData: true, density: 'compact', accent: 'custom',
+      customAccent: '#7c6cff', mode: 'light', hideValues: true,
+    }
+    localStorage.setItem('finverse:settings', JSON.stringify({
+      ...preferences, provider: 'openai', apiKey: 'retired-key', model: 'retired-model',
+      baseUrl: 'https://retired.example', confirmRemoteOllama: true, monitorNewsApiKey: 'retired-news-key',
+    }))
+    const portfolio = JSON.stringify([{ id: 'saved', positions: [] }])
+    localStorage.setItem('finverse:folios', portfolio)
+    const retiredKeys = ['finverse:chat', 'finverse:quickMode', 'finverse:apiKey:session', 'finverse:monitorNewsApiKey:session']
+    for (const key of retiredKeys) {
+      localStorage.setItem(key, 'retired-value')
+      sessionStorage.setItem(key, 'retired-value')
+    }
+
+    expect(loadSettings()).toEqual(preferences)
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
+    expect(localStorage.getItem('finverse:folios')).toBe(portfolio)
+    for (const key of retiredKeys) {
+      expect(localStorage.getItem(key)).toBeNull()
+      expect(sessionStorage.getItem(key)).toBeNull()
+    }
+  })
+
+  it('saves only supported preferences even when an older caller supplies retired fields', () => {
+    const preferences = loadSettings()
+    saveSettings({ ...preferences, apiKey: 'retired-key', provider: 'openai' } as typeof preferences)
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it.each(['null', '[]', '"old settings"', '{invalid'])('replaces malformed settings with defaults: %s', (raw) => {
+    localStorage.setItem('finverse:settings', raw)
+    const preferences = loadSettings()
+    expect(preferences).toEqual({
+      currency: 'INR', allowExternalData: false, density: 'comfortable',
+      accent: 'indigo', mode: 'dark', hideValues: false,
+    })
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
+  })
+
+  it('uses defaults when browser storage cannot be read, cleaned or saved', () => {
+    const blocked = () => { throw new DOMException('Blocked', 'SecurityError') }
+    vi.stubGlobal('localStorage', { getItem: blocked, setItem: blocked, removeItem: blocked })
+    vi.stubGlobal('sessionStorage', { removeItem: blocked })
+    expect(loadSettings()).toEqual({
+      currency: 'INR', allowExternalData: false, density: 'comfortable',
+      accent: 'indigo', mode: 'dark', hideValues: false,
+    })
+  })
+})
 
 describe('saveFolios', () => {
   it('reports a storage failure without throwing', () => {

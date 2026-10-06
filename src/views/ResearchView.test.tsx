@@ -15,7 +15,6 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const position: Position = { id: 'one', ticker: 'TCS', name: 'Tata Consultancy Services', type: 'stock', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120, exchange: 'NSE' }
 let container: HTMLDivElement
 let root: ReturnType<typeof createRoot>
-const onAssistant = vi.fn()
 
 beforeEach(() => {
   localStorage.clear()
@@ -28,8 +27,8 @@ beforeEach(() => {
   document.body.append(container)
   root = createRoot(container)
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); state.resolvePath.mockReset(); state.history.mockReset(); onAssistant.mockReset() })
-async function render(active = true) { await act(async () => root.render(<ResearchView active={active} onOpenAssistant={onAssistant} onRequestImport={vi.fn()} />)) }
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); state.resolvePath.mockReset(); state.history.mockReset() })
+async function render(active = true) { await act(async () => root.render(<ResearchView active={active} onRequestImport={vi.fn()} />)) }
 async function click(text: string) {
   const button = [...container.querySelectorAll('button')].find((item) => item.textContent?.trim() === text)
   expect(button, text).toBeDefined()

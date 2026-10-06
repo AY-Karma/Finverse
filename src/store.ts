@@ -4,7 +4,6 @@ import { normalizePosition } from './instruments'
 const FOLIOS_KEY = 'finverse:folios'
 const LEGACY_POSITIONS_KEY = 'finverse:positions'
 const SETTINGS_KEY = 'finverse:settings'
-const SESSION_API_KEY = 'finverse:apiKey:session'
 
 const MAX_PERSISTED_FOLIOS = 100
 const MAX_PERSISTED_POSITIONS_PER_FOLIO = 5_000
@@ -112,78 +111,54 @@ export function loadFolios(): Folio[] {
   return []
 }
 
-/** Persist preferences only. Provider credentials are isolated to the current tab. */
 export function saveSettings(settings: Settings): void {
-  const persisted: Partial<Settings> = { ...settings }
-  delete persisted.apiKey
+  const { currency, allowExternalData, density, accent, customAccent, mode, hideValues } = settings
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(persisted))
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency, allowExternalData, density, accent, customAccent, mode, hideValues }))
   } catch {
     /* storage unavailable or full */
   }
-  try {
-    if (settings.apiKey) sessionStorage.setItem(SESSION_API_KEY, settings.apiKey)
-    else sessionStorage.removeItem(SESSION_API_KEY)
-  } catch {
-    /* session storage can be unavailable in privacy-restricted browsers */
-  }
 }
 
-function loadSessionApiKey(): string {
-  try {
-    return sessionStorage.getItem(SESSION_API_KEY) ?? ''
-  } catch {
-    return ''
+function clearRetiredStorage(): void {
+  for (const key of ['finverse:chat', 'finverse:quickMode', 'finverse:apiKey:session', 'finverse:monitorNewsApiKey:session']) {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      /* storage unavailable */
+    }
+    try {
+      sessionStorage.removeItem(key)
+    } catch {
+      /* storage unavailable */
+    }
   }
 }
 
 export function loadSettings(): Settings {
   const defaults: Settings = {
-    provider: '', apiKey: '', model: '', baseUrl: 'http://localhost:11434/v1', confirmRemoteOllama: false, currency: 'INR', allowExternalData: false,
+    currency: 'INR', allowExternalData: false,
     density: 'comfortable', accent: 'indigo', mode: 'dark', hideValues: false,
   }
+  clearRetiredStorage()
+  let parsed: Record<string, unknown> = {}
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
-    const parsed = raw ? (JSON.parse(raw) as Partial<Settings>) : {}
-    const legacyApiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey : ''
-    delete parsed.apiKey
-    delete (parsed as { monitorNewsApiKey?: unknown }).monitorNewsApiKey
-    try {
-      sessionStorage.removeItem('finverse:monitorNewsApiKey:session')
-    } catch {
-      /* session storage can be unavailable in privacy-restricted browsers */
-    }
-    if (legacyApiKey) {
-      try {
-        if (!loadSessionApiKey()) sessionStorage.setItem(SESSION_API_KEY, legacyApiKey)
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed))
-      } catch {
-        /* retain the key in memory for this load if storage is blocked */
-      }
-    }
-    const provider = parsed.provider === 'openai' || parsed.provider === 'anthropic' || parsed.provider === 'openrouter' || parsed.provider === 'ollama' ? parsed.provider : defaults.provider
-    const currency = parsed.currency === 'USD' ? 'USD' : defaults.currency
-    const density = parsed.density === 'compact' ? 'compact' : defaults.density
-    const accent = parsed.accent === 'emerald' || parsed.accent === 'cobalt' || parsed.accent === 'amber' || parsed.accent === 'custom' ? parsed.accent : defaults.accent
-    const mode = parsed.mode === 'light' ? 'light' as const : defaults.mode
-    const customAccent = typeof parsed.customAccent === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.customAccent) ? parsed.customAccent.toLowerCase() : undefined
-    return {
-      ...defaults,
-      ...parsed,
-      provider,
-      currency,
-      density,
-      accent,
-      ...(customAccent ? { customAccent } : {}),
-      mode,
-      apiKey: loadSessionApiKey() || legacyApiKey,
-      model: typeof parsed.model === 'string' ? parsed.model.slice(0, MAX_PERSISTED_TEXT) : defaults.model,
-      baseUrl: typeof parsed.baseUrl === 'string' && parsed.baseUrl.trim() ? parsed.baseUrl.slice(0, MAX_PERSISTED_TEXT) : defaults.baseUrl,
-      confirmRemoteOllama: parsed.confirmRemoteOllama === true,
-      allowExternalData: parsed.allowExternalData === true,
-      hideValues: parsed.hideValues === true,
-    }
+    const value: unknown = raw ? JSON.parse(raw) : {}
+    if (isRecord(value)) parsed = value
   } catch {
-    return defaults
+    /* invalid or unavailable storage uses defaults */
   }
+  const customAccent = typeof parsed.customAccent === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.customAccent) ? parsed.customAccent.toLowerCase() : undefined
+  const settings: Settings = {
+    currency: parsed.currency === 'USD' ? 'USD' : defaults.currency,
+    allowExternalData: parsed.allowExternalData === true,
+    density: parsed.density === 'compact' ? 'compact' : defaults.density,
+    accent: parsed.accent === 'emerald' || parsed.accent === 'cobalt' || parsed.accent === 'amber' || parsed.accent === 'custom' ? parsed.accent : defaults.accent,
+    ...(customAccent ? { customAccent } : {}),
+    mode: parsed.mode === 'light' ? 'light' : defaults.mode,
+    hideValues: parsed.hideValues === true,
+  }
+  saveSettings(settings)
+  return settings
 }

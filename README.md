@@ -13,10 +13,6 @@
   </p>
 </div>
 
-![Finverse overview with sample holdings and a floating allocation detail card](readme-assets/overview.png)
-
-<p align="center"><sub>Illustrative portfolio overview with sample holdings.</sub></p>
-
 ## What you can do
 
 - **See the whole portfolio.** View current value, invested capital, P&L, holdings, and allocation across separate folios.
@@ -24,10 +20,6 @@
 - **Put performance in context.** Explore concentration and risk, then compare your portfolio with a market benchmark.
 - **Follow your holdings.** Filter portfolio news and open research links for the instruments you own.
 - **Download your data.** Import `.xlsx`, `.xls`, or `.csv` holdings files, then export a CSV copy or a JSON archive.
-
-![Finverse insights preview with a sample portfolio and NIFTY 50 comparison](readme-assets/insights.png)
-
-<p align="center"><sub>Illustrative insights preview. Chart values are sample data.</sub></p>
 
 ## Get started
 
@@ -38,13 +30,13 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite, then choose **Open Finverse**. Import a holdings export to create your first folio. You can review each file before saving it, and each accepted file becomes a separate folio.
+Open the local URL printed by Vite to enter the portfolio workspace. Import a holdings export to create your first folio. You can review each file before saving it, and each accepted file becomes a separate folio.
 
 Run `npm run build` to check the TypeScript code and create a production build.
 
 ## Your data
 
-Finverse stores holdings and preferences in your browser. External market data is off by default; turning it on sends instrument identifiers to market data providers for quotes, history, and news. The optional AI assistant sends portfolio context and chat messages to the provider you configure. Its API key stays in the browser tab's session storage.
+Finverse stores holdings and preferences in your browser. External market data is off by default; turning it on sends instrument identifiers to market data providers for quotes, history, and news.
 
 Historical backcasts apply **today's holdings** to past prices, so they do not represent past trades. Tracked history starts when daily portfolio snapshots begin accumulating on this device.
 

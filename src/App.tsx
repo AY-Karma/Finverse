@@ -9,13 +9,11 @@ import { PortfolioImportDialog } from './views/PortfolioImportDialog'
 
 const loadMonitorView = () => import('./views/MonitorView')
 const loadResearchView = () => import('./views/ResearchView')
-const loadAssistantView = () => import('./views/AssistantView')
 const loadSettingsView = () => import('./views/SettingsView')
 const loadInsightsView = () => import('./views/InsightsView')
 
 const MonitorView = lazy(() => loadMonitorView().then((module) => ({ default: module.MonitorView })))
 const ResearchView = lazy(() => loadResearchView().then((module) => ({ default: module.ResearchView })))
-const AssistantView = lazy(() => loadAssistantView().then((module) => ({ default: module.AssistantView })))
 const SettingsView = lazy(() => loadSettingsView().then((module) => ({ default: module.SettingsView })))
 const InsightsView = lazy(() => loadInsightsView().then((module) => ({ default: module.InsightsView })))
 
@@ -31,12 +29,11 @@ export default function App({ initialView }: { initialView: View }) {
   const [view, setView] = useState<View>(initialView)
   const [importOpen, setImportOpen] = useState(false)
   const [researchVisited, setResearchVisited] = useState(initialView === 'research')
-  const [assistantDraft, setAssistantDraft] = useState('')
   const [monitorQuery, setMonitorQuery] = useState('')
   const [researchReturn, setResearchReturn] = useState(false)
   const researchUrl = useRef(initialView === 'research' ? window.location.pathname + window.location.search : '/app/research')
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
-  const { positions, settings, quickMode } = useStore()
+  const { positions, settings } = useStore()
 
   const navigate = useCallback((nextView: View) => {
     if (window.location.pathname === '/app/research') researchUrl.current = window.location.pathname + window.location.search
@@ -44,14 +41,12 @@ export default function App({ initialView }: { initialView: View }) {
     if (window.location.pathname + window.location.search !== nextPath) window.history.pushState({}, '', nextPath)
     if (nextView === 'research') setResearchVisited(true)
     if (nextView === 'holdings') setMonitorQuery('')
-    if (nextView === 'assistant') setAssistantDraft('')
     setResearchReturn(false)
     setView(nextView)
   }, [])
 
   const openFromResearch = (nextView: View, position?: Position) => {
     navigate(nextView)
-    if (nextView === 'assistant') setAssistantDraft(position ? `Help me review ${position.name || position.ticker} (${position.ticker}${position.exchange ? `, ${position.exchange}` : ''}). What evidence should I check, what is missing, and what would challenge the reason to own it?` : '')
     if (nextView === 'holdings') setMonitorQuery(position?.name || position?.ticker || '')
     setResearchReturn(true)
   }
@@ -64,10 +59,6 @@ export default function App({ initialView }: { initialView: View }) {
   useEffect(() => {
     const onPopState = () => {
       const route = entryRoute(window.location.pathname, window.location.search)
-      if (route.page === 'landing') {
-        window.location.reload()
-        return
-      }
       if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
       if (route.view === 'research') setResearchVisited(true)
       setView(route.view)
@@ -102,15 +93,12 @@ export default function App({ initialView }: { initialView: View }) {
           {NAV.map((item) => (
             <button
               key={item.id}
-              className={`nav-item${view === item.id || (view === 'assistant' && item.id === 'research') ? ' nav-item--active' : ''}`}
-              aria-current={view === item.id || (view === 'assistant' && item.id === 'research') ? 'page' : undefined}
+              className={`nav-item${view === item.id ? ' nav-item--active' : ''}`}
+              aria-current={view === item.id ? 'page' : undefined}
               onClick={() => navigate(item.id)}
             >
               <span className="nav-item-label">
                 {item.label}
-                {item.id === 'research' && quickMode && (
-                  <span className="nav-quick-dot" aria-label="Quick mode on" title="Quick mode is on" />
-                )}
               </span>
               <span className="nav-index">{item.index}</span>
             </button>
@@ -127,14 +115,13 @@ export default function App({ initialView }: { initialView: View }) {
       </aside>
 
       <main className="main">
-        {researchReturn && view !== 'research' && view !== 'assistant' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}>← Back to Research</button>}
+        {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}>← Back to Research</button>}
         {view === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
-        {researchVisited && <div hidden={view !== 'research'}><Suspense fallback={<div className="view-loading">Loading research...</div>}><ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onOpenAssistant={(position) => openFromResearch('assistant', position)} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} /></Suspense></div>}
+        {researchVisited && <div hidden={view !== 'research'}><Suspense fallback={<div className="view-loading">Loading research...</div>}><ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} /></Suspense></div>}
         {view !== 'overview' && (
           <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
             {view === 'holdings' && <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
             {view === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
-            {view === 'assistant' && <AssistantView initialDraft={assistantDraft} onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
             {view === 'settings' && <SettingsView />}
           </Suspense>
         )}

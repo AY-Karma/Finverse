@@ -9,11 +9,9 @@ import type { View } from './useStore'
 
 const state = vi.hoisted(() => ({
   positions: [] as Position[], settings: {} as Settings, liveQuotes: {}, fxRate: null,
-  quickMode: false, setQuickMode: vi.fn(), chat: vi.fn(),
 }))
 vi.mock('./useStore', () => ({ useStore: () => state }))
 vi.mock('./theme', () => ({ applyTheme: vi.fn() }))
-vi.mock('./providers', async (original) => ({ ...await original<typeof import('./providers')>(), chat: state.chat }))
 vi.mock('./views/ResearchHistory', () => ({ ResearchHistory: () => null }))
 vi.mock('./views/Overview', () => ({ Overview: () => <h1>Overview workspace</h1> }))
 vi.mock('./views/MonitorView', () => ({
@@ -35,7 +33,6 @@ beforeEach(() => {
   localStorage.clear()
   state.positions = [holding]
   state.settings = { ...loadSettings(), allowExternalData: false }
-  state.chat.mockReset()
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -87,6 +84,17 @@ async function browserBack() {
 }
 
 describe('Research workspace navigation', () => {
+  it('returns to the workspace overview when browser navigation reaches the root', async () => {
+    await render('settings', '/app/settings')
+    await act(async () => {
+      window.history.replaceState({}, '', '/')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(window.location.pathname).toBe('/app')
+    expect(container.querySelector('h1')?.textContent).toBe('Overview workspace')
+    expect([...container.querySelectorAll('.nav-item-label')].map((item) => item.textContent)).toEqual(['Overview', 'Insights', 'Research', 'Monitor', 'Settings'])
+  })
+
   it('preserves the selected Sources section when leaving through the sidebar', async () => {
     await render('research', '/app/research?holding=tcs&tab=sources')
     const researchUrl = window.location.pathname + window.location.search
@@ -129,26 +137,6 @@ describe('Research workspace navigation', () => {
 
     expect(window.location.pathname + window.location.search).toBe('/app/research?holding=tcs&tab=sources')
     expect(container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.textContent).toBe('Sources')
-  })
-
-  it('opens an editable selected-holding AI draft without sending it', async () => {
-    await render('research', '/app/research?holding=tcs&tab=sources')
-    const researchUrl = window.location.pathname + window.location.search
-    await click('Ask about this holding')
-
-    expect(window.location.pathname).toBe('/app/research/assistant')
-    const draft = container.querySelector<HTMLInputElement>('input[aria-label="Message to AI provider"]')!
-    expect(draft.value).toContain('Tata Consultancy Services (TCS, NSE)')
-    expect(draft.value).not.toContain('Private research note')
-    expect(container.textContent).toContain('Your current portfolio context is included')
-    expect(state.chat).not.toHaveBeenCalled()
-    await edit(draft, 'An edited question about TCS')
-    expect(draft.value).toBe('An edited question about TCS')
-    expect(state.chat).not.toHaveBeenCalled()
-
-    await click('← Back to Research')
-    expect(window.location.pathname + window.location.search).toBe(researchUrl)
-    expect(container.querySelector('[role=tab][aria-selected=true]')?.textContent).toBe('Sources')
   })
 
   it('passes the selected holding to related news and provides a return to its research', async () => {

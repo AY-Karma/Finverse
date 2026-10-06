@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { entryRoute, pathForView } from './entryRoute'
 
 describe('entryRoute', () => {
-  it('uses the landing page at the public root', () => {
-    expect(entryRoute('/', '')).toEqual({ page: 'landing' })
-    expect(entryRoute('/index.html', '')).toEqual({ page: 'landing' })
+  it('opens the overview at the public root', () => {
+    expect(entryRoute('/', '')).toEqual({ view: 'overview', redirectTo: '/app' })
+    expect(entryRoute('/index.html', '')).toEqual({ view: 'overview', redirectTo: '/app' })
   })
 
   it.each([
@@ -12,20 +12,23 @@ describe('entryRoute', () => {
     ['/app/monitor', 'holdings'],
     ['/app/insights', 'insights'],
     ['/app/research', 'research'],
-    ['/app/research/assistant', 'assistant'],
     ['/app/settings', 'settings'],
   ] as const)('maps %s to the %s view', (path, view) => {
-    expect(entryRoute(path, '')).toEqual({ page: 'workspace', view })
+    expect(entryRoute(path, '')).toEqual({ view })
     expect(pathForView(view)).toBe(path)
   })
 
   it('redirects legacy workspace links to the app root', () => {
-    expect(entryRoute('/', '?workspace=1')).toEqual({ page: 'workspace', view: 'overview', redirectTo: '/app' })
-    expect(entryRoute('/workspace', '')).toEqual({ page: 'workspace', view: 'overview', redirectTo: '/app' })
+    expect(entryRoute('/', '?workspace=1')).toEqual({ view: 'overview', redirectTo: '/app' })
+    expect(entryRoute('/workspace', '')).toEqual({ view: 'overview', redirectTo: '/app' })
   })
 
-  it('canonicalizes unknown app paths and leaves unrelated paths public', () => {
-    expect(entryRoute('/app/unknown', '')).toEqual({ page: 'workspace', view: 'overview', redirectTo: '/app' })
-    expect(entryRoute('/unknown', '')).toEqual({ page: 'landing' })
+  it('redirects unknown paths to the app root', () => {
+    expect(entryRoute('/app/unknown', '')).toEqual({ view: 'overview', redirectTo: '/app' })
+    expect(entryRoute('/unknown', '')).toEqual({ view: 'overview', redirectTo: '/app' })
+  })
+
+  it('recognizes app paths with trailing slashes and view-specific queries', () => {
+    expect(entryRoute('/app/research/', '?holding=RELIANCE')).toEqual({ view: 'research' })
   })
 })

@@ -1,7 +1,5 @@
 export type AssetType = 'stock' | 'etf' | 'mutual-fund' | 'other'
 
-export type ProviderId = 'openai' | 'anthropic' | 'openrouter' | 'ollama'
-
 export type Currency = 'INR' | 'USD'
 
 export type Exchange = 'NSE' | 'BSE' | 'NASDAQ' | 'NYSE' | 'LSE' | 'OTHER'
@@ -45,12 +43,6 @@ export interface Folio {
 }
 
 export interface Settings {
-  provider: ProviderId | ''
-  apiKey: string
-  model: string
-  baseUrl: string
-  /** Explicit consent is required before Ollama can send data to a remote host. */
-  confirmRemoteOllama: boolean
   currency: Currency
   allowExternalData: boolean
   density: Density
@@ -64,12 +56,6 @@ export interface Settings {
 export interface FxRate {
   usdInr: number
   at: number
-}
-
-export interface ChartSpec {
-  kind: 'bar' | 'pie' | 'line'
-  title?: string
-  data: { label: string; value: number }[]
 }
 
 export interface LiveQuote {
@@ -90,12 +76,4 @@ export interface PortfolioSnapshot {
   pnl: number
   /** Number of valued positions when the snapshot was captured. */
   holdingCount: number
-}
-
-export interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-  charts?: ChartSpec[]
-  /** Abort notices rendered with danger styling: 'stopped' (Stop button) or 'timeout' (generation cap). */
-  kind?: 'stopped' | 'timeout' | 'quick-fallback'
 }

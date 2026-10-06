@@ -20,8 +20,8 @@ function groupLabel(position: Position): string {
   return position.type === 'mutual-fund' ? position.category || 'Uncategorized funds' : position.sector || 'Uncategorized holdings'
 }
 
-export function ResearchView({ onOpenAssistant, onRequestImport, onGoTo, active = true, onUrlChange }: {
-  onOpenAssistant: (position?: Position) => void; onRequestImport: () => void;
+export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChange }: {
+  onRequestImport: () => void;
   onGoTo?: (view: View, position?: Position) => void; active?: boolean; onUrlChange?: (url: string) => void
 }) {
   const { positions, liveQuotes, fxRate, settings } = useStore()
@@ -137,7 +137,7 @@ export function ResearchView({ onOpenAssistant, onRequestImport, onGoTo, active 
             </>}
             {navigation.tab === 'sources' && <section className="rd-section"><div className="rd-section-head"><div><h3>Read at the source</h3><p>{selected.type === 'mutual-fund' ? 'Confirm that the scheme, plan and option match your holding.' : 'Confirm the listing and reporting period before using a figure.'}</p></div></div><SourceList links={links} /><p className="rd-callout">Search links help you locate a matching document. They do not verify the destination or its data. Company facts are provided by those sources.</p><p className="rd-footnote">Opening a link shares its investment query with the destination. Background lookups are {settings.allowExternalData ? 'enabled' : 'off'}.</p></section>}
           </div>
-          <footer className="rd-dossier-foot"><div><strong>Continue your review</strong><span>Explore news or draft a question for your configured AI provider.</span></div><div className="rd-foot-actions">{onGoTo && <button type="button" className="btn btn--secondary" onClick={() => onGoTo('holdings', selected)}>Related news</button>}<button type="button" className="btn btn--secondary" onClick={() => onOpenAssistant(selected)}>Ask about this holding <span aria-hidden="true">↗</span></button>{onGoTo && <button type="button" className="rd-text-button" onClick={() => onGoTo('insights')}>Portfolio insights →</button>}</div><p className="rd-footnote">AI opens an editable draft. Nothing is sent until you submit.</p></footer>
+          {onGoTo && <footer className="rd-dossier-foot"><div><strong>Continue your review</strong><span>Explore related news or review your portfolio insights.</span></div><div className="rd-foot-actions"><button type="button" className="btn btn--secondary" onClick={() => onGoTo('holdings', selected)}>Related news</button><button type="button" className="rd-text-button" onClick={() => onGoTo('insights')}>Portfolio insights →</button></div></footer>}
         </>}
       </article>
     </div>

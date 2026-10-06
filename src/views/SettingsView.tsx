@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { hexToHsv, hsvToHex, type Hsv } from '../theme'
-import { describeOllamaEndpoint, isLocalProvider, LOCAL_MODEL_PRESETS, PROVIDERS } from '../providers'
 import { ACCENTS, ACCENT_KEYS, normalizeHex } from '../theme'
 import type { Accent, Density, Mode } from '../types'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
 
-const STORAGE_HINT =
-  'Keys stay in this browser tab and go directly to the provider you choose. Finverse has no backend. Use a low-limit key and do not share this device.'
-
-type SettingsSection = 'preferences' | 'privacy' | 'ai'
+type SettingsSection = 'preferences' | 'privacy'
 
 export function SettingsView() {
   const { settings, setSettings } = useStore()
@@ -66,19 +62,9 @@ export function SettingsView() {
   useEffect(() => {
     if (settings.accent !== 'custom') setPickerOpen(false)
   }, [settings.accent])
-  const local = settings.provider ? isLocalProvider(settings.provider) : false
-  const ollamaDestination = local ? describeOllamaEndpoint(settings.baseUrl) : null
-  const configured = Boolean(settings.provider) && (
-    local
-      ? Boolean(ollamaDestination && !ollamaDestination.error && (!ollamaDestination.requiresConfirmation || settings.confirmRemoteOllama))
-      : Boolean(settings.apiKey)
-  )
-  const providerName = PROVIDERS.find((provider) => provider.id === settings.provider)?.name ?? 'Not connected'
-
   const sections: { id: SettingsSection; index: string; label: string; summary: string }[] = [
     { id: 'preferences', index: '01', label: 'Preferences', summary: `${settings.currency} · ${settings.density}` },
     { id: 'privacy', index: '02', label: 'Data & privacy', summary: settings.allowExternalData ? 'External data on' : 'Local-first' },
-    { id: 'ai', index: '03', label: 'AI connection', summary: configured ? providerName : 'Not configured' },
   ]
 
   return (
@@ -88,7 +74,7 @@ export function SettingsView() {
           <div className="page-eyebrow">05 · Workspace</div>
           <h1 className="page-title">Settings</h1>
         </div>
-        <p className="page-sub">Control the workspace, connections, and where portfolio data can go.</p>
+        <p className="page-sub">Control the workspace and where portfolio data can go.</p>
       </div>
 
       <div className="settings-shell enter d1">
@@ -235,7 +221,7 @@ export function SettingsView() {
               title="Data & privacy"
               description="Finverse is local-first. External access remains off until you allow it."
             >
-              <StatusPill state="on" label="Local-first" />
+              <span className="settings-status-pill settings-status-pill--on" role="status"><span className="settings-status-dot" />Local-first</span>
             </SettingsSectionHeader>
           )}
           {activeSection === 'privacy' && (
@@ -260,134 +246,16 @@ export function SettingsView() {
                 </div>
                 <div className="settings-group">
                   <DataRow label="Portfolio & history" destination="This browser">
-                    Holdings, tracked history, and saved AI chat use local storage.
+                    Holdings and tracked history use local storage.
                   </DataRow>
                   <DataRow label="Market data" destination={settings.allowExternalData ? 'Identifiers only' : 'Blocked'}>
                     Quote providers receive instrument identifiers, never quantities or cost basis.
-                  </DataRow>
-                  <DataRow label="AI requests" destination="Only on submit">
-                    Your selected provider receives portfolio context only when you send a prompt.
-                  </DataRow>
-                  <DataRow label="API credentials" destination="This tab">
-                    Provider keys use session storage and are removed when the tab session ends.
                   </DataRow>
                 </div>
               </section>
             </div>
           )}
 
-          {activeSection === 'ai' && (
-            <SettingsSectionHeader
-              eyebrow="Assistant"
-              title="AI connection"
-              description="Choose the model that powers portfolio questions and analysis."
-            >
-              <StatusPill state={configured ? 'on' : 'off'} label={configured ? 'Configured' : 'Not configured'} />
-            </SettingsSectionHeader>
-          )}
-          {activeSection === 'ai' && (
-            <div className="settings-stack">
-              <div className="settings-group ai-settings-group">
-                <SettingRow label="Provider" description="Requests go directly from this browser to the selected provider.">
-                  <select
-                    id="provider"
-                    className="select settings-control settings-control--wide"
-                    aria-label="AI provider"
-                    value={settings.provider}
-                    onChange={(event) => {
-                      const id = event.target.value as typeof settings.provider
-                      const provider = PROVIDERS.find((item) => item.id === id)
-                      if (id === settings.provider) return
-                      update({
-                        provider: id,
-                        apiKey: '',
-                        model: provider?.model || '',
-                        baseUrl: id === 'ollama' ? 'http://localhost:11434/v1' : '',
-                        confirmRemoteOllama: false,
-                      })
-                    }}
-                  >
-                    <option value="">Select a provider</option>
-                    {PROVIDERS.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-                  </select>
-                </SettingRow>
-
-                {!settings.provider && (
-                  <div className="settings-empty-state">
-                    <span className="settings-empty-mark" aria-hidden="true">AI</span>
-                    <div>
-                      <strong>No provider selected</strong>
-                      <p>Choose a provider to configure the assistant. Nothing is sent until you submit a prompt.</p>
-                    </div>
-                  </div>
-                )}
-
-                {local && (
-                  <div className="ai-config-fields">
-                    <div className="settings-form-grid">
-                      <TextField id="model" label="Model" placeholder="e.g. qwen2.5:1.5b" value={settings.model} onChange={(model) => update({ model })} />
-                      <TextField
-                        id="baseurl"
-                        label="Base URL"
-                        placeholder="http://localhost:11434/v1"
-                        value={settings.baseUrl}
-                        onChange={(baseUrl) => update({ baseUrl, confirmRemoteOllama: false })}
-                      />
-                    </div>
-                    <div className="field">
-                      <span className="field-label">Installed on this device</span>
-                      <div className="model-chips">
-                        {LOCAL_MODEL_PRESETS.map((model) => (
-                          <button
-                            key={model}
-                            type="button"
-                            className={`model-chip${settings.model === model ? ' model-chip--active' : ''}`}
-                            aria-pressed={settings.model === model}
-                            onClick={() => update({ model })}
-                          >
-                            {model}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {ollamaDestination && (
-                      <div className="ollama-destination" role={ollamaDestination.error ? 'alert' : 'status'}>
-                        <span className="field-label">Resolved destination</span>
-                        <code>{ollamaDestination.endpoint}</code>
-                        {ollamaDestination.error && <span className="hint down">{ollamaDestination.error}</span>}
-                        {!ollamaDestination.error && ollamaDestination.requiresConfirmation && (
-                          <label className="remote-ollama-confirm">
-                            <input
-                              type="checkbox"
-                              checked={settings.confirmRemoteOllama}
-                              onChange={(event) => update({ confirmRemoteOllama: event.target.checked })}
-                            />
-                            <span>I understand this sends my portfolio and chat to this remote HTTPS server.</span>
-                          </label>
-                        )}
-                      </div>
-                    )}
-                    <p className="hint">Use localhost or 127.0.0.1 with your Ollama port. Remote endpoints must use HTTPS and require confirmation before a request is sent.</p>
-                  </div>
-                )}
-
-                {settings.provider && !local && (
-                  <div className="ai-config-fields">
-                    <p className="hint">Credential destination: <code>{PROVIDERS.find((provider) => provider.id === settings.provider)?.endpoint}</code>. Switching providers clears the key and resets the model.</p>
-                    <div className="settings-form-grid">
-                      <TextField id="apikey" label="API key" type="password" placeholder="sk-…" value={settings.apiKey} onChange={(apiKey) => update({ apiKey })} />
-                      <TextField id="model" label="Model" placeholder={getProviderDefault(settings.provider)} value={settings.model} onChange={(model) => update({ model })} />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="settings-security-note">
-                <span className="settings-security-icon" aria-hidden="true">↗</span>
-                <p>{STORAGE_HINT}</p>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -487,35 +355,6 @@ function DataRow({ label, destination, children }: { label: string; destination:
       <span className="data-destination">{destination}</span>
     </div>
   )
-}
-
-function StatusPill({ state, label }: { state: 'on' | 'off'; label: string }) {
-  return (
-    <span className={`provider-status provider-status--${state}`} role="status">
-      <span className="provider-status-dot" />
-      {label}
-    </span>
-  )
-}
-
-function TextField({ id, label, type = 'text', placeholder, value, onChange }: {
-  id: string
-  label: string
-  type?: string
-  placeholder: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="field">
-      <label className="field-label" htmlFor={id}>{label}</label>
-      <input id={id} className="input" type={type} placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} />
-    </div>
-  )
-}
-
-function getProviderDefault(provider: string): string {
-  return PROVIDERS.find((item) => item.id === provider)?.model ?? 'model'
 }
 
 function capitalize(value: string): string {
