@@ -14,6 +14,36 @@ describe('news API', () => {
     expect(await response.text()).toContain('Reliance rises')
     expect(fetcher.mock.calls[0][0].toString()).toContain('news.google.com/rss/search')
     expect(fetcher.mock.calls[1][0].toString()).toContain('bing.com/news/search')
+    expect(new URL(fetcher.mock.calls[0][0].toString()).searchParams.get('q')).toBe('RELIANCE stock India when:14d')
+    expect(new URL(fetcher.mock.calls[0][0].toString()).searchParams.get('gl')).toBe('IN')
+  })
+
+  it.each([
+    { region: 'US', locale: 'en-US', company: 'Apple', suffix: 'stock United States' },
+    { region: 'GB', locale: 'en-GB', company: 'Shell', suffix: 'stock United Kingdom' },
+  ])('uses the $region market for holding searches and provider fallback', async ({ region, locale, company, suffix }) => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 403 }))
+      .mockResolvedValueOnce(new Response(STORY))
+    const response = await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=search&q=${company}&region=${region}`))
+    const google = new URL(fetcher.mock.calls[0][0].toString())
+    const bing = new URL(fetcher.mock.calls[1][0].toString())
+
+    expect(response.status).toBe(200)
+    expect(google.searchParams.get('q')).toBe(`${company} ${suffix} when:14d`)
+    expect(google.searchParams.get('hl')).toBe(locale)
+    expect(google.searchParams.get('gl')).toBe(region)
+    expect(google.searchParams.get('ceid')).toBe(`${region}:en`)
+    expect(bing.searchParams.get('q')).toBe(`${company} ${suffix}`)
+    expect(bing.searchParams.get('mkt')).toBe(locale)
+  })
+
+  it.each(['DE', 'us', '', 'US%2CIN'])('rejects unsupported region %s before contacting a provider', async (region) => {
+    const fetcher = vi.fn<typeof fetch>()
+    const response = await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=search&q=Apple&region=${region}`))
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('Invalid news region.')
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('rejects arbitrary upstream URLs', async () => {

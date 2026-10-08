@@ -154,6 +154,7 @@ export function useMonitor() {
   const quoteRecords = useMemo(() => latestQuoteRecords(positions, liveQuotes, now, settings.allowExternalData), [positions, liveQuotes, now, settings.allowExternalData])
   const currentDate = today(now)
   return {
+    now,
     positions,
     hideValues: settings.hideValues,
     allowExternalData: settings.allowExternalData,

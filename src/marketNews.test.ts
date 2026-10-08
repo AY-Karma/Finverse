@@ -11,6 +11,7 @@ import {
   type NewsItem,
 } from './marketNews'
 import type { Position } from './types'
+import { holdingIdentity } from './monitor'
 
 const NOW = Date.parse('2026-08-24T10:00:00Z')
 const hoursAgo = (hours: number) => new Date(NOW - hours * 3_600_000).toUTCString()
@@ -124,6 +125,15 @@ describe('dedupeItems', () => {
 })
 
 describe('eligibleHoldings', () => {
+  it('combines same-instrument lots while preserving equal tickers in different markets', () => {
+    const airline: Position = { ...positions[0], id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ', currency: 'USD' }
+    const miner: Position = { ...positions[0], id: 'miner', ticker: 'AAL', name: 'Anglo American plc', exchange: 'LSE' }
+    const holdings = eligibleHoldings([airline, { ...airline, id: 'second-lot' }, miner])
+    expect(holdings).toHaveLength(2)
+    expect(holdings.map(({ identity, region }) => [identity, region])).toEqual([
+      [holdingIdentity(airline), 'US'], [holdingIdentity(miner), 'GB'],
+    ])
+  })
   it('covers equities and ETFs plus legacy rows with provider symbols, never mutual funds', () => {
     const legacyOther: Position = { id: 'krn', ticker: 'KRN', name: 'KRN Heat Exchanger', type: 'other', quantity: 1, buyPrice: 1, lastPrice: 1, invested: 1, exchange: 'NSE', providerSymbol: 'KRN.NS' }
     const bareOther: Position = { id: 'unk', ticker: 'UNK', name: 'Unknown Asset', type: 'other', quantity: 1, buyPrice: 1, lastPrice: 1, invested: 1 }
@@ -132,6 +142,22 @@ describe('eligibleHoldings', () => {
     const tickers = eligibleHoldings([...positions, legacyOther, bareOther, etf]).map((holding) => holding.ticker)
 
     expect(tickers).toEqual(['RELIANCE', 'TCS', 'KRN', 'NIFTYBEES'])
+  })
+
+  it('selects the news market from exchange before falling back to currency', () => {
+    const base = positions[0]
+    const holdings = eligibleHoldings([
+      { ...base, ticker: 'AAPL', exchange: 'NASDAQ', currency: 'USD' },
+      { ...base, ticker: 'IBM', exchange: 'NYSE', currency: 'INR' },
+      { ...base, ticker: 'SHEL', exchange: 'LSE', currency: 'USD' },
+      { ...base, ticker: 'RELIANCE', exchange: 'NSE', currency: 'USD' },
+      { ...base, ticker: 'BSE-EQ', exchange: 'BSE' },
+      { ...base, ticker: 'US-EQ', exchange: undefined, currency: 'USD' },
+      { ...base, ticker: 'UNKNOWN', exchange: undefined, currency: undefined },
+    ])
+    expect(holdings.map(({ ticker, region }) => [ticker, region])).toEqual([
+      ['AAPL', 'US'], ['IBM', 'US'], ['SHEL', 'GB'], ['RELIANCE', 'IN'], ['BSE-EQ', 'IN'], ['US-EQ', 'US'], ['UNKNOWN', 'IN'],
+    ])
   })
 })
 
@@ -255,6 +281,25 @@ describe('market news adapter · company search', () => {
     expect(otherQuery.items.every((item, index) => item.id !== first.items[index].id)).toBe(true)
   })
 
+  it('separates the same query by news region while sharing the default Indian search cache', async () => {
+    const request = vi.fn(async (_url: string) => BING_FEED)
+    const adapter = createMarketNewsAdapter(request)
+    const defaultRegion = await adapter.fetchCompanyNews('Shell', {})
+    await adapter.fetchCompanyNews('Shell', { region: 'IN' })
+    const us = await adapter.fetchCompanyNews('Shell', { region: 'US' })
+    const gb = await adapter.fetchCompanyNews('Shell', { region: 'GB' })
+    await adapter.fetchCompanyNews(' shell ', { region: 'US' })
+    await adapter.fetchCompanyNews('Shell', { region: 'GB' })
+
+    expect(request.mock.calls.map(([url]) => url)).toEqual([
+      '/api/news?source=search&q=Shell',
+      '/api/news?source=search&q=Shell&region=US',
+      '/api/news?source=search&q=Shell&region=GB',
+    ])
+    expect(us.items[0].id).not.toBe(defaultRegion.items[0].id)
+    expect(gb.items[0].id).not.toBe(us.items[0].id)
+  })
+
   it('reports failed searches as issues and retries after the failure cache expires', async () => {
     let calls = 0
     const adapter = createMarketNewsAdapter(async () => {
@@ -344,6 +389,13 @@ describe('loadMarketFeed', () => {
 
     expect(adapter.fetchCompanyNews).not.toHaveBeenCalled()
     expect(feed.items.map((item) => item.id)).toEqual(['wire:1'])
+  })
+
+  it('passes the holding region to company search without changing the standing wire', async () => {
+    const adapter = makeStub()
+    await loadMarketFeed(positions, { query: 'Apple', region: 'US' }, adapter)
+    expect(adapter.fetchCompanyNews).toHaveBeenCalledWith('Apple', expect.objectContaining({ region: 'US' }))
+    expect(adapter.fetchWire.mock.calls[0][0]).not.toHaveProperty('region')
   })
 
   it('never attributes stories to mutual-fund holdings', async () => {

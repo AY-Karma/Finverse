@@ -46,11 +46,28 @@ export function pagedEvents(events: NewsItem[], page: number, pageSize: number):
   return events.slice(offset, offset + pageSize)
 }
 
-export function titleParts(title: string): { text: string; sentiment: NewsSentiment }[] {
-  const sentiment = sentimentForTitle(title)
-  if (sentiment === 'neutral') return [{ text: title, sentiment }]
-  return title.split(/(\d+(?:\.\d+)?%)/g).filter(Boolean).map((text) => ({
-    text,
-    sentiment: /\d+(?:\.\d+)?%/.test(text) ? sentiment : 'neutral',
-  }))
+export function titleParts(title: string): { text: string; sentiment: NewsSentiment; highlighted?: boolean }[] {
+  const amounts = /(?<!\w)[+−-]?(?:₹|Rs\.?|INR|USD|\$|£|€)\s*[+−-]?\d+(?:,\d+)*(?:\.\d+)?(?:\s*(?:crore|cr|lakh|million|billion|bn)\b)?|(?<!\w)[+−-]?\d+(?:,\d+)*(?:\.\d+)?%/gi
+  const shareMove = /\b(?:shares?|stock|share price|stock price)\s+(?:(?:is|are|was|were)\s+)?(?:(?:trades?|traded|trading)\s+)?(up|down|gains?|gained|rises?|rose|risen|jumps?|jumped|surges?|surged|rally|rallies|rallied|soars?|soared|falls?|fell|fallen|drops?|dropped|plunges?|plunged|declines?|declined|slumps?|slumped|tumbles?|tumbled)\s+(?:by\s+)?(?:(?:about|nearly|almost|over)\s+)?$/i
+  const upwardMove = /^(up|gain|rise|rose|risen|jump|surge|rall|soar)/i
+  const impactContext = /\b(?:impact|(?:(?:share|stock)\s+)?price change|day move)\s*[:=]?\s*$/i
+  const parts: ReturnType<typeof titleParts> = []
+  let offset = 0
+  for (const match of title.matchAll(amounts)) {
+    if (match.index > offset) parts.push({ text: title.slice(offset, match.index), sentiment: 'neutral' })
+    const text = match[0]
+    const prefix = title.slice(0, match.index)
+    const direction = prefix.match(shareMove)?.[1]
+    let sentiment: NewsSentiment = 'neutral'
+    const followsRange = /^[−-]/.test(text) && /[\d%]$/.test(prefix)
+    if (!followsRange && (direction || impactContext.test(prefix))) {
+      if (/[−-]/.test(text)) sentiment = 'negative'
+      else if (text.includes('+')) sentiment = 'positive'
+      else if (direction) sentiment = upwardMove.test(direction) ? 'positive' : 'negative'
+    }
+    parts.push({ text, sentiment, highlighted: true })
+    offset = match.index + text.length
+  }
+  if (offset < title.length) parts.push({ text: title.slice(offset), sentiment: 'neutral' })
+  return parts.length ? parts : [{ text: title, sentiment: 'neutral' }]
 }

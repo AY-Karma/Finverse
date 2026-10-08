@@ -69,7 +69,7 @@ export function ReminderAction({ controller, onAdded }: PanelProps & { onAdded?:
           <h2 id="mp-reminder-title">Add a reminder</h2>
           <button className="mp-icon-button" type="button" aria-label="Close reminder form" onClick={() => dialog.current?.close()}>×</button>
         </div>
-        <p className="mp-muted">Saved in this browser and shown in your Timeline. No notification is sent. {remaining} of {MAX_REMINDERS} reminder slots available.</p>
+        <p className="mp-muted">Saved in this browser and shown in Personal reminders. No notification is sent. {remaining} of {MAX_REMINDERS} reminder slots available.</p>
         <label className="mp-field">
           About
           <select value={holdingId} onChange={(event) => setHoldingId(event.target.value)}>
