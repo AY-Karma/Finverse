@@ -44,7 +44,11 @@
 .mn-issues p + p { margin-top: 8px !important; }
 .mn-story { padding: 16px; border-top: 1px solid var(--hairline); }
 .mn-story-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; gap: 10px; }
+.mn-story-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 9px; min-width: 0; }
 .mn-story-tag { color: var(--ink-muted); font-size: 13px; line-height: 1.4; font-family: var(--font-mono); font-weight: 550; letter-spacing: .04em; overflow-wrap: anywhere; }
+.mn-tone { --mn-tone-color: var(--ink-muted); display: inline-flex; align-items: center; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--mn-tone-color) 30%, transparent); border-radius: 4px; background: color-mix(in srgb, var(--mn-tone-color) 7%, var(--surface-1)); color: var(--mn-tone-color); font-size: 12px; font-weight: 550; line-height: 1.5; white-space: nowrap; }
+.mn-tone-positive { --mn-tone-color: var(--mp-positive, var(--semantic-success)); }
+.mn-tone-negative { --mn-tone-color: var(--mp-negative, var(--semantic-danger)); }
 .mn-panel .mn-dismiss { border-color: transparent; background: transparent; width: 28px; height: 28px; }
 .mn-story-title { display: block; font-size: 17px; line-height: 1.6; font-weight: 500; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .mn-story-title:hover { text-decoration: underline; text-underline-offset: 3px; }

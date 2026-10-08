@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { eligibleHoldings, loadMarketFeed, type LoadedMarketFeed, type NewsItem } from '../marketNews'
 import { filterNewsEvents, pageCount, pagedEvents, titleParts, type NewsFeedFilters } from '../monitorFeed'
+import { classifyHeadline, type HeadlineTone } from '../headlineTone'
 import { useStore } from '../useStore'
 import { MonitorNewsIcon } from './MonitorNewsIcon'
 import './monitorNewsPanel.css'
 
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 const PAGE_SIZE = 3
+const TONE_LABELS: Record<HeadlineTone, string> = { positive: '+ Positive', negative: '− Negative', mixed: '± Mixed', unknown: '? Unclear' }
 
 export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selectedRevision }: { initialQuery?: string; selectedIdentity?: string; selectedRevision?: number }) {
   const { positions, settings } = useStore()
@@ -154,7 +156,7 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
           <summary><FilterIcon /> Filters</summary>
           <div className="mn-filter-fields">
             <label>Order<select value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value as NewsFeedFilters['sort'] })}><option value="latest">Latest first</option><option value="company">By holding</option></select></label>
-            <label>Headline language<select value={filters.sentiment} onChange={(event) => updateFilters({ sentiment: event.target.value as NewsFeedFilters['sentiment'] })}><option value="all">All headlines</option><option value="positive">Positive words</option><option value="negative">Negative words</option><option value="neutral">Neutral words</option></select></label>
+            <label>Headline tone<select value={filters.sentiment} onChange={(event) => updateFilters({ sentiment: event.target.value as NewsFeedFilters['sentiment'] })}><option value="all">All headlines</option><option value="positive">Positive</option><option value="negative">Negative</option><option value="mixed">Mixed</option><option value="unknown">Unclear</option></select></label>
             <label>Contains<input type="search" value={filters.query} onChange={(event) => updateFilters({ query: event.target.value })} placeholder="Headline or source" /></label>
           </div>
         </details>
@@ -183,8 +185,16 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
 }
 
 function NewsStory({ item, onDismiss }: { item: NewsItem; onDismiss: () => void }) {
+  const tone = classifyHeadline(item.title)
+  const explanation = `Estimated headline tone: ${tone.status === 'unknown' ? 'unclear' : tone.status}. ${tone.reason}`
   return <article className="mn-story">
-    <div className="mn-story-top"><span className="mn-story-tag" title={item.matches.length ? `Headline mentions ${item.matches.join(', ')}` : 'No portfolio holding names matched in this headline'}>{item.matches.length ? item.matches.join(' · ') : item.origin === 'search' ? 'SEARCH' : 'MARKET'}</span><button className="mn-icon-button mn-dismiss" type="button" aria-label={`Dismiss ${item.title}`} onClick={onDismiss}><CloseIcon /></button></div>
+    <div className="mn-story-top">
+      <div className="mn-story-tags">
+        <span className="mn-story-tag" title={item.matches.length ? `Headline mentions ${item.matches.join(', ')}` : 'No portfolio holding names matched in this headline'}>{item.matches.length ? item.matches.join(' · ') : item.origin === 'search' ? 'SEARCH' : 'MARKET'}</span>
+        <span className={`mn-tone mn-tone-${tone.status}`} role="img" aria-label={explanation} title={explanation}>{TONE_LABELS[tone.status]}</span>
+      </div>
+      <button className="mn-icon-button mn-dismiss" type="button" aria-label={`Dismiss ${item.title}`} onClick={onDismiss}><CloseIcon /></button>
+    </div>
     <a className="mn-story-title" href={item.sourceUrl} target="_blank" rel="noreferrer">{titleParts(item.title).map((part, index) => part.highlighted ? <strong key={index} className={`mn-title-number mn-title-${part.sentiment}`}>{part.text}</strong> : part.text)} <ArrowIcon /></a>
     <div className="mn-story-meta"><span>{item.source}</span><time dateTime={item.publishedAt == null ? undefined : new Date(item.publishedAt).toISOString()}>{item.publishedAt == null ? 'Time unavailable' : new Date(item.publishedAt).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</time></div>
   </article>

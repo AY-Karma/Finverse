@@ -75,6 +75,35 @@ afterEach(async () => {
 })
 
 describe('portfolio news', () => {
+  it('shows explained tone badges beside Market and filters using the same classification', async () => {
+    const titles = [
+      'US jobless claims hover near 57-year low for fourth consecutive week',
+      'Rs 9,395 crore block deal! GQG exits ITC shares after a sharp 30% crash this year',
+      'Revenue rises but profit falls',
+      'Company appoints a new director',
+    ]
+    loadFeed.mockResolvedValue(feed(titles.map((title, index) => ({ ...story(String(index), []), title }))))
+    await renderPanel()
+    await clickButton('Market')
+    expect([...container.querySelectorAll('.mn-story-tags')].every((tags) => tags.querySelector('.mn-story-tag')?.textContent === 'MARKET' && tags.querySelector('.mn-tone'))).toBe(true)
+    expect([...container.querySelectorAll('.mn-tone')].map((badge) => badge.textContent)).toEqual(['+ Positive', '− Negative', '± Mixed'])
+    expect(container.querySelector('.mn-tone-negative')?.getAttribute('aria-label')).toContain('Estimated headline tone: negative.')
+    expect(container.querySelector('.mn-tone-negative')?.getAttribute('title')).toContain('crash')
+
+    await clickButton('Search and filter market news')
+    const select = [...container.querySelectorAll<HTMLSelectElement>('.mn-filter-fields select')][1]
+    for (const [status, index] of [['positive', 0], ['negative', 1], ['mixed', 2], ['unknown', 3]] as const) {
+      await act(async () => {
+        select.value = status
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(container.querySelectorAll('article')).toHaveLength(1)
+      expect(container.querySelector('.mn-story-title')?.textContent?.trim()).toBe(titles[index])
+      expect(container.querySelector(`.mn-tone-${status}`)).not.toBeNull()
+    }
+    expect(loadFeed).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps publisher headlines readable and emphasizes only their relevant financial figures', async () => {
     const titles = [
       'TCS shares gain 1.25% as investors assess its AI services update',

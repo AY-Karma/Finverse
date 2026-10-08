@@ -126,6 +126,46 @@ describe('Portfolio Watch masking', () => {
     expect(container.querySelector('.pa-record[data-tone="neutral"]')).toBeNull()
   })
 
+  it.each([true, false])('toggles summary details and activity back to Brief with open alerts: %s', async (hasOpenAlerts) => {
+    await renderWatch(false)
+    if (!hasOpenAlerts) {
+      for (let index = 0; index < 3; index += 1) {
+        const review = container.querySelector<HTMLButtonElement>('button[aria-label^="Mark reviewed:"]')!
+        await act(async () => { review.click() })
+      }
+    }
+    const details = container.querySelector<HTMLButtonElement>('.pa-summary-footer button')!
+    const activity = container.querySelector<HTMLButtonElement>('.pa-summary-review')!
+    expect(activity.textContent).toContain(hasOpenAlerts ? 'Review alerts' : 'Open activity')
+
+    await act(async () => { details.click() })
+    expect(container.querySelector('.pa-holdings')).not.toBeNull()
+    expect(details.getAttribute('aria-expanded')).toBe('true')
+    expect(details.textContent).toContain('Hide details')
+    await act(async () => { details.click() })
+    expect(container.querySelector('.pa-holdings')).toBeNull()
+    expect(container.querySelector('.pa-brief')).not.toBeNull()
+    expect(details.getAttribute('aria-expanded')).toBe('false')
+
+    await act(async () => { activity.click() })
+    expect(container.querySelector('.pa-ledger')).not.toBeNull()
+    expect(activity.getAttribute('aria-expanded')).toBe('true')
+    expect(activity.textContent).toContain('Close activity')
+    await act(async () => { activity.click() })
+    expect(container.querySelector('.pa-ledger')).toBeNull()
+    expect(container.querySelector('.pa-brief')).not.toBeNull()
+    expect(activity.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('.pa-views button[aria-pressed="true"]')?.textContent).toBe('Brief')
+
+    await clickButton('Holdings')
+    expect(details.getAttribute('aria-expanded')).toBe('true')
+    await act(async () => { details.click() })
+    expect(container.querySelector('.pa-brief')).not.toBeNull()
+    await clickButton('Activity')
+    await act(async () => { activity.click() })
+    expect(container.querySelector('.pa-brief')).not.toBeNull()
+  })
+
   it('shows a dated largest impact and masks its identity and breadth geometry', async () => {
     await renderWatch(false)
     state.store.liveQuotes = {

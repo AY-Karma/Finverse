@@ -1,4 +1,5 @@
 import type { NewsItem } from './marketNews'
+import { classifyHeadline, type HeadlineTone } from './headlineTone'
 
 export type NewsSentiment = 'positive' | 'negative' | 'neutral'
 type NewsSort = 'latest' | 'company'
@@ -6,17 +7,12 @@ type NewsSort = 'latest' | 'company'
 export interface NewsFeedFilters {
   query: string
   ticker: string
-  sentiment: 'all' | NewsSentiment
+  sentiment: 'all' | HeadlineTone
   sort: NewsSort
 }
 
-const NEGATIVE_TERMS = /\b(down|fall(?:s|en)?|drop(?:s|ped)?|plung(?:e|es|ed)|declin(?:e|es|ed)|slump(?:s|ed)?|tumble(?:s|d)?|loss(?:es)?|miss(?:es|ed)?|weak(?:ens|er)?|cut(?:s|ting)?|downgrade[ds]?)\b/i
-const POSITIVE_TERMS = /\b(up|rise[ns]?|gain(?:s|ed)?|jump(?:s|ed)?|surge(?:s|d)?|rall(?:y|ies|ied)?|soar(?:s|ed)?|beat(?:s)?|record profit|upgrade[ds]?)\b/i
-
-export function sentimentForTitle(title: string): NewsSentiment {
-  if (NEGATIVE_TERMS.test(title)) return 'negative'
-  if (POSITIVE_TERMS.test(title)) return 'positive'
-  return 'neutral'
+export function sentimentForTitle(title: string): HeadlineTone {
+  return classifyHeadline(title).status
 }
 
 /** Filters and orders the in-memory feed only. No holding data leaves the browser. */

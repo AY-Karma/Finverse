@@ -43,6 +43,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
   }
   const percent = (value: number | null) => controller.hideValues ? privateValue('', true) : value == null ? 'Unavailable' : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
   const chooseView = (next: ActivityView) => { setView(next); setVisibleCount(6) }
+  const toggleView = (next: 'holdings' | 'activity') => chooseView(view === next ? 'brief' : next)
   const alerts = controller.alerts.filter((alert) => filter === 'all' || (filter === 'open' ? alert.state === 'open' : alert.state !== 'open'))
   const activity = [...alerts, ...(filter === 'all' ? controller.quoteRecords : [])].sort((a, b) => b.at - a.at)
   const openAlerts = controller.alerts.filter((alert) => alert.state === 'open')
@@ -59,7 +60,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
     { label: 'Not reported', count: notReported, tone: 'unavailable' },
   ]
   const latestObservation = model.summary.latestObservedAt == null ? null : new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(model.summary.latestObservedAt)
-  const reviewActivity = () => { setFilter('open'); chooseView('activity') }
+  const reviewActivity = () => { setFilter('open'); toggleView('activity') }
   const showNews = (identity: string) => {
     onSelectNews(identity)
     window.requestAnimationFrame(() => {
@@ -83,7 +84,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <strong className="pa-summary-value" data-trend={valueTrend(largestImpact?.dayContribution ?? null)} title={largestImpact ? signedMoney(largestImpact.dayContribution) : undefined} aria-label={largestImpact ? signedMoney(largestImpact.dayContribution) : undefined}>{controller.hideValues ? privateValue('', true) : largestImpact ? summaryImpact(largestImpact.dayContribution!) : latestNav ? money(latestNav.price, latestNav.assetCurrency) : model.summary.impactCount ? money(0) : <span className="pa-summary-empty">{fundOnly ? 'Unavailable' : 'Not reported'}</span>}</strong>
         <span className="pa-summary-context">{controller.hideValues ? 'Values and rankings hidden' : largestImpact ? <>{largestImpact.ticker}{largestImpact.changePct != null && <> · <span className="pa-change" data-trend={valueTrend(largestImpact.changePct)}>{percent(largestImpact.changePct)}</span></>}</> : latestNav ? latestNav.name : fundOnly ? 'No recent fund NAV is available' : model.summary.impactCount ? 'Available impact estimates are zero' : 'A reported price change is needed to estimate impact'}</span>
         {(largestImpact || latestNav) && <span className="pa-summary-time">{observedLabel((largestImpact ?? latestNav)!)}</span>}
-        <div className="pa-summary-footer"><span>{fundOnly ? 'Daily NAV publication' : `${model.summary.impactCount} of ${model.summary.impactEligibleCount} quote estimates`}</span><button type="button" className="pa-link" onClick={() => chooseView('holdings')}>Details <span aria-hidden="true">↗</span></button></div>
+        <div className="pa-summary-footer"><span>{fundOnly ? 'Daily NAV publication' : `${model.summary.impactCount} of ${model.summary.impactEligibleCount} quote estimates`}</span><button type="button" className="pa-link" aria-expanded={view === 'holdings'} aria-controls="portfolio-holdings-details" onClick={() => toggleView('holdings')}>{view === 'holdings' ? 'Hide details' : 'Details'} <span aria-hidden="true">{view === 'holdings' ? '↑' : '↗'}</span></button></div>
       </div>
       <div className="pa-summary-card">
         <span className="pa-summary-label">Reported moves</span>
@@ -99,12 +100,12 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <span className="pa-summary-context">{model.summary.quoteCount} {model.summary.quoteCount === 1 ? 'quote' : 'quotes'} · {model.summary.navCount} daily {model.summary.navCount === 1 ? 'NAV' : 'NAVs'}</span>
         <span className="pa-summary-note">{latestObservation ? <>Latest · <time dateTime={new Date(model.summary.latestObservedAt!).toISOString()}>{latestObservation} IST</time></> : controller.allowExternalData ? 'No recent provider observations' : 'External market data is off'}</span>
       </div>
-      <button type="button" className="pa-summary-card pa-summary-review" aria-label={`Review ${controller.counts.open} open watch ${controller.counts.open === 1 ? 'alert' : 'alerts'}`} onClick={reviewActivity}>
+      <button type="button" className="pa-summary-card pa-summary-review" aria-expanded={view === 'activity'} aria-controls="portfolio-activity-details" aria-label={view === 'activity' ? 'Close activity' : `Review ${controller.counts.open} open watch ${controller.counts.open === 1 ? 'alert' : 'alerts'}`} onClick={reviewActivity}>
         <span className="pa-summary-label">To review <span aria-hidden="true">↗</span></span>
         <strong className="pa-summary-value" data-attention={controller.counts.open > 0}>{controller.counts.open}<small> {controller.counts.open === 1 ? 'alert' : 'alerts'}</small></strong>
         <span className="pa-summary-context">{controller.counts.activeRules} active watch {controller.counts.activeRules === 1 ? 'rule' : 'rules'}</span>
         <span className="pa-summary-note">{controller.counts.upcoming} upcoming {controller.counts.upcoming === 1 ? 'reminder' : 'reminders'}</span>
-        <span className="pa-summary-review-link">{controller.counts.open ? 'Review alerts' : 'Open activity'} <span aria-hidden="true">→</span></span>
+        <span className="pa-summary-review-link">{view === 'activity' ? 'Close activity' : controller.counts.open ? 'Review alerts' : 'Open activity'} <span aria-hidden="true">{view === 'activity' ? '↑' : '→'}</span></span>
       </button>
     </div>
     {(model.counts.stale > 0 || model.counts.imported > 0 || model.counts.unavailable > 0 || !controller.allowExternalData) && <p className="pa-data-note" role="status">{!controller.allowExternalData ? 'External data is off. Showing imported prices. ' : ''}{model.counts.stale > 0 ? `${model.counts.stale} older quotes. ` : ''}{model.counts.imported > 0 ? `${model.counts.imported} imported prices. ` : ''}{model.counts.unavailable > 0 ? `${model.counts.unavailable} prices unavailable. ` : ''}Only recent provider observations enter the move list.</p>}
@@ -134,7 +135,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
       {openAlerts.length > 2 && <p className="pa-explainer">{openAlerts.length - 2} more items in Activity.</p>}
     </div>}
 
-    {view === 'holdings' && <div className="pa-holdings">
+    {view === 'holdings' && <div className="pa-holdings" id="portfolio-holdings-details">
       <div className="pa-section-title"><h3>Every holding</h3><span>{model.counts.total} tracked</span></div>
       <div className="pa-table" role="table" aria-label="Holding market observations">
         <div className="pa-table-head" role="row"><span role="columnheader">Holding / as of</span><span role="columnheader">Price / NAV</span><span role="columnheader">Move</span><span role="columnheader">Est. impact</span><span role="columnheader">Weight</span></div>
@@ -150,7 +151,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
       <p className="pa-explainer">NAVs are daily publications. A missing move is unavailable, never zero.{model.counts.fxUnavailable > 0 ? ' FX is unavailable for some holdings; their converted impact and portfolio weights are unavailable.' : ''}</p>
     </div>}
 
-    {view === 'activity' && <div className="pa-ledger">
+    {view === 'activity' && <div className="pa-ledger" id="portfolio-activity-details">
       <div className="pa-section-title"><h3>Observation log</h3><span>Latest quotes & watch alerts</span></div>
       <div className="pa-filters" aria-label="Filter portfolio activity">
         {(['all', 'open', 'history'] as const).map((item) => <button type="button" key={item} aria-pressed={filter === item} onClick={() => { setFilter(item); setVisibleCount(6) }}>{item === 'all' ? 'All activity' : item === 'open' ? 'To review' : 'History'}</button>)}

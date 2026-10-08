@@ -21,6 +21,19 @@ const events: NewsItem[] = [
 ]
 
 describe('monitor feed', () => {
+  it.each([
+    ['Rs 9,395 crore block deal! GQG exits ITC shares after a sharp 30% crash this year', 'negative'],
+    ['US stocks: US markets fall as higher yields and oil prices flag inflation risk', 'negative'],
+    ['US jobless claims hover near 57-year low for fourth consecutive week', 'positive'],
+    ['Shares gain 2% as interest costs fall', 'positive'],
+    ['US jobless claims rise as layoffs increase', 'negative'],
+    ['Earnings beat expectations after cost cuts', 'positive'],
+    ['TCS shares fell 30%', 'negative'],
+    ['Infosys, Wipro ADRs fall nearly 3% after TCS earnings', 'negative'],
+  ])('classifies the financial meaning of %s', (title, expected) => {
+    expect(sentimentForTitle(title)).toBe(expected)
+  })
+
   it('filters by matched holding and sentiment, then sorts locally', () => {
     expect(filterNewsEvents(events, { query: '', ticker: 'TCS', sentiment: 'negative', sort: 'latest' }).map((event) => event.id)).toEqual(['one'])
     expect(filterNewsEvents(events, { query: '', ticker: 'all', sentiment: 'all', sort: 'company' }).map((event) => event.id)).toEqual(['four', 'two', 'one', 'three'])
