@@ -8,12 +8,12 @@ import './monitorNewsPanel.css'
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 const PAGE_SIZE = 3
 
-export function MonitorNewsPanel({ initialQuery = '', selectedTicker, selectedRevision }: { initialQuery?: string; selectedTicker?: string; selectedRevision?: number }) {
+export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selectedRevision }: { initialQuery?: string; selectedIdentity?: string; selectedRevision?: number }) {
   const { positions, settings } = useStore()
-  const holdingsKey = useMemo(() => positions.map((position) => `${position.id}:${position.ticker}:${position.name}:${position.type}:${position.providerSymbol ?? ''}:${position.exchange ?? ''}:${position.currency ?? ''}`).sort().join('|'), [positions])
+  const holdingsKey = useMemo(() => positions.map((position) => `${position.id}:${position.ticker}:${position.name}:${position.type}:${position.providerSymbol ?? ''}:${position.exchange ?? ''}:${position.currency ?? ''}:${position.instrumentKey ?? ''}:${position.isin ?? ''}`).sort().join('|'), [positions])
   const monitorPositions = useMemo(() => positions, [holdingsKey])
-  const holdings = useMemo(() => [...new Map(eligibleHoldings(monitorPositions).map((holding) => [holding.ticker, holding])).values()].sort((left, right) => left.ticker.localeCompare(right.ticker)), [monitorPositions])
-  const selectedHolding = holdings.find((holding) => holding.ticker === selectedTicker)
+  const holdings = useMemo(() => eligibleHoldings(monitorPositions).sort((left, right) => left.ticker.localeCompare(right.ticker) || left.identity.localeCompare(right.identity)), [monitorPositions])
+  const selectedHolding = holdings.find((holding) => holding.identity === selectedIdentity)
   const startingQuery = selectedHolding ? selectedHolding.name || selectedHolding.ticker : initialQuery
   const [feed, setFeed] = useState<LoadedMarketFeed | null>(null)
   const [loading, setLoading] = useState(false)
@@ -22,11 +22,11 @@ export function MonitorNewsPanel({ initialQuery = '', selectedTicker, selectedRe
   const [showTools, setShowTools] = useState(false)
   const [activeQuery, setActiveQuery] = useState(startingQuery)
   const [scope, setScope] = useState<'holdings' | 'market'>('holdings')
-  const [holdingTicker, setHoldingTicker] = useState(selectedHolding?.ticker ?? '')
+  const [holdingIdentity, setHoldingIdentity] = useState(selectedHolding?.identity ?? '')
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
   const [filters, setFilters] = useState<NewsFeedFilters>({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
   const [page, setPage] = useState(1)
-  const activeRegion = holdings.find((holding) => holding.ticker === holdingTicker)?.region
+  const activeRegion = holdings.find((holding) => holding.identity === holdingIdentity)?.region
   const previousInitialQuery = useRef(initialQuery)
 
   useEffect(() => {
@@ -34,21 +34,21 @@ export function MonitorNewsPanel({ initialQuery = '', selectedTicker, selectedRe
     previousInitialQuery.current = initialQuery
     setSearchDraft(initialQuery)
     setActiveQuery(initialQuery)
-    setHoldingTicker('')
+    setHoldingIdentity('')
     setFilters({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
     setPage(1)
   }, [initialQuery])
 
   useEffect(() => {
-    if (!selectedTicker || !selectedHolding) return
+    if (!selectedIdentity || !selectedHolding) return
     const query = selectedHolding.name || selectedHolding.ticker
     setSearchDraft(query)
     setActiveQuery(query)
-    setHoldingTicker(selectedHolding.ticker)
+    setHoldingIdentity(selectedHolding.identity)
     setScope('holdings')
     setFilters({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
     setPage(1)
-  }, [selectedTicker, selectedRevision, selectedHolding?.name, selectedHolding?.ticker, selectedHolding?.region])
+  }, [selectedIdentity, selectedRevision, selectedHolding?.name, selectedHolding?.identity, selectedHolding?.region])
 
   useEffect(() => {
     setFeed(null)
@@ -95,16 +95,16 @@ export function MonitorNewsPanel({ initialQuery = '', selectedTicker, selectedRe
   }
   const selectQuery = (query: string) => {
     setActiveQuery(query)
-    setHoldingTicker('')
+    setHoldingIdentity('')
     setFilters((value) => ({ ...value, ticker: 'all' }))
     setPage(1)
   }
-  const findHoldingNews = (ticker: string) => {
-    const holding = holdings.find((item) => item.ticker === ticker)
+  const findHoldingNews = (identity: string) => {
+    const holding = holdings.find((item) => item.identity === identity)
     const query = holding ? holding.name || holding.ticker : ''
     setSearchDraft(query)
     selectQuery(query)
-    setHoldingTicker(holding?.ticker ?? '')
+    setHoldingIdentity(holding?.identity ?? '')
     setScope('holdings')
   }
   const enabled = settings.allowExternalData && positions.length > 0
@@ -130,9 +130,9 @@ export function MonitorNewsPanel({ initialQuery = '', selectedTicker, selectedRe
         <button type="button" aria-pressed={scope === 'market'} disabled={!enabled} onClick={() => { setScope('market'); setSearchDraft(''); selectQuery('') }}>Market</button>
       </div>
     </div>
-    <label className="mn-holding-search"><span className="mn-sr-only">Find news for a holding</span><select aria-label="Find news for a holding" value={holdingTicker} disabled={!enabled || holdings.length === 0} onChange={(event) => findHoldingNews(event.target.value)}>
+    <label className="mn-holding-search"><span className="mn-sr-only">Find news for a holding</span><select aria-label="Find news for a holding" value={holdingIdentity} disabled={!enabled || holdings.length === 0} onChange={(event) => findHoldingNews(event.target.value)}>
       <option value="">Find news for a holding</option>
-      {holdings.map((holding) => <option value={holding.ticker} key={holding.ticker}>{holding.ticker} · {holding.name}</option>)}
+      {holdings.map((holding) => <option value={holding.identity} key={holding.identity}>{holding.ticker} · {holding.name} · {holding.region}</option>)}
     </select></label>
 
     {!enabled ? <div className="mn-empty">
@@ -148,7 +148,7 @@ export function MonitorNewsPanel({ initialQuery = '', selectedTicker, selectedRe
       <div className="mn-filter-row">
         <label className="mn-holding-filter"><span className="mn-sr-only">Filter news by holding</span><select value={filters.ticker} onChange={(event) => updateFilters({ ticker: event.target.value })}>
           <option value="all">All stories</option>
-          {holdings.map((holding) => <option value={holding.ticker} key={holding.ticker}>{holding.ticker}</option>)}
+          {[...eligibleTickers].map((ticker) => <option value={ticker} key={ticker}>{ticker}</option>)}
         </select></label>
         <details className="mn-filters">
           <summary><FilterIcon /> Filters</summary>
@@ -162,7 +162,7 @@ export function MonitorNewsPanel({ initialQuery = '', selectedTicker, selectedRe
       </div>
       {activeQuery && <div className="mn-query"><strong>Search: {activeQuery}</strong><button className="mn-text-button" type="button" onClick={() => { setSearchDraft(''); selectQuery('') }}>Back to wire</button></div>}
       <div className="mn-coverage">
-        <strong>{loading && feed == null ? 'Checking holding mentions...' : holdings.length ? `${matchedHoldings} of ${holdings.length} holdings mentioned` : 'No eligible company holdings'}</strong>
+        <strong>{loading && feed == null ? 'Checking holding mentions...' : holdings.length ? `${matchedHoldings} of ${eligibleTickers.size} ${eligibleTickers.size === holdings.length ? 'holdings' : 'holding symbols'} mentioned` : 'No eligible company holdings'}</strong>
         <p>{activeQuery ? 'Search results may include other companies. Matches use headline names and tickers.' : 'Matches use headline names and tickers. Coverage varies by publisher.'}</p>
         {positions.some((position) => position.type === 'mutual-fund') && <p>Mutual funds use NAV updates; constituent news is not available.</p>}
       </div>

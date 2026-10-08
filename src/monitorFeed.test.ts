@@ -76,6 +76,19 @@ describe('monitor feed', () => {
     ])
   })
 
+  it('keeps signed operating figures neutral beside an actual share-price move', () => {
+    for (const title of ['TCS revenue -2%, profit +5% in latest quarter', 'Revenue: −₹500, profit +₹250']) {
+      const parts = titleParts(title)
+      expect(parts.map((part) => part.text).join('')).toBe(title)
+      expect(parts.filter((part) => part.highlighted).every((part) => part.sentiment === 'neutral')).toBe(true)
+    }
+    expect(titleParts('TCS shares gain +1.25% as revenue falls -2%').filter((part) => part.highlighted)).toEqual([
+      { text: '+1.25%', sentiment: 'positive', highlighted: true },
+      { text: '-2%', sentiment: 'neutral', highlighted: true },
+    ])
+    expect(titleParts('Profit misses estimates as shares fall -3%')).toContainEqual({ text: '-3%', sentiment: 'negative', highlighted: true })
+  })
+
   it('handles explicitly reported price movements and sign formats without coloring generic keywords', () => {
     expect(titleParts('Share price rose by nearly 2.5%')).toContainEqual({ text: '2.5%', sentiment: 'positive', highlighted: true })
     expect(titleParts('Stock is trading down 0.8%')).toContainEqual({ text: '0.8%', sentiment: 'negative', highlighted: true })

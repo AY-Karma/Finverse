@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { loadMarketFeed, type LoadedMarketFeed, type NewsItem } from '../marketNews'
+import { holdingIdentity } from '../monitor'
 import type { Position } from '../types'
 import type { useStore } from '../useStore'
 import { MonitorNewsPanel } from './MonitorNewsPanel'
@@ -31,7 +32,7 @@ function feed(items: NewsItem[]): LoadedMarketFeed {
   return { items, issues: [], fetchedAt: 1000 }
 }
 
-async function renderPanel(props: { initialQuery?: string; selectedTicker?: string; selectedRevision?: number } = {}) {
+async function renderPanel(props: { initialQuery?: string; selectedIdentity?: string; selectedRevision?: number } = {}) {
   if (!root) {
     container = document.createElement('div')
     document.body.append(container)
@@ -46,10 +47,14 @@ async function clickButton(name: string) {
   await act(async () => { button!.click() })
 }
 
-async function selectHolding(ticker: string) {
+function newsIdentity(ticker: string) {
+  return holdingIdentity(state.store.positions.find((holding) => holding.ticker === ticker)!)
+}
+
+async function selectHolding(holding: string | Position) {
   const select = container.querySelector<HTMLSelectElement>('.mn-holding-search select')!
   await act(async () => {
-    select.value = ticker
+    select.value = typeof holding === 'string' ? newsIdentity(holding) : holdingIdentity(holding)
     select.dispatchEvent(new Event('change', { bubbles: true }))
   })
 }
@@ -96,7 +101,7 @@ describe('portfolio news', () => {
     expect(container.querySelector('.mn-coverage strong')?.textContent).toBe('2 of 2 holdings mentioned')
     expect(container.querySelector('.mn-story-tag')?.textContent).toBe('HDFCBANK · TCS')
     expect(container.textContent).toContain('Mutual funds use NAV updates; constituent news is not available.')
-    expect(container.querySelector('.mn-holding-search option[value="FUND"]')).toBeNull()
+    expect([...container.querySelectorAll('.mn-holding-search option')].some((option) => option.textContent?.includes('Small Cap Fund'))).toBe(false)
     expect(container.querySelector('.mn-story-title')?.getAttribute('href')).toBe('https://example.com/holding')
 
     await clickButton('Market')
@@ -115,7 +120,7 @@ describe('portfolio news', () => {
     await selectHolding('TCS')
     expect(loadFeed).toHaveBeenCalledTimes(2)
     expect(loadFeed.mock.calls[1][1]?.query).toBe('Tata Consultancy Services Ltd')
-    expect(container.querySelector<HTMLSelectElement>('.mn-holding-search select')?.value).toBe('TCS')
+    expect(container.querySelector<HTMLSelectElement>('.mn-holding-search select')?.value).toBe(newsIdentity('TCS'))
     expect(container.querySelectorAll('article')).toHaveLength(1)
     expect(container.querySelector('.mn-story-tag')?.textContent).toBe('SEARCH')
     expect(container.querySelector('.mn-coverage strong')?.textContent).toBe('0 of 2 holdings mentioned')
@@ -128,18 +133,18 @@ describe('portfolio news', () => {
   })
 
   it('accepts activity selections without repeating searches after quote-only store updates', async () => {
-    await renderPanel({ selectedTicker: 'HDFCBANK' })
+    await renderPanel({ selectedIdentity: newsIdentity('HDFCBANK') })
     expect(loadFeed).toHaveBeenCalledTimes(1)
     expect(loadFeed.mock.calls[0][1]?.query).toBe('HDFC Bank Ltd')
 
     state.store.positions = state.store.positions.map((holding) => ({ ...holding, lastPrice: 120 }))
-    await renderPanel({ selectedTicker: 'HDFCBANK' })
+    await renderPanel({ selectedIdentity: newsIdentity('HDFCBANK') })
     expect(loadFeed).toHaveBeenCalledTimes(1)
 
-    await renderPanel({ selectedTicker: 'TCS' })
+    await renderPanel({ selectedIdentity: newsIdentity('TCS') })
     expect(loadFeed).toHaveBeenCalledTimes(2)
     expect(loadFeed.mock.calls[1][1]?.query).toBe('Tata Consultancy Services Ltd')
-    await renderPanel({ selectedTicker: 'FUND' })
+    await renderPanel({ selectedIdentity: newsIdentity('FUND') })
     expect(loadFeed).toHaveBeenCalledTimes(2)
   })
 
@@ -160,14 +165,32 @@ describe('portfolio news', () => {
     expect(loadFeed.mock.calls.at(-1)?.[1]).not.toHaveProperty('region')
   })
 
+  it.each([false, true])('searches equal tickers in their own markets regardless of import order: %s', async (reverseOrder) => {
+    const airline: Position = { ...position('AAL', 'American Airlines'), id: 'airline', exchange: 'NASDAQ', currency: 'USD' }
+    const miner: Position = { ...position('AAL', 'Anglo American plc'), id: 'miner', exchange: 'LSE' }
+    state.store.positions = reverseOrder ? [miner, airline] : [airline, miner]
+    await renderPanel({ selectedIdentity: holdingIdentity(airline), selectedRevision: 1 })
+    expect(loadFeed.mock.calls[0][1]).toEqual(expect.objectContaining({ query: 'American Airlines', region: 'US' }))
+    const select = container.querySelector<HTMLSelectElement>('.mn-holding-search select')!
+    expect([...select.options].map((option) => option.value)).toEqual(expect.arrayContaining([holdingIdentity(airline), holdingIdentity(miner)]))
+    expect(select.options).toHaveLength(3)
+    expect(container.querySelector('.mn-coverage strong')?.textContent).toBe('0 of 1 holding symbols mentioned')
+
+    await selectHolding(miner)
+    expect(loadFeed.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ query: 'Anglo American plc', region: 'GB' }))
+    await renderPanel({ selectedIdentity: holdingIdentity(airline), selectedRevision: 2 })
+    expect(loadFeed.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ query: 'American Airlines', region: 'US' }))
+    expect(select.value).toBe(holdingIdentity(airline))
+  })
+
   it('reselects an activity holding after the local picker or Back to wire changes the query', async () => {
-    await renderPanel({ selectedTicker: 'HDFCBANK', selectedRevision: 1 })
+    await renderPanel({ selectedIdentity: newsIdentity('HDFCBANK'), selectedRevision: 1 })
     await selectHolding('TCS')
-    await renderPanel({ selectedTicker: 'HDFCBANK', selectedRevision: 2 })
+    await renderPanel({ selectedIdentity: newsIdentity('HDFCBANK'), selectedRevision: 2 })
     expect(loadFeed.mock.calls[2][1]?.query).toBe('HDFC Bank Ltd')
-    expect(container.querySelector<HTMLSelectElement>('[aria-label="Find news for a holding"]')?.value).toBe('HDFCBANK')
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Find news for a holding"]')?.value).toBe(newsIdentity('HDFCBANK'))
     await clickButton('Back to wire')
-    await renderPanel({ selectedTicker: 'HDFCBANK', selectedRevision: 3 })
+    await renderPanel({ selectedIdentity: newsIdentity('HDFCBANK'), selectedRevision: 3 })
     expect(loadFeed.mock.calls[4][1]?.query).toBe('HDFC Bank Ltd')
   })
 
@@ -216,7 +239,7 @@ describe('portfolio news', () => {
     await renderPanel()
     const firstSignal = loadFeed.mock.calls[0][1]?.signal
     expect(container.querySelector('[aria-label="Loading market news"]')).not.toBeNull()
-    await renderPanel({ selectedTicker: 'TCS' })
+    await renderPanel({ selectedIdentity: newsIdentity('TCS') })
     expect(firstSignal?.aborted).toBe(true)
 
     await act(async () => { pending[1](feed([story('current', ['TCS'], 'search')])) })

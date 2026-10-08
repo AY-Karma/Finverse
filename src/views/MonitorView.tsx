@@ -9,7 +9,7 @@ import './monitor.css'
 
 export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestImport: () => void; initialQuery?: string }) {
   const controller = useMonitor()
-  const [newsSelection, setNewsSelection] = useState({ ticker: '', revision: 0 })
+  const [newsSelection, setNewsSelection] = useState({ identity: '', revision: 0 })
   if (controller.positions.length === 0) {
     return <PortfolioRequiredState area="02 · Monitor" description="Bring in your holdings to follow price updates, create watch rules, and read portfolio news." onImport={onRequestImport} />
   }
@@ -29,8 +29,8 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
       </div>
     </header>
     <div className="mp-content-flow">
-      <MonitorActivityPanel controller={controller} onSelectNews={(ticker) => setNewsSelection((current) => ({ ticker, revision: current.revision + 1 }))} />
-      <MonitorNewsPanel initialQuery={initialQuery} selectedTicker={newsSelection.ticker} selectedRevision={newsSelection.revision} />
+      <MonitorActivityPanel controller={controller} onSelectNews={(identity) => setNewsSelection((current) => ({ identity, revision: current.revision + 1 }))} />
+      <MonitorNewsPanel initialQuery={initialQuery} selectedIdentity={newsSelection.identity} selectedRevision={newsSelection.revision} />
       <div className="mp-panel mp-watch-rules"><RulesPanel controller={controller} /></div>
     </div>
     <p className="mp-source-note">Prices and NAVs use provider observation times. Estimated impact uses your current units and the reported price change, converted at the available FX rate. Headlines are related coverage, not an explanation of a price move.</p>

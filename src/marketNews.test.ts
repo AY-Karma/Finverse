@@ -11,6 +11,7 @@ import {
   type NewsItem,
 } from './marketNews'
 import type { Position } from './types'
+import { holdingIdentity } from './monitor'
 
 const NOW = Date.parse('2026-08-24T10:00:00Z')
 const hoursAgo = (hours: number) => new Date(NOW - hours * 3_600_000).toUTCString()
@@ -124,6 +125,15 @@ describe('dedupeItems', () => {
 })
 
 describe('eligibleHoldings', () => {
+  it('combines same-instrument lots while preserving equal tickers in different markets', () => {
+    const airline: Position = { ...positions[0], id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ', currency: 'USD' }
+    const miner: Position = { ...positions[0], id: 'miner', ticker: 'AAL', name: 'Anglo American plc', exchange: 'LSE' }
+    const holdings = eligibleHoldings([airline, { ...airline, id: 'second-lot' }, miner])
+    expect(holdings).toHaveLength(2)
+    expect(holdings.map(({ identity, region }) => [identity, region])).toEqual([
+      [holdingIdentity(airline), 'US'], [holdingIdentity(miner), 'GB'],
+    ])
+  })
   it('covers equities and ETFs plus legacy rows with provider symbols, never mutual funds', () => {
     const legacyOther: Position = { id: 'krn', ticker: 'KRN', name: 'KRN Heat Exchanger', type: 'other', quantity: 1, buyPrice: 1, lastPrice: 1, invested: 1, exchange: 'NSE', providerSymbol: 'KRN.NS' }
     const bareOther: Position = { id: 'unk', ticker: 'UNK', name: 'Unknown Asset', type: 'other', quantity: 1, buyPrice: 1, lastPrice: 1, invested: 1 }

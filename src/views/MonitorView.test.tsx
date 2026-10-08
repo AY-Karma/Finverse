@@ -10,7 +10,7 @@ import { MonitorView } from './MonitorView'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore> }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
-vi.mock('./MonitorNewsPanel', () => ({ MonitorNewsPanel: ({ selectedTicker, selectedRevision }: { selectedTicker: string; selectedRevision: number }) => <section data-news-ticker={selectedTicker} data-news-revision={selectedRevision} /> }))
+vi.mock('./MonitorNewsPanel', () => ({ MonitorNewsPanel: ({ selectedIdentity, selectedRevision }: { selectedIdentity: string; selectedRevision: number }) => <section data-news-identity={selectedIdentity} data-news-revision={selectedRevision} /> }))
 
 let root: Root
 let container: HTMLDivElement
@@ -240,13 +240,28 @@ describe('Portfolio Watch masking', () => {
     expect(action.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
     expect(action.textContent).not.toContain('↗')
     await clickButton('View news for UP')
-    expect(container.querySelector('[data-news-ticker="UP"]')?.getAttribute('data-news-revision')).toBe('1')
+    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-identity')).toBe(holdingIdentity(state.store.positions[0]))
+    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-revision')).toBe('1')
     await clickButton('View news for UP')
-    expect(container.querySelector('[data-news-ticker="UP"]')?.getAttribute('data-news-revision')).toBe('2')
+    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-revision')).toBe('2')
     await clickButton('Holdings')
     await clickButton('View news for UP')
-    expect(container.querySelector('[data-news-ticker="UP"]')?.getAttribute('data-news-revision')).toBe('3')
+    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-revision')).toBe('3')
     vi.restoreAllMocks()
+  })
+
+  it('routes equal-ticker holdings to their own market identity', async () => {
+    await renderWatch(false)
+    const base = state.store.positions[0]
+    const airline = { ...base, id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ' as const, currency: 'USD' as const }
+    const miner = { ...base, id: 'miner', ticker: 'AAL', name: 'Anglo American plc', exchange: 'LSE' as const }
+    state.store.positions = [airline, miner]
+    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
+    await clickButton('Holdings')
+    for (const holding of [airline, miner]) {
+      await clickButton(`View news for ${holding.name}`)
+      expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-identity')).toBe(holdingIdentity(holding))
+    }
   })
 
   it('shows published NAV updates without inventing fund moves or constituent news', async () => {

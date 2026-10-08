@@ -1,5 +1,5 @@
 import { instrumentLabel } from './instruments'
-import { freshQuote, usableQuote } from './monitor'
+import { freshQuote, holdingIdentity, usableQuote } from './monitor'
 import type { Currency, FxRate, LiveQuote, Position } from './types'
 import { combinePositions, effectivePrice, quoteKey } from './valuation'
 
@@ -7,6 +7,7 @@ export type ActivityFreshness = 'recent' | 'stale' | 'imported' | 'unavailable'
 
 export interface HoldingActivity {
   id: string
+  instrumentIdentity: string
   key: string
   ticker: string
   name: string
@@ -141,6 +142,7 @@ export function buildPortfolioActivity({
     const movement = changePct ?? change
     const holding: HoldingActivity = {
       id: position.id,
+      instrumentIdentity: holdingIdentity(position),
       key,
       ticker: instrumentLabel(position),
       name: position.name,

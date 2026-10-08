@@ -25,7 +25,7 @@ function observedLabel(row: HoldingActivity): string {
   return `${date} ${row.marketTimeZone === 'Asia/Kolkata' ? 'IST' : row.marketTimeZone === 'America/New_York' ? 'ET' : 'London'}`
 }
 
-export function MonitorActivityPanel({ controller, onSelectNews }: { controller: MonitorController; onSelectNews: (ticker: string) => void }) {
+export function MonitorActivityPanel({ controller, onSelectNews }: { controller: MonitorController; onSelectNews: (identity: string) => void }) {
   const { liveQuotes, fxRate, settings } = useStore()
   const [view, setView] = useState<ActivityView>('brief')
   const [filter, setFilter] = useState<'all' | 'open' | 'history'>('all')
@@ -33,7 +33,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
   const [reminderCount, setReminderCount] = useState(3)
   const now = controller.now
   const model = useMemo(() => buildPortfolioActivity({ positions: controller.positions, quotes: controller.allowExternalData ? liveQuotes : {}, fxRate: fxRate ?? null, currency: settings.currency, hideValues: controller.hideValues, now }), [controller.positions, controller.allowExternalData, controller.hideValues, liveQuotes, fxRate, settings.currency, now])
-  const newsTickers = new Set(eligibleHoldings(controller.positions).map((holding) => holding.ticker))
+  const newsIdentities = new Set(eligibleHoldings(controller.positions).map((holding) => holding.identity))
   const money = (value: number | null, currency = settings.currency) => controller.hideValues ? privateValue('', true) : value == null ? 'Unavailable' : new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
   const signedMoney = (value: number | null) => controller.hideValues || value == null ? money(value) : `${value > 0 ? '+' : value < 0 ? '−' : ''}${money(Math.abs(value))}`
   const summaryImpact = (value: number) => {
@@ -60,8 +60,8 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
   ]
   const latestObservation = model.summary.latestObservedAt == null ? null : new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(model.summary.latestObservedAt)
   const reviewActivity = () => { setFilter('open'); chooseView('activity') }
-  const showNews = (ticker: string) => {
-    onSelectNews(ticker)
+  const showNews = (identity: string) => {
+    onSelectNews(identity)
     window.requestAnimationFrame(() => {
       const panel = document.getElementById('monitor-news-heading')?.closest('section')
       panel?.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'nearest' })
@@ -116,7 +116,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <span className="pa-symbol" aria-hidden="true">{row.type === 'mutual-fund' ? 'MF' : row.ticker.slice(0, 3)}</span>
         <div className="pa-identity"><strong>{row.name || row.ticker}</strong><span>{row.movementLabel} · {row.source ?? 'No provider'} · {observedLabel(row)}</span></div>
         <div className="pa-mover-numbers"><strong className="pa-change" data-trend={valueTrend(row.changePct)}>{percent(row.changePct)}</strong><span className="pa-impact-line"><span>Impact:</span><b className="pa-impact" data-trend={valueTrend(row.dayContribution)}>{signedMoney(row.dayContribution)}</b></span></div>
-        {newsTickers.has(row.ticker) && <HoldingNewsAction holding={row} onClick={() => showNews(row.ticker)} />}
+        {newsIdentities.has(row.instrumentIdentity) && <HoldingNewsAction holding={row} onClick={() => showNews(row.instrumentIdentity)} />}
       </li>)}</ul> : <div className="pa-empty"><strong>No recent moves reported</strong><p>{model.counts.fresh > 0 ? 'Some providers publish a price or daily NAV without a change. See Holdings for their latest observations.' : 'Refresh prices to see reported changes. Older and imported prices stay in Holdings.'}</p></div>}
       <p className="pa-explainer">{controller.hideValues ? 'Values and movement rankings are hidden.' : 'Ranked by absolute estimated impact where available, then by reported percentage move. Observation dates can differ.'}</p>
       </>}
@@ -139,7 +139,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
       <div className="pa-table" role="table" aria-label="Holding market observations">
         <div className="pa-table-head" role="row"><span role="columnheader">Holding / as of</span><span role="columnheader">Price / NAV</span><span role="columnheader">Move</span><span role="columnheader">Est. impact</span><span role="columnheader">Weight</span></div>
         {model.holdings.slice(0, visibleCount).map((row) => <div className="pa-table-row" role="row" data-tone={row.trend} key={row.id}>
-          <div className="pa-table-identity" role="cell"><strong>{row.name || row.ticker}</strong><span>{assetTypeLabel(row.type)} · {row.source ?? 'No provider'}</span><time dateTime={row.observedAt == null ? undefined : new Date(row.observedAt).toISOString()}>{observedLabel(row)}{row.freshness === 'stale' ? ' · Older quote' : ''}</time>{newsTickers.has(row.ticker) && <HoldingNewsAction holding={row} onClick={() => showNews(row.ticker)} />}</div>
+          <div className="pa-table-identity" role="cell"><strong>{row.name || row.ticker}</strong><span>{assetTypeLabel(row.type)} · {row.source ?? 'No provider'}</span><time dateTime={row.observedAt == null ? undefined : new Date(row.observedAt).toISOString()}>{observedLabel(row)}{row.freshness === 'stale' ? ' · Older quote' : ''}</time>{newsIdentities.has(row.instrumentIdentity) && <HoldingNewsAction holding={row} onClick={() => showNews(row.instrumentIdentity)} />}</div>
           <div role="cell" data-label="Price / NAV">{money(row.price, row.assetCurrency)}</div>
           <div role="cell" className="pa-direction" data-label={row.movementLabel}><span className="pa-change" data-trend={valueTrend(row.changePct)}>{percent(row.changePct)}</span></div>
           <div role="cell" className="pa-direction" data-label="Est. impact"><span className="pa-impact" data-trend={valueTrend(row.dayContribution)}>{signedMoney(row.dayContribution)}</span></div>

@@ -1,4 +1,6 @@
 import type { Position } from './types'
+import { holdingIdentity } from './monitor'
+import { combinePositions } from './valuation'
 
 export type NewsRegion = 'IN' | 'US' | 'GB'
 
@@ -166,12 +168,12 @@ function holdingNewsRegion(position: Position): NewsRegion {
   return position.currency === 'USD' ? 'US' : 'IN'
 }
 
-export function eligibleHoldings(positions: Position[]): { ticker: string; name: string; region: NewsRegion }[] {
+export function eligibleHoldings(positions: Position[]): { identity: string; ticker: string; name: string; region: NewsRegion }[] {
   // Mutual funds have no meaningful news identity in the wire; equities and ETFs do.
-  return positions
+  return combinePositions(positions)
     .filter((position) => position.type === 'stock' || position.type === 'etf' ||
       (position.type === 'other' && Boolean(position.providerSymbol)))
-    .map((position) => ({ ticker: position.ticker, name: position.name, region: holdingNewsRegion(position) }))
+    .map((position) => ({ identity: holdingIdentity(position), ticker: position.ticker, name: position.name, region: holdingNewsRegion(position) }))
 }
 
 export function dedupeItems(items: NewsItem[]): NewsItem[] {
