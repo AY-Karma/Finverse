@@ -11,6 +11,7 @@ import {
 } from '../live'
 import { AllocationCard } from './AllocationCard'
 import { MarketCalendar } from './MarketCalendar'
+import { ActionIcon } from './ActionIcon'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
 const LEDGER_PAGE_SIZE = 100
@@ -192,7 +193,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           </p>
         </div>
         <button className="btn btn--primary" type="button" onClick={onRequestImport}>
-          Import portfolio →
+          <ActionIcon name="import" />Import portfolio
         </button>
       </div>
     )
@@ -214,7 +215,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           </p>
         </div>
         <button className="btn btn--primary" type="button" onClick={onRequestImport}>
-          Import holdings →
+          <ActionIcon name="import" />Import holdings
         </button>
       </div>
     )
@@ -413,7 +414,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           <span className="score-label">{dataLabels.sessionLabel}</span>
           <strong className={hideValues ? '' : dailyMoveDirection}>{dailyMove == null ? 'Unavailable' : mask(dailyMoveText)}</strong>
         </div>
-        <button type="button" className="btn btn--secondary" onClick={() => onGoTo('insights')}>Open Insights →</button>
+        <button type="button" className="btn btn--secondary" onClick={() => onGoTo('insights')}><ActionIcon name="insights" />Open Insights</button>
       </div>
 
       {/* Ticker tape */}

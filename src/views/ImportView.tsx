@@ -4,6 +4,7 @@ import { MAX_IMPORT_FILES } from '../importLimits'
 import { useStore, type ImportPreview } from '../useStore'
 import { UndoImportButton } from './UndoImportButton'
 import { RemoveFolioButton } from './RemoveFolioButton'
+import { ActionIcon } from './ActionIcon'
 
 interface ImportViewProps {
   compact?: boolean
@@ -122,7 +123,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
               <span className={`import-source-mark import-source-mark--${source.id}`} aria-hidden="true">{source.mark}</span>
               <strong>{source.name}</strong>
               <small>{source.description}</small>
-              <span className="import-source-action">Open official site ↗</span>
+              <span className="import-source-action"><ActionIcon name="external" />Open official site</span>
             </a>
           ))}
           <button

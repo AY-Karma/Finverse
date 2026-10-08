@@ -14,7 +14,7 @@
 .mn-panel button:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
 .mn-scope-row { padding: 0 16px 10px; }
 .mn-scope { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); }
-.mn-scope button { flex: 1; min-height: 36px; padding: 5px 9px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-muted); font-size: 14px; line-height: 1.4; }
+.mn-scope button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1; min-height: 36px; padding: 5px 9px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-muted); font-size: 14px; line-height: 1.4; }
 .mn-scope button[aria-pressed='true'] { border-color: var(--hairline-strong); background: var(--surface-1); color: var(--ink); }
 .mn-holding-search { display: block; padding: 0 16px 12px; }
 .mn-panel .mn-holding-search select { width: 100%; font-size: 15px; text-overflow: ellipsis; }
@@ -28,7 +28,6 @@
 .mn-search input { flex: 1; width: 100%; }
 .mn-panel .mn-button { min-height: 38px; padding: 8px 11px; border: 1px solid var(--hairline-strong); border-radius: 7px; background: var(--surface-2); color: var(--ink); font-size: 14px; line-height: 1.4; }
 .mn-query { padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 7px 12px; justify-content: space-between; font-size: 14px; overflow-wrap: anywhere; }
-.mn-panel .mn-text-button { border: 0; background: transparent; color: var(--mn-accent); padding: 0; font-size: 14px; }
 .mn-filter-row { padding: 0 16px 12px; display: flex; align-items: start; gap: 10px; }
 .mn-holding-filter { flex: 1; min-width: 0; }
 .mn-holding-filter select { width: 100%; }
@@ -65,8 +64,7 @@
 .mn-footer nav { display: flex; align-items: center; gap: 7px; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mn-empty { padding: 8px 16px 20px; font-size: 15px; line-height: 1.6; color: var(--ink-muted); }
 .mn-empty strong { display: block; color: var(--ink); font-size: 16px; font-weight: 550; margin-bottom: 6px; }
-.mn-settings { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; color: var(--mn-accent); font-size: 14px; text-decoration: none; }
-.mn-settings:hover { text-decoration: underline; }
+.mn-settings { margin-top: 12px; }
 .mn-loading { padding: 0 16px; }
 .mn-loading > div { border-top: 1px solid var(--hairline); padding: 22px 0; }
 .mn-loading i { display: block; width: 92%; height: 12px; border-radius: 4px; background: var(--surface-3); margin-bottom: 12px; }
@@ -85,6 +83,5 @@
   .mn-panel .mn-dismiss { width: 44px; height: 44px; }
   .mn-story-title { font-size: 17px; }
   .mn-footer { flex-wrap: wrap; }
-  .mn-panel .mn-text-button { padding: 8px 0; }
   .mn-panel .mn-holding-search select { font-size: 16px; }
 }

@@ -4,6 +4,7 @@ import { filterNewsEvents, pageCount, pagedEvents, titleParts, type NewsFeedFilt
 import { classifyHeadline, type HeadlineTone } from '../headlineTone'
 import { useStore } from '../useStore'
 import { MonitorNewsIcon } from './MonitorNewsIcon'
+import { ActionIcon } from './ActionIcon'
 import './monitorNewsPanel.css'
 
 const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
@@ -128,19 +129,19 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
 
     <div className="mn-scope-row" role="group" aria-label="News scope">
       <div className="mn-scope">
-        <button type="button" aria-pressed={scope === 'holdings'} disabled={!enabled} onClick={() => { setScope('holdings'); setPage(1) }}>Holdings</button>
-        <button type="button" aria-pressed={scope === 'market'} disabled={!enabled} onClick={() => { setScope('market'); setSearchDraft(''); selectQuery('') }}>Market</button>
+        <button type="button" aria-pressed={scope === 'holdings'} disabled={!enabled} onClick={() => { setScope('holdings'); setPage(1) }}><ActionIcon name="holdings" />Holdings</button>
+        <button type="button" aria-pressed={scope === 'market'} disabled={!enabled} onClick={() => { setScope('market'); setSearchDraft(''); selectQuery('') }}><ActionIcon name="market" />Market</button>
       </div>
     </div>
     <label className="mn-holding-search"><span className="mn-sr-only">Find news for a holding</span><select aria-label="Find news for a holding" value={holdingIdentity} disabled={!enabled || holdings.length === 0} onChange={(event) => findHoldingNews(event.target.value)}>
       <option value="">Find news for a holding</option>
-      {holdings.map((holding) => <option value={holding.identity} key={holding.identity}>{holding.ticker} · {holding.name} · {holding.region}</option>)}
+      {holdings.map((holding) => <option value={holding.identity} key={holding.identity}>{holding.ticker}{holding.name ? ` · ${holding.name}` : ''}</option>)}
     </select></label>
 
     {!enabled ? <div className="mn-empty">
       <strong>{positions.length === 0 ? 'Add holdings to follow the wire' : 'External data is off'}</strong>
       <p>{positions.length === 0 ? 'Import your portfolio in Settings to see its news here.' : 'Enable external market data in Settings to load news.'}</p>
-      <a className="mn-settings" href="/app/settings">Open Settings <ArrowIcon /></a>
+      <a className="workspace-action mn-settings" href="/app/settings"><ActionIcon name="settings" />Open Settings</a>
     </div> : <>
       <div id="monitor-news-tools" hidden={!showTools}>
       <form className="mn-search" role="search" onSubmit={(event) => { event.preventDefault(); selectQuery(searchDraft.trim()) }}>
@@ -162,7 +163,7 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
         </details>
       </div>
       </div>
-      {activeQuery && <div className="mn-query"><strong>Search: {activeQuery}</strong><button className="mn-text-button" type="button" onClick={() => { setSearchDraft(''); selectQuery('') }}>Back to wire</button></div>}
+      {activeQuery && <div className="mn-query"><strong>Search: {activeQuery}</strong><button className="workspace-action" type="button" onClick={() => { setSearchDraft(''); selectQuery('') }}><MonitorNewsIcon />Back to wire</button></div>}
       <div className="mn-coverage">
         <strong>{loading && feed == null ? 'Checking holding mentions...' : holdings.length ? `${matchedHoldings} of ${eligibleTickers.size} ${eligibleTickers.size === holdings.length ? 'holdings' : 'holding symbols'} mentioned` : 'No eligible company holdings'}</strong>
         <p>{activeQuery ? 'Search results may include other companies. Matches use headline names and tickers.' : 'Matches use headline names and tickers. Coverage varies by publisher.'}</p>

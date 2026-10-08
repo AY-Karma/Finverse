@@ -2,7 +2,7 @@
 .mp-page {
   --mp-accent: color-mix(in srgb, var(--primary-hover) 40%, var(--ink));
   --mp-positive: color-mix(in srgb, var(--semantic-success) 70%, var(--ink));
-  --mp-negative: var(--market-closed);
+  --mp-negative: var(--semantic-danger);
   --mp-amber: color-mix(in srgb, var(--chart-benchmark) 80%, var(--ink));
   min-width: 0;
   padding-bottom: 24px;
@@ -12,7 +12,6 @@
 }
 [data-mode='light'] .mp-page {
   --mp-accent: color-mix(in srgb, var(--primary) 30%, var(--ink));
-  --mp-negative: color-mix(in srgb, var(--market-closed) 90%, var(--ink));
 }
 .mp-page h1, .mp-page h2, .mp-page h3, .mp-page p { margin: 0; }
 :where(.mp-page) :where(button, input, select, textarea) { font: inherit; }
@@ -25,7 +24,7 @@
 .mp-eyebrow, .mp-kicker { color: var(--ink-muted); font-family: var(--font-mono); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; }
 .mp-data-status { gap: 8px; border: 1px solid var(--hairline-strong); border-radius: 20px; padding: 5px 11px; color: var(--ink-muted); font-size: 13px; }
 .mp-data-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mp-accent); flex-shrink: 0; }
-.mp-data-status a { color: var(--mp-accent); text-underline-offset: 3px; }
+.mp-data-status a { display: inline-flex; align-items: center; gap: 5px; color: var(--mp-accent); text-underline-offset: 3px; }
 .mp-hero-main { justify-content: space-between; gap: 24px; align-items: end; }
 .mp-hero h1 { font-size: clamp(30px, 3vw, 38px); font-weight: 550; letter-spacing: -.045em; line-height: 1.2; }
 .mp-hero-main p { margin-top: 7px; color: var(--ink-muted); font-size: 16px; }

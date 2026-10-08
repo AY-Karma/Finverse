@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMonitor } from '../useMonitor'
+import { ActionIcon } from './ActionIcon'
 import { MonitorToast } from './MonitorToast'
 import { MonitorNewsPanel } from './MonitorNewsPanel'
 import { MonitorActivityPanel } from './MonitorActivityPanel'
@@ -18,7 +19,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
     <header className="mp-hero">
       <div className="mp-hero-top">
         <p className="mp-eyebrow">03 · Monitor</p>
-        <div className="mp-data-status"><span className="mp-data-dot" />{controller.allowExternalData ? 'Market data enabled' : <><span>Market data off</span><a href="/app/settings">Settings</a></>}</div>
+        <div className="mp-data-status"><span className="mp-data-dot" />{controller.allowExternalData ? 'Market data enabled' : <><span>Market data off</span><a href="/app/settings"><ActionIcon name="settings" />Settings</a></>}</div>
       </div>
       <div className="mp-hero-main">
         <div><h1>Portfolio watch</h1><p>What moved. What needs your attention.</p></div>

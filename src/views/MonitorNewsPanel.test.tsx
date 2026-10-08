@@ -161,6 +161,21 @@ describe('portfolio news', () => {
     expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline wire')
   })
 
+  it('omits country suffixes and empty name separators while searching with the holding ticker', async () => {
+    state.store.positions = [position('FMCGIETF', '', 'etf'), position('HDFCBANK', 'HDFC Bank Ltd')]
+    loadFeed.mockImplementation(async (_positions, options) => feed(options?.query === 'FMCGIETF'
+      ? [story('etf-result', ['FMCGIETF'], 'search')]
+      : []))
+    await renderPanel()
+
+    await selectHolding('FMCGIETF')
+    expect(loadFeed.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ query: 'FMCGIETF', region: 'IN' }))
+    expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline etf-result')
+    expect([...container.querySelectorAll('.mn-holding-search option')].map((option) => option.textContent)).toEqual([
+      'Find news for a holding', 'FMCGIETF', 'HDFCBANK · HDFC Bank Ltd',
+    ])
+  })
+
   it('accepts activity selections without repeating searches after quote-only store updates', async () => {
     await renderPanel({ selectedIdentity: newsIdentity('HDFCBANK') })
     expect(loadFeed).toHaveBeenCalledTimes(1)

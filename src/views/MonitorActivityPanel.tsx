@@ -8,11 +8,12 @@ import type { MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
 import { ReminderAction } from './monitorPanels'
 import { MonitorNewsIcon } from './MonitorNewsIcon'
+import { ActionIcon, type ActionIconName } from './ActionIcon'
 import './monitorActivityPanel.css'
 
 type ActivityView = 'brief' | 'holdings' | 'activity'
-const VIEWS: { id: ActivityView; label: string }[] = [
-  { id: 'brief', label: 'Brief' }, { id: 'holdings', label: 'Holdings' }, { id: 'activity', label: 'Activity' },
+const VIEWS: { id: ActivityView; label: string; icon: ActionIconName }[] = [
+  { id: 'brief', label: 'Brief', icon: 'overview' }, { id: 'holdings', label: 'Holdings', icon: 'holdings' }, { id: 'activity', label: 'Activity', icon: 'activity' },
 ]
 
 function valueTrend(value: number | null): 'up' | 'down' | 'neutral' {
@@ -76,7 +77,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
       <ReminderAction controller={controller} />
     </header>
     <div className="pa-views" aria-label="Portfolio activity view">
-      {VIEWS.map((item) => <button type="button" key={item.id} aria-pressed={view === item.id} onClick={() => chooseView(item.id)}>{item.label}</button>)}
+      {VIEWS.map((item) => <button type="button" key={item.id} aria-pressed={view === item.id} onClick={() => chooseView(item.id)}><ActionIcon name={item.icon} />{item.label}</button>)}
     </div>
     <div className="pa-pulse" role="group" aria-label="Portfolio briefing summary">
       <div className="pa-summary-card pa-summary-lead" data-tone={valueTrend(largestImpact?.dayContribution ?? null)}>
@@ -84,7 +85,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <strong className="pa-summary-value" data-trend={valueTrend(largestImpact?.dayContribution ?? null)} title={largestImpact ? signedMoney(largestImpact.dayContribution) : undefined} aria-label={largestImpact ? signedMoney(largestImpact.dayContribution) : undefined}>{controller.hideValues ? privateValue('', true) : largestImpact ? summaryImpact(largestImpact.dayContribution!) : latestNav ? money(latestNav.price, latestNav.assetCurrency) : model.summary.impactCount ? money(0) : <span className="pa-summary-empty">{fundOnly ? 'Unavailable' : 'Not reported'}</span>}</strong>
         <span className="pa-summary-context">{controller.hideValues ? 'Values and rankings hidden' : largestImpact ? <>{largestImpact.ticker}{largestImpact.changePct != null && <> · <span className="pa-change" data-trend={valueTrend(largestImpact.changePct)}>{percent(largestImpact.changePct)}</span></>}</> : latestNav ? latestNav.name : fundOnly ? 'No recent fund NAV is available' : model.summary.impactCount ? 'Available impact estimates are zero' : 'A reported price change is needed to estimate impact'}</span>
         {(largestImpact || latestNav) && <span className="pa-summary-time">{observedLabel((largestImpact ?? latestNav)!)}</span>}
-        <div className="pa-summary-footer"><span>{fundOnly ? 'Daily NAV publication' : `${model.summary.impactCount} of ${model.summary.impactEligibleCount} quote estimates`}</span><button type="button" className="pa-link" aria-expanded={view === 'holdings'} aria-controls="portfolio-holdings-details" onClick={() => toggleView('holdings')}>{view === 'holdings' ? 'Hide details' : 'Details'} <span aria-hidden="true">{view === 'holdings' ? '↑' : '↗'}</span></button></div>
+        <div className="pa-summary-footer"><span>{fundOnly ? 'Daily NAV publication' : `${model.summary.impactCount} of ${model.summary.impactEligibleCount} quote estimates`}</span><button type="button" className="workspace-action" aria-expanded={view === 'holdings'} aria-controls="portfolio-holdings-details" onClick={() => toggleView('holdings')}><ActionIcon name={view === 'holdings' ? 'close' : 'details'} /><span>{view === 'holdings' ? 'Hide details' : 'Details'}</span></button></div>
       </div>
       <div className="pa-summary-card">
         <span className="pa-summary-label">Reported moves</span>
@@ -101,18 +102,18 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <span className="pa-summary-note">{latestObservation ? <>Latest · <time dateTime={new Date(model.summary.latestObservedAt!).toISOString()}>{latestObservation} IST</time></> : controller.allowExternalData ? 'No recent provider observations' : 'External market data is off'}</span>
       </div>
       <button type="button" className="pa-summary-card pa-summary-review" aria-expanded={view === 'activity'} aria-controls="portfolio-activity-details" aria-label={view === 'activity' ? 'Close activity' : `Review ${controller.counts.open} open watch ${controller.counts.open === 1 ? 'alert' : 'alerts'}`} onClick={reviewActivity}>
-        <span className="pa-summary-label">To review <span aria-hidden="true">↗</span></span>
+        <span className="pa-summary-label">To review</span>
         <strong className="pa-summary-value" data-attention={controller.counts.open > 0}>{controller.counts.open}<small> {controller.counts.open === 1 ? 'alert' : 'alerts'}</small></strong>
         <span className="pa-summary-context">{controller.counts.activeRules} active watch {controller.counts.activeRules === 1 ? 'rule' : 'rules'}</span>
         <span className="pa-summary-note">{controller.counts.upcoming} upcoming {controller.counts.upcoming === 1 ? 'reminder' : 'reminders'}</span>
-        <span className="pa-summary-review-link">{view === 'activity' ? 'Close activity' : controller.counts.open ? 'Review alerts' : 'Open activity'} <span aria-hidden="true">{view === 'activity' ? '↑' : '→'}</span></span>
+        <span className="workspace-action pa-summary-review-link"><ActionIcon name={view === 'activity' ? 'close' : controller.counts.open ? 'review' : 'activity'} /><span>{view === 'activity' ? 'Close activity' : controller.counts.open ? 'Review alerts' : 'Open activity'}</span></span>
       </button>
     </div>
     {(model.counts.stale > 0 || model.counts.imported > 0 || model.counts.unavailable > 0 || !controller.allowExternalData) && <p className="pa-data-note" role="status">{!controller.allowExternalData ? 'External data is off. Showing imported prices. ' : ''}{model.counts.stale > 0 ? `${model.counts.stale} older quotes. ` : ''}{model.counts.imported > 0 ? `${model.counts.imported} imported prices. ` : ''}{model.counts.unavailable > 0 ? `${model.counts.unavailable} prices unavailable. ` : ''}Only recent provider observations enter the move list.</p>}
 
     {view === 'brief' && <div className="pa-brief">
       {(model.holdings.some((row) => row.type !== 'mutual-fund') || navRows.length === 0) && <>
-      <div className="pa-section-title"><h3>{controller.hideValues ? 'Holding updates' : model.movers.some((row) => row.dayContribution != null) ? 'Largest reported impacts' : 'Reported moves'}</h3><button type="button" className="pa-link" onClick={() => chooseView('holdings')}>All holdings <span aria-hidden="true">↗</span></button></div>
+      <div className="pa-section-title"><h3>{controller.hideValues ? 'Holding updates' : model.movers.some((row) => row.dayContribution != null) ? 'Largest reported impacts' : 'Reported moves'}</h3><button type="button" className="workspace-action" onClick={() => chooseView('holdings')}><ActionIcon name="holdings" /><span>All holdings</span></button></div>
       {briefRows.length > 0 ? <ul className="pa-movers" aria-label={controller.hideValues ? 'Holding updates' : 'Largest reported holding moves'}>{briefRows.map((row) => <li className="pa-mover" data-tone={row.trend} key={row.id}>
         <span className="pa-symbol" aria-hidden="true">{row.type === 'mutual-fund' ? 'MF' : row.ticker.slice(0, 3)}</span>
         <div className="pa-identity"><strong>{row.name || row.ticker}</strong><span>{row.movementLabel} · {row.source ?? 'No provider'} · {observedLabel(row)}</span></div>
@@ -130,7 +131,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         </li>)}</ul>
         <p className="pa-explainer">Daily publications, not intraday quotes.{navRows.length > 2 ? ` See all ${navRows.length} funds in Holdings.` : ''}</p>
       </>}
-      <div className="pa-section-title"><h3>Needs review</h3><button type="button" className="pa-link" onClick={reviewActivity}>Review activity <span aria-hidden="true">↗</span></button></div>
+      <div className="pa-section-title"><h3>Needs review</h3><button type="button" className="workspace-action" onClick={reviewActivity}><ActionIcon name="review" /><span>Review activity</span></button></div>
       {openAlerts.length > 0 ? <div className="pa-records">{openAlerts.slice(0, 2).map((record) => <ActivityRecord key={record.id} record={record} controller={controller} />)}</div> : <div className="pa-clear"><span aria-hidden="true">✓</span><p>No open watch alerts. Your active rules will flag matching price observations.</p></div>}
       {openAlerts.length > 2 && <p className="pa-explainer">{openAlerts.length - 2} more items in Activity.</p>}
     </div>}

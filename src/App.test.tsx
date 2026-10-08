@@ -155,7 +155,7 @@ describe('Research workspace navigation', () => {
 
     expect(window.location.pathname).toBe('/app/monitor')
     expect(container.querySelector('[aria-label="Monitor workspace"] output')?.textContent).toBe(holding.name)
-    await click('← Back to Research')
+    await click('Back to Research')
 
     expect(window.location.pathname + window.location.search).toBe(researchUrl)
     expect(container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.textContent).toBe('Sources')

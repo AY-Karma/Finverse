@@ -5,6 +5,7 @@ import { ACCENTS, ACCENT_KEYS, normalizeHex } from '../theme'
 import type { Accent, Density, Mode } from '../types'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
+import { ActionIcon } from './ActionIcon'
 
 type SettingsSection = 'preferences' | 'privacy'
 
@@ -92,6 +93,7 @@ export function SettingsView() {
                 aria-current={activeSection === section.id ? 'page' : undefined}
                 onClick={() => setActiveSection(section.id)}
               >
+                <span className="settings-nav-icon"><ActionIcon name={section.id} /></span>
                 <span className="settings-nav-index">{section.index}</span>
                 <span className="settings-nav-copy">
                   <strong>{section.label}</strong>

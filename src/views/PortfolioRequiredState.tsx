@@ -1,3 +1,5 @@
+import { ActionIcon } from './ActionIcon'
+
 interface PortfolioRequiredStateProps {
   area: string
   description: string
@@ -13,7 +15,7 @@ export function PortfolioRequiredState({ area, description, onImport }: Portfoli
         <p className="page-sub">{description}</p>
       </div>
       <button className="btn btn--primary" type="button" onClick={onImport}>
-        Bring in your portfolio →
+        <ActionIcon name="import" />Bring in your portfolio
       </button>
     </div>
   )

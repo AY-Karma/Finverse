@@ -6,6 +6,7 @@ import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
 import { Overview } from './views/Overview'
 import { PortfolioImportDialog } from './views/PortfolioImportDialog'
+import { ActionIcon } from './views/ActionIcon'
 
 const loadMonitorView = () => import('./views/MonitorView')
 const loadResearchView = () => import('./views/ResearchView')
@@ -97,6 +98,7 @@ export default function App({ initialView }: { initialView: View }) {
               aria-current={view === item.id ? 'page' : undefined}
               onClick={() => navigate(item.id)}
             >
+              <span className="nav-item-icon"><ActionIcon name={item.id} /></span>
               <span className="nav-item-label">
                 {item.label}
               </span>
@@ -115,7 +117,7 @@ export default function App({ initialView }: { initialView: View }) {
       </aside>
 
       <main className="main">
-        {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}>← Back to Research</button>}
+        {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}><ActionIcon name="research" />Back to Research</button>}
         {view === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
         {researchVisited && <div hidden={view !== 'research'}><Suspense fallback={<div className="view-loading">Loading research...</div>}><ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} /></Suspense></div>}
         {view !== 'overview' && (

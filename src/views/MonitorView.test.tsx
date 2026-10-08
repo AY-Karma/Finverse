@@ -179,7 +179,7 @@ describe('Portfolio Watch masking', () => {
     expect(lead.querySelector('.pa-summary-context')?.textContent).toContain('DOWN')
     expect(lead.querySelector('.pa-summary-time')?.textContent).toContain('IST')
     expect(lead.textContent).toContain('2 of 2 quote estimates')
-    await clickButton('Details ↗')
+    await clickButton('Details')
     expect(container.querySelector('.pa-table')).not.toBeNull()
     state.store.settings = { ...state.store.settings, hideValues: true }
     await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })

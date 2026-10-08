@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from 'react'
 import { clampViewportStart, createChartViewport, shiftViewportStart } from '../chartViewport'
+import { ActionIcon } from './ActionIcon'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const FALLBACK_WIDTH = 1000
@@ -383,7 +384,7 @@ export function InteractiveTrendChart({
             disabled={atLatest}
             aria-label={atLatest ? 'Showing latest prices' : 'Jump to latest prices'}
             title={atLatest ? 'You are viewing the latest prices' : 'Jump to the latest prices'}
-          ><span>Latest</span><span aria-hidden="true">→</span></button>
+          ><ActionIcon name="latest" /><span>Latest</span></button>
         </div>}
         <div className="interactive-trend-legend">{lines.map((line) => {
           const latestValue = latest?.[line.key]
