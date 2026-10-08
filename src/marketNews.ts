@@ -1,5 +1,7 @@
 import type { Position } from './types'
 
+export type NewsRegion = 'IN' | 'US' | 'GB'
+
 export interface NewsItem {
   id: string
   title: string
@@ -29,7 +31,7 @@ interface NewsFetch {
  */
 export interface MarketNewsAdapter {
   fetchWire(options: { signal?: AbortSignal; onPartial?: (feed: NewsFetch) => void }): Promise<NewsFetch>
-  fetchCompanyNews(query: string, options: { signal?: AbortSignal }): Promise<NewsFetch>
+  fetchCompanyNews(query: string, options: { signal?: AbortSignal; region?: NewsRegion }): Promise<NewsFetch>
 }
 
 export interface LoadedMarketFeed extends NewsFetch {
@@ -157,12 +159,19 @@ export function matchedTickers(title: string, holdings: { ticker: string; name: 
   })
 }
 
-export function eligibleHoldings(positions: Position[]): { ticker: string; name: string }[] {
+function holdingNewsRegion(position: Position): NewsRegion {
+  if (position.exchange === 'NASDAQ' || position.exchange === 'NYSE') return 'US'
+  if (position.exchange === 'LSE') return 'GB'
+  if (position.exchange === 'NSE' || position.exchange === 'BSE') return 'IN'
+  return position.currency === 'USD' ? 'US' : 'IN'
+}
+
+export function eligibleHoldings(positions: Position[]): { ticker: string; name: string; region: NewsRegion }[] {
   // Mutual funds have no meaningful news identity in the wire; equities and ETFs do.
   return positions
     .filter((position) => position.type === 'stock' || position.type === 'etf' ||
       (position.type === 'other' && Boolean(position.providerSymbol)))
-    .map((position) => ({ ticker: position.ticker, name: position.name }))
+    .map((position) => ({ ticker: position.ticker, name: position.name, region: holdingNewsRegion(position) }))
 }
 
 export function dedupeItems(items: NewsItem[]): NewsItem[] {
@@ -228,12 +237,13 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
     return result
   }
 
-  const fetchCompanyNews = async (query: string, { signal }: { signal?: AbortSignal } = {}): Promise<NewsFetch> => {
-    const key = query.trim().toLowerCase()
-    if (!key) return { items: [], issues: [] }
+  const fetchCompanyNews = async (query: string, { signal, region }: { signal?: AbortSignal; region?: NewsRegion } = {}): Promise<NewsFetch> => {
+    const normalizedQuery = query.trim().toLowerCase()
+    if (!normalizedQuery) return { items: [], issues: [] }
+    const key = `${region ?? 'IN'}:${normalizedQuery}`
     const cached = searchCache.get(key)
     if (cached && Date.now() - cached.at < cached.ttl) return cached.result
-    const target = `/api/news?source=search&q=${encodeURIComponent(query.trim())}`
+    const target = `/api/news?source=search&q=${encodeURIComponent(query.trim())}${region ? `&region=${region}` : ''}`
     const cutoff = Date.now() - NEWS_MAX_AGE_MS
     try {
       const payload = await request(target, signal)
@@ -258,7 +268,7 @@ const marketNewsAdapter = createMarketNewsAdapter()
 /** Wire always loads; the optional query layers a company deep-dive on top. Both failures surface as issues. */
 export async function loadMarketFeed(
   positions: Position[],
-  options: { signal?: AbortSignal; query?: string; onPartial?: (feed: LoadedMarketFeed) => void } = {},
+  options: { signal?: AbortSignal; query?: string; region?: NewsRegion; onPartial?: (feed: LoadedMarketFeed) => void } = {},
   adapter: MarketNewsAdapter = marketNewsAdapter,
 ): Promise<LoadedMarketFeed> {
   const holdings = eligibleHoldings(positions)

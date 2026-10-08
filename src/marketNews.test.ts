@@ -133,6 +133,22 @@ describe('eligibleHoldings', () => {
 
     expect(tickers).toEqual(['RELIANCE', 'TCS', 'KRN', 'NIFTYBEES'])
   })
+
+  it('selects the news market from exchange before falling back to currency', () => {
+    const base = positions[0]
+    const holdings = eligibleHoldings([
+      { ...base, ticker: 'AAPL', exchange: 'NASDAQ', currency: 'USD' },
+      { ...base, ticker: 'IBM', exchange: 'NYSE', currency: 'INR' },
+      { ...base, ticker: 'SHEL', exchange: 'LSE', currency: 'USD' },
+      { ...base, ticker: 'RELIANCE', exchange: 'NSE', currency: 'USD' },
+      { ...base, ticker: 'BSE-EQ', exchange: 'BSE' },
+      { ...base, ticker: 'US-EQ', exchange: undefined, currency: 'USD' },
+      { ...base, ticker: 'UNKNOWN', exchange: undefined, currency: undefined },
+    ])
+    expect(holdings.map(({ ticker, region }) => [ticker, region])).toEqual([
+      ['AAPL', 'US'], ['IBM', 'US'], ['SHEL', 'GB'], ['RELIANCE', 'IN'], ['BSE-EQ', 'IN'], ['US-EQ', 'US'], ['UNKNOWN', 'IN'],
+    ])
+  })
 })
 
 describe('market news adapter · wire', () => {
@@ -255,6 +271,25 @@ describe('market news adapter · company search', () => {
     expect(otherQuery.items.every((item, index) => item.id !== first.items[index].id)).toBe(true)
   })
 
+  it('separates the same query by news region while sharing the default Indian search cache', async () => {
+    const request = vi.fn(async (_url: string) => BING_FEED)
+    const adapter = createMarketNewsAdapter(request)
+    const defaultRegion = await adapter.fetchCompanyNews('Shell', {})
+    await adapter.fetchCompanyNews('Shell', { region: 'IN' })
+    const us = await adapter.fetchCompanyNews('Shell', { region: 'US' })
+    const gb = await adapter.fetchCompanyNews('Shell', { region: 'GB' })
+    await adapter.fetchCompanyNews(' shell ', { region: 'US' })
+    await adapter.fetchCompanyNews('Shell', { region: 'GB' })
+
+    expect(request.mock.calls.map(([url]) => url)).toEqual([
+      '/api/news?source=search&q=Shell',
+      '/api/news?source=search&q=Shell&region=US',
+      '/api/news?source=search&q=Shell&region=GB',
+    ])
+    expect(us.items[0].id).not.toBe(defaultRegion.items[0].id)
+    expect(gb.items[0].id).not.toBe(us.items[0].id)
+  })
+
   it('reports failed searches as issues and retries after the failure cache expires', async () => {
     let calls = 0
     const adapter = createMarketNewsAdapter(async () => {
@@ -344,6 +379,13 @@ describe('loadMarketFeed', () => {
 
     expect(adapter.fetchCompanyNews).not.toHaveBeenCalled()
     expect(feed.items.map((item) => item.id)).toEqual(['wire:1'])
+  })
+
+  it('passes the holding region to company search without changing the standing wire', async () => {
+    const adapter = makeStub()
+    await loadMarketFeed(positions, { query: 'Apple', region: 'US' }, adapter)
+    expect(adapter.fetchCompanyNews).toHaveBeenCalledWith('Apple', expect.objectContaining({ region: 'US' }))
+    expect(adapter.fetchWire.mock.calls[0][0]).not.toHaveProperty('region')
   })
 
   it('never attributes stories to mutual-fund holdings', async () => {

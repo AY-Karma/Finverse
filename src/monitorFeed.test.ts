@@ -37,9 +37,54 @@ describe('monitor feed', () => {
     expect(filterNewsEvents(events, { query: 'reliance', ticker: 'all', sentiment: 'all', sort: 'latest' }).map((event) => event.id)).toEqual(['two'])
   })
 
-  it('classifies and highlights a directional percentage', () => {
+  it('emphasizes a share movement figure while keeping the sentence neutral and intact', () => {
     expect(sentimentForTitle('TCS is down 12% today')).toBe('negative')
-    expect(titleParts('TCS is down 12% today')).toContainEqual({ text: '12%', sentiment: 'negative' })
+    const title = 'TCS shares are down 12% today'
+    const parts = titleParts(title)
+    expect(parts).toEqual([
+      { text: 'TCS shares are down ', sentiment: 'neutral' },
+      { text: '12%', sentiment: 'negative', highlighted: true },
+      { text: ' today', sentiment: 'neutral' },
+    ])
+    expect(parts.map((part) => part.text).join('')).toBe(title)
+  })
+
+  it('highlights signed amounts independently and leaves unsigned deal values neutral', () => {
+    const title = 'TCS up +1.25%, impact +₹1,768; Infosys down −₹1,437.50; ₹5 crore deal'
+    const parts = titleParts(title)
+    expect(parts.map((part) => part.text).join('')).toBe(title)
+    expect(parts).toContainEqual({ text: '+1.25%', sentiment: 'positive', highlighted: true })
+    expect(parts).toContainEqual({ text: '+₹1,768', sentiment: 'positive', highlighted: true })
+    expect(parts).toContainEqual({ text: '−₹1,437.50', sentiment: 'negative', highlighted: true })
+    expect(parts).toContainEqual({ text: '₹5 crore', sentiment: 'neutral', highlighted: true })
+  })
+
+  it('keeps operating figures neutral and preserves ordinary headline text', () => {
+    expect(titleParts('Revenue up 5%, profit down 2%').filter((part) => part.text.endsWith('%')).every((part) => part.sentiment === 'neutral')).toBe(true)
+    expect(titleParts('TCS shares rise as revenue grows 10%')).toContainEqual({ text: '10%', sentiment: 'neutral', highlighted: true })
+    expect(titleParts('TCS shares revenue up 10%')).toContainEqual({ text: '10%', sentiment: 'neutral', highlighted: true })
+    expect(titleParts('Forecast returns of 5%-7%').filter((part) => part.highlighted).every((part) => part.sentiment === 'neutral')).toBe(true)
+    expect(titleParts('TCS names new director')).toEqual([{ text: 'TCS names new director', sentiment: 'neutral' }])
+  })
+
+  it('associates each share move with its local direction in mixed news', () => {
+    const parts = titleParts('TCS shares gain 1.25%, HDFC Bank shares down 0.86%, profit down 2%')
+    expect(parts.filter((part) => part.highlighted)).toEqual([
+      { text: '1.25%', sentiment: 'positive', highlighted: true },
+      { text: '0.86%', sentiment: 'negative', highlighted: true },
+      { text: '2%', sentiment: 'neutral', highlighted: true },
+    ])
+  })
+
+  it('handles explicitly reported price movements and sign formats without coloring generic keywords', () => {
+    expect(titleParts('Share price rose by nearly 2.5%')).toContainEqual({ text: '2.5%', sentiment: 'positive', highlighted: true })
+    expect(titleParts('Stock is trading down 0.8%')).toContainEqual({ text: '0.8%', sentiment: 'negative', highlighted: true })
+    expect(titleParts('Impact USD -500, +₹250, and a Rs. 5 crore contract').filter((part) => part.highlighted)).toEqual([
+      { text: 'USD -500', sentiment: 'negative', highlighted: true },
+      { text: '+₹250', sentiment: 'positive', highlighted: true },
+      { text: 'Rs. 5 crore', sentiment: 'neutral', highlighted: true },
+    ])
+    expect(titleParts('Earnings beat expectations after cost cuts')).toEqual([{ text: 'Earnings beat expectations after cost cuts', sentiment: 'neutral' }])
   })
 
   it('keeps page boundaries stable', () => {
