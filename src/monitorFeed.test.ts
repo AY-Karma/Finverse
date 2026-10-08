@@ -49,8 +49,8 @@ describe('monitor feed', () => {
     expect(parts.map((part) => part.text).join('')).toBe(title)
   })
 
-  it('highlights signed amounts independently and leaves unsigned deal values neutral', () => {
-    const title = 'TCS up +1.25%, impact +₹1,768; Infosys down −₹1,437.50; ₹5 crore deal'
+  it('highlights signed price and impact figures and leaves deal values neutral', () => {
+    const title = 'TCS shares up +1.25%, impact +₹1,768; Infosys shares down −₹1,437.50; ₹5 crore deal'
     const parts = titleParts(title)
     expect(parts.map((part) => part.text).join('')).toBe(title)
     expect(parts).toContainEqual({ text: '+1.25%', sentiment: 'positive', highlighted: true })
@@ -77,7 +77,14 @@ describe('monitor feed', () => {
   })
 
   it('keeps signed operating figures neutral beside an actual share-price move', () => {
-    for (const title of ['TCS revenue -2%, profit +5% in latest quarter', 'Revenue: −₹500, profit +₹250']) {
+    for (const title of [
+      'TCS revenue -2%, profit +5% in latest quarter',
+      'Revenue: −₹500, profit +₹250',
+      'TCS profits -2%, revenues +5% in latest quarter',
+      'TCS reports -2% revenue growth',
+      'TCS Q2 PAT +5%',
+      'A +₹5 crore contract and an unspecified -2% figure',
+    ]) {
       const parts = titleParts(title)
       expect(parts.map((part) => part.text).join('')).toBe(title)
       expect(parts.filter((part) => part.highlighted).every((part) => part.sentiment === 'neutral')).toBe(true)
@@ -94,7 +101,7 @@ describe('monitor feed', () => {
     expect(titleParts('Stock is trading down 0.8%')).toContainEqual({ text: '0.8%', sentiment: 'negative', highlighted: true })
     expect(titleParts('Impact USD -500, +₹250, and a Rs. 5 crore contract').filter((part) => part.highlighted)).toEqual([
       { text: 'USD -500', sentiment: 'negative', highlighted: true },
-      { text: '+₹250', sentiment: 'positive', highlighted: true },
+      { text: '+₹250', sentiment: 'neutral', highlighted: true },
       { text: 'Rs. 5 crore', sentiment: 'neutral', highlighted: true },
     ])
     expect(titleParts('Earnings beat expectations after cost cuts')).toEqual([{ text: 'Earnings beat expectations after cost cuts', sentiment: 'neutral' }])
