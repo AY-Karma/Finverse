@@ -92,7 +92,16 @@ describe('Research workspace navigation', () => {
     })
     expect(window.location.pathname).toBe('/app')
     expect(container.querySelector('h1')?.textContent).toBe('Overview workspace')
-    expect([...container.querySelectorAll('.nav-item-label')].map((item) => item.textContent)).toEqual(['Overview', 'Insights', 'Research', 'Monitor', 'Settings'])
+    expect([...container.querySelectorAll('.nav-item')].map((item) => [
+      item.querySelector('.nav-item-label')?.textContent,
+      item.querySelector('.nav-index')?.textContent,
+    ])).toEqual([
+      ['Overview', '01'],
+      ['Insights', '02'],
+      ['Monitor', '03'],
+      ['Research', '04'],
+      ['Settings', '05'],
+    ])
   })
 
   it('preserves the selected Sources section when leaving through the sidebar', async () => {

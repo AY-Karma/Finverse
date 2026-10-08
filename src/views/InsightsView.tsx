@@ -167,7 +167,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   if (snapshot.positions.length === 0) {
     return (
       <PortfolioRequiredState
-        area="03 · Insights"
+        area="02 · Insights"
         description="Bring in your holdings to turn market prices into contribution, allocation, performance, and risk views."
         onImport={onRequestImport}
       />
@@ -191,7 +191,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     <div className="insights-page">
       <div className="page-head enter d0">
         <div>
-          <div className="page-eyebrow">03 · Investment intelligence</div>
+          <div className="page-eyebrow">02 · Investment intelligence</div>
           <h1 className="page-title">Read the market story.</h1>
         </div>
         <p className="page-sub">A visual explanation of what moved your portfolio, where your exposure sits, and how your record compares with the market.</p>

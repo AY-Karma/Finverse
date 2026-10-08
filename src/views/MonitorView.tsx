@@ -11,13 +11,13 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
   const controller = useMonitor()
   const [newsSelection, setNewsSelection] = useState({ identity: '', revision: 0 })
   if (controller.positions.length === 0) {
-    return <PortfolioRequiredState area="02 · Monitor" description="Bring in your holdings to follow price updates, create watch rules, and read portfolio news." onImport={onRequestImport} />
+    return <PortfolioRequiredState area="03 · Monitor" description="Bring in your holdings to follow price updates, create watch rules, and read portfolio news." onImport={onRequestImport} />
   }
 
   return <div className="mp-page">
     <header className="mp-hero">
       <div className="mp-hero-top">
-        <p className="mp-eyebrow">02 · Monitor</p>
+        <p className="mp-eyebrow">03 · Monitor</p>
         <div className="mp-data-status"><span className="mp-data-dot" />{controller.allowExternalData ? 'Market data enabled' : <><span>Market data off</span><a href="/app/settings">Settings</a></>}</div>
       </div>
       <div className="mp-hero-main">

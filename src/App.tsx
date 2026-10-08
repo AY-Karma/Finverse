@@ -20,8 +20,8 @@ const InsightsView = lazy(() => loadInsightsView().then((module) => ({ default: 
 const NAV: { id: View; label: string; index: string }[] = [
   { id: 'overview', label: 'Overview', index: '01' },
   { id: 'insights', label: 'Insights', index: '02' },
-  { id: 'research', label: 'Research', index: '03' },
-  { id: 'holdings', label: 'Monitor', index: '04' },
+  { id: 'holdings', label: 'Monitor', index: '03' },
+  { id: 'research', label: 'Research', index: '04' },
   { id: 'settings', label: 'Settings', index: '05' },
 ]
 
