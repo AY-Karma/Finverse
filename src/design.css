@@ -699,10 +699,10 @@ body {
   align-items: center;
   gap: 5px;
   white-space: nowrap;
+  color: var(--ink);
 }
-.table--ledger .ltp--up { color: var(--semantic-success); }
-.table--ledger .ltp--down { color: var(--semantic-danger); }
-.table--ledger .ltp--flat { color: var(--ink-subtle); }
+.table--ledger .ltp--up .ltp-arrow { color: var(--semantic-success); }
+.table--ledger .ltp--down .ltp-arrow { color: var(--semantic-danger); }
 .table--ledger .ltp-arrow {
   font-size: 8px;
   line-height: 1;
@@ -1118,6 +1118,8 @@ body {
 .table--ledger td {
   padding: 11px 9px;
 }
+.panel--ledger td.up { color: var(--semantic-success); }
+.panel--ledger td.down { color: var(--semantic-danger); }
 .table--ledger .th-sort {
   padding: var(--sp-sm) 9px;
 }
