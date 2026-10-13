@@ -12,6 +12,7 @@ import {
 import { AllocationCard } from './AllocationCard'
 import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
+import { preloadPortfolioImport } from './PortfolioImportDialog'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
 const LEDGER_PAGE_SIZE = 100
@@ -197,7 +198,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
             Bring in your latest holdings file to see value, allocation, performance, and the market around your investments.
           </p>
         </div>
-        <button className="btn btn--primary" type="button" onClick={onRequestImport}>
+        <button className="btn btn--primary" type="button" onClick={onRequestImport} onFocus={preloadPortfolioImport} onPointerEnter={preloadPortfolioImport}>
           <ActionIcon name="import" />Import portfolio
         </button>
       </div>
@@ -219,7 +220,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
               : 'Import a broker export (.xlsx / .csv) with ticker, quantity, and cost to run it onto the equity scoreboard.'}
           </p>
         </div>
-        <button className="btn btn--primary" type="button" onClick={onRequestImport}>
+        <button className="btn btn--primary" type="button" onClick={onRequestImport} onFocus={preloadPortfolioImport} onPointerEnter={preloadPortfolioImport}>
           <ActionIcon name="import" />Import holdings
         </button>
       </div>

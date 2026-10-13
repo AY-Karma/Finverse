@@ -1,3 +1,4 @@
+import { numberFormatter, dateFormatter } from '../formatters'
 import { useMemo, useState } from 'react'
 import { assetTypeLabel } from '../instruments'
 import { eligibleHoldings } from '../marketNews'
@@ -22,7 +23,7 @@ function valueTrend(value: number | null): 'up' | 'down' | 'neutral' {
 
 function observedLabel(row: HoldingActivity): string {
   if (row.observedAt == null) return row.freshness === 'imported' ? 'Imported price · no market time' : 'Price unavailable'
-  const date = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: row.marketTimeZone }).format(row.observedAt)
+  const date = dateFormatter({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: row.marketTimeZone }).format(row.observedAt)
   return `${date} ${row.marketTimeZone === 'Asia/Kolkata' ? 'IST' : row.marketTimeZone === 'America/New_York' ? 'ET' : 'London'}`
 }
 
@@ -35,11 +36,11 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
   const now = controller.now
   const model = useMemo(() => buildPortfolioActivity({ positions: controller.positions, quotes: controller.allowExternalData ? liveQuotes : {}, fxRate: fxRate ?? null, currency: settings.currency, hideValues: controller.hideValues, now }), [controller.positions, controller.allowExternalData, controller.hideValues, liveQuotes, fxRate, settings.currency, now])
   const newsIdentities = new Set(eligibleHoldings(controller.positions).map((holding) => holding.identity))
-  const money = (value: number | null, currency = settings.currency) => controller.hideValues ? privateValue('', true) : value == null ? 'Unavailable' : new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
+  const money = (value: number | null, currency = settings.currency) => controller.hideValues ? privateValue('', true) : value == null ? 'Unavailable' : numberFormatter({ style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
   const signedMoney = (value: number | null) => controller.hideValues || value == null ? money(value) : `${value > 0 ? '+' : value < 0 ? '−' : ''}${money(Math.abs(value))}`
   const summaryImpact = (value: number) => {
     if (Math.abs(value) < 100_000) return signedMoney(value)
-    const amount = new Intl.NumberFormat('en-IN', { style: 'currency', currency: settings.currency, notation: 'compact', maximumFractionDigits: 2 }).format(Math.abs(value))
+    const amount = numberFormatter({ style: 'currency', currency: settings.currency, notation: 'compact', maximumFractionDigits: 2 }).format(Math.abs(value))
     return `${value < 0 ? '−' : '+'}${amount}`
   }
   const percent = (value: number | null) => controller.hideValues ? privateValue('', true) : value == null ? 'Unavailable' : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
@@ -60,7 +61,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
     { label: 'Flat', count: model.counts.flat ?? 0, tone: 'neutral' },
     { label: 'Not reported', count: notReported, tone: 'unavailable' },
   ]
-  const latestObservation = model.summary.latestObservedAt == null ? null : new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(model.summary.latestObservedAt)
+  const latestObservation = model.summary.latestObservedAt == null ? null : dateFormatter({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(model.summary.latestObservedAt)
   const reviewActivity = () => { setFilter('open'); toggleView('activity') }
   const showNews = (identity: string) => {
     onSelectNews(identity)
@@ -165,7 +166,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
     <div className="pa-reminders">
       <div className="pa-section-title"><h3>Personal reminders</h3><span>{controller.counts.upcoming} upcoming</span></div>
       {controller.events.length > 0 ? <ul>{controller.events.slice(0, reminderCount).map((event) => <li key={event.id}>
-        <time dateTime={event.date}>{new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${event.date}T12:00:00Z`))}</time>
+        <time dateTime={event.date}>{dateFormatter({ day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${event.date}T12:00:00Z`))}</time>
         <div><strong>{event.title}</strong><span>{event.holding}</span></div>
         <button type="button" aria-pressed={event.reminder} aria-label={`${event.reminder ? 'Remove reminder for' : 'Set reminder for'} ${event.title}`} onClick={() => controller.toggleReminder(event.id)}>{event.reminder ? 'Reminder on' : 'Remind me'}</button>
       </li>)}</ul> : <p className="pa-explainer">Add a date to revisit a holding or check an announcement. Reminders stay in this app.</p>}
@@ -184,7 +185,7 @@ function ActivityRecord({ record, controller }: { record: MonitorRecord | Monito
   const trend = movement?.trend ?? 'neutral'
   return <article className="pa-record" data-tone={trend}>
     <details>
-      <summary><span className="pa-record-kind">{isAlert ? 'Rule' : 'Quote'}</span><span className="pa-record-main"><strong>{record.holding}</strong><span className="pa-record-caption"><span>{record.title}</span>{movement && <span className="pa-record-change" data-trend={trend} aria-label={`${movement.label}: ${movement.value}`}>{movement.value}</span>}</span></span><time dateTime={new Date(record.at).toISOString()}>{new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(record.at)}</time><span className="pa-expand" aria-hidden="true">⌄</span></summary>
+      <summary><span className="pa-record-kind">{isAlert ? 'Rule' : 'Quote'}</span><span className="pa-record-main"><strong>{record.holding}</strong><span className="pa-record-caption"><span>{record.title}</span>{movement && <span className="pa-record-change" data-trend={trend} aria-label={`${movement.label}: ${movement.value}`}>{movement.value}</span>}</span></span><time dateTime={new Date(record.at).toISOString()}>{dateFormatter({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(record.at)}</time><span className="pa-expand" aria-hidden="true">⌄</span></summary>
       <div className="pa-record-detail"><p>{record.reason}</p><p>{record.evidence}</p><dl>{record.metrics.map((metric) => <div key={metric.label}><dt>{metric.label}</dt><dd data-trend={metric.trend}>{metric.value}</dd></div>)}</dl></div>
     </details>
     {isAlert && <div className="pa-review-actions"><span className="mp-badge" data-state={record.state}>{record.state === 'open' ? 'To review' : record.state === 'reviewed' ? 'Reviewed' : 'Snoozed'}</span>{record.state === 'open' ? <><button type="button" aria-label={`Mark reviewed: ${record.holding}`} onClick={() => controller.setAlertState(record.id, 'reviewed')}>Mark reviewed</button><button type="button" aria-label={`Snooze: ${record.holding}`} onClick={() => controller.setAlertState(record.id, 'snoozed')}>Snooze</button></> : <button type="button" onClick={() => controller.setAlertState(record.id, 'open')}>Reopen item</button>}</div>}

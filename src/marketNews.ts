@@ -49,6 +49,7 @@ const WIRE_CACHE_MS = 15 * 60 * 1000
 const WIRE_FAILURE_CACHE_MS = 5 * 60 * 1000
 const SEARCH_CACHE_MS = 15 * 60 * 1000
 const SEARCH_FAILURE_CACHE_MS = 2 * 60 * 1000
+const MAX_SEARCH_CACHE_ENTRIES = 64
 const NEWS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
 const RETRY_DELAY_MS = 700
 
@@ -63,8 +64,16 @@ async function fetchText(url: string, signal?: AbortSignal): Promise<string> {
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Retry was cancelled.', 'AbortError')) }, { once: true })
+    const abort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('Retry was cancelled.', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, ms)
+    if (signal?.aborted) abort()
+    else signal?.addEventListener('abort', abort, { once: true })
   })
 }
 
@@ -137,10 +146,6 @@ export function significantNameWords(name: string): string[] {
     .slice(0, 3)
 }
 
-function tickerMentioned(titleUpper: string, ticker: string): boolean {
-  return new RegExp(`(^|[^A-Z0-9])${escapeRegExp(ticker)}($|[^A-Z0-9])`).test(titleUpper)
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -148,17 +153,29 @@ function escapeRegExp(value: string): string {
 /** Which of the user's holdings a headline is about: exact ticker word, collapsed ticker
  * ("HCL Tech" → HCLTECH), or every significant company-name word. */
 export function matchedTickers(title: string, holdings: { ticker: string; name: string }[]): string[] {
-  const titleUpper = ` ${title.toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ')} `
-  const titleCollapsed = titleUpper.replace(/ /g, '')
-  return holdings.flatMap((holding) => {
+  return createHoldingMatcher(holdings)(title)
+}
+
+function createHoldingMatcher(holdings: { ticker: string; name: string }[]): (title: string) => string[] {
+  const matchers = holdings.map((holding) => {
     const ticker = holding.ticker.trim().toUpperCase()
-    const words = significantNameWords(holding.name)
-    const collapsedTicker = ticker.replace(/[^A-Z0-9]/g, '')
-    const mentioned = (ticker.length >= 2 && tickerMentioned(titleUpper, ticker)) ||
-      (collapsedTicker.length >= 4 && titleCollapsed.includes(collapsedTicker)) ||
-      (words.length > 0 && words.every((word) => titleUpper.includes(word)))
-    return mentioned ? [holding.ticker] : []
+    return {
+      ticker: holding.ticker,
+      expression: ticker.length >= 2 ? new RegExp(`(^|[^A-Z0-9])${escapeRegExp(ticker)}($|[^A-Z0-9])`) : undefined,
+      words: significantNameWords(holding.name),
+      collapsedTicker: ticker.replace(/[^A-Z0-9]/g, ''),
+    }
   })
+  return (title) => {
+    const titleUpper = ` ${title.toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ')} `
+    const titleCollapsed = titleUpper.replace(/ /g, '')
+    return matchers.flatMap(({ ticker, expression, words, collapsedTicker }) => {
+      const mentioned = expression?.test(titleUpper) ||
+        (collapsedTicker.length >= 4 && titleCollapsed.includes(collapsedTicker)) ||
+        (words.length > 0 && words.every((word) => titleUpper.includes(word)))
+      return mentioned ? [ticker] : []
+    })
+  }
 }
 
 function holdingNewsRegion(position: Position): NewsRegion {
@@ -190,13 +207,13 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
   let wireCache: { at: number; ttl: number; result: NewsFetch } | null = null
   const searchCache = new Map<string, { at: number; ttl: number; result: NewsFetch }>()
 
-  // The public CORS relay rejects requests in short bursts between long healthy
-  // stretches; one quick retry rescues most of them. Aborted requests never retry.
   const request = async (url: string, signal?: AbortSignal): Promise<string> => {
     try {
       return await requestText(url, signal)
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError'))) throw error
+      // The local API caches provider failures for 15s, so a 700ms retry cannot recover a 502.
+      if (error instanceof Error && /^HTTP 502\b/.test(error.message)) throw error
       await delay(RETRY_DELAY_MS, signal)
       return requestText(url, signal)
     }
@@ -243,21 +260,38 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
     const normalizedQuery = query.trim().toLowerCase()
     if (!normalizedQuery) return { items: [], issues: [] }
     const key = `${region ?? 'IN'}:${normalizedQuery}`
+    const timestamp = Date.now()
+    for (const [storedKey, entry] of searchCache) {
+      if (timestamp - entry.at >= entry.ttl) searchCache.delete(storedKey)
+    }
     const cached = searchCache.get(key)
-    if (cached && Date.now() - cached.at < cached.ttl) return cached.result
+    if (cached) {
+      searchCache.delete(key)
+      searchCache.set(key, cached)
+      return cached.result
+    }
+    const cacheResult = (result: NewsFetch, ttl: number) => {
+      searchCache.delete(key)
+      while (searchCache.size >= MAX_SEARCH_CACHE_ENTRIES) {
+        const oldest = searchCache.keys().next().value
+        if (oldest === undefined) break
+        searchCache.delete(oldest)
+      }
+      searchCache.set(key, { at: Date.now(), ttl, result })
+    }
     const target = `/api/news?source=search&q=${encodeURIComponent(query.trim())}${region ? `&region=${region}` : ''}`
     const cutoff = Date.now() - NEWS_MAX_AGE_MS
     try {
       const payload = await request(target, signal)
       if (signal?.aborted) throw new DOMException('Company search was cancelled.', 'AbortError')
       const result = { items: rssItems(payload, 'News search').map((raw) => toNewsItem(raw, `search:${key}`, 'search', cutoff)).filter((item): item is NewsItem => item != null), issues: [] }
-      searchCache.set(key, { at: Date.now(), ttl: SEARCH_CACHE_MS, result })
+      cacheResult(result, SEARCH_CACHE_MS)
       return result
     } catch (error) {
       if (signal?.aborted) throw error
       const rateLimited = String(error).includes('429')
       const result = { items: [], issues: [{ source: `Search · ${query}`, message: rateLimited ? 'The news search source is rate-limiting requests. Try again shortly.' : 'Company news search failed. Try another query or refresh later.' }] }
-      searchCache.set(key, { at: Date.now(), ttl: SEARCH_FAILURE_CACHE_MS, result })
+      cacheResult(result, SEARCH_FAILURE_CACHE_MS)
       return result
     }
   }
@@ -274,9 +308,10 @@ export async function loadMarketFeed(
   adapter: MarketNewsAdapter = marketNewsAdapter,
 ): Promise<LoadedMarketFeed> {
   const holdings = eligibleHoldings(positions)
+  const matchTitle = createHoldingMatcher(holdings)
   const tag = (items: NewsItem[]) => dedupeItems(items).map((item) => ({
     ...item,
-    matches: matchedTickers(item.title, holdings),
+    matches: matchTitle(item.title),
   }))
   const [wire, search] = await Promise.all([
     adapter.fetchWire({

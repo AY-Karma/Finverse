@@ -1,9 +1,61 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createNewsHandler } from '../api/news'
 
 const STORY = '<rss><channel><item><title>Reliance rises</title><link>https://example.com/story</link></item></channel></rss>'
 
+afterEach(() => vi.useRealTimers())
+
 describe('news API', () => {
+  it('hedges a slow company provider after 500ms and cancels the losing request', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn<typeof fetch>((url, options) => {
+      if (url.toString().includes('bing.com')) return Promise.resolve(new Response(STORY))
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })
+      })
+    })
+    const pending = createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
+
+    await vi.advanceTimersByTimeAsync(499)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect((await pending).status).toBe(200)
+    expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true)
+  })
+
+  it('keeps fast primary results without sending a fallback request', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
+    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(response.status).toBe(200)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['failed', 'pending'])('keeps the primary alive with a %s fallback and cancels fallback when primary wins', async (fallback) => {
+    vi.useFakeTimers()
+    let releasePrimary!: (response: Response) => void
+    const fetcher = vi.fn<typeof fetch>((url, options) => {
+      if (!url.toString().includes('bing.com')) return new Promise((resolve) => { releasePrimary = resolve })
+      if (fallback === 'failed') return Promise.resolve(new Response('', { status: 503 }))
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })
+      })
+    })
+    let settled = false
+    const pending = createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
+      .then((response) => { settled = true; return response })
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(settled).toBe(false)
+    releasePrimary(new Response(STORY))
+    expect((await pending).status).toBe(200)
+    expect(fetcher.mock.calls[1][1]?.signal?.aborted).toBe(true)
+  })
+
   it('fetches company news on the server and falls back when the first provider fails', async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('', { status: 403 }))

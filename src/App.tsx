@@ -5,7 +5,7 @@ import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
 import { Overview } from './views/Overview'
-import { PortfolioImportDialog } from './views/PortfolioImportDialog'
+import { PortfolioImportDialog, preloadPortfolioImport } from './views/PortfolioImportDialog'
 import { ActionIcon } from './views/ActionIcon'
 
 const loadMonitorView = () => import('./views/MonitorView')
@@ -53,6 +53,7 @@ export default function App({ initialView }: { initialView: View }) {
   }
 
   const requestPortfolioImport = () => {
+    preloadPortfolioImport()
     navigate('overview')
     setImportOpen(true)
   }

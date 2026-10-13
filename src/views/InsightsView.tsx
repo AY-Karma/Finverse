@@ -88,13 +88,12 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const backcastHistory = backcast?.points ?? []
   const analyticsHistory = backcastHistory
   const backcastChartHistory = useMemo(() => downsampleSeries(backcast?.points ?? [], MAX_CHART_POINTS), [backcast])
-  const analyticsStartAt = analyticsHistory[0]?.at ?? null
   const trackedAvailable = chartHistory.length >= 2
   const performanceHistory = performanceMode === 'tracked' ? chartHistory : backcastChartHistory
 
   useEffect(() => {
     const symbol = selectedBenchmark.symbol
-    if (!settings.allowExternalData || analyticsStartAt == null || !symbol) {
+    if (!settings.allowExternalData || snapshot.positions.length === 0 || !symbol) {
       setBenchmarkPoints([])
       setBenchmarkError(false)
       setBenchmarkLoading(false)
@@ -107,7 +106,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     setBenchmarkError(false)
     setBenchmarkLoading(true)
     const to = new Date()
-    const from = new Date(Math.min(analyticsStartAt, to.getTime() - 365 * 24 * 60 * 60 * 1000))
+    const from = new Date(to.getTime() - backcastDays * 24 * 60 * 60 * 1000)
     const load = async (attempt: number) => {
       let points: typeof benchmarkPoints = []
       try {
@@ -134,7 +133,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       controller.abort()
       if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [analyticsStartAt, benchmarkReload, selectedBenchmark.symbol, settings.allowExternalData])
+  }, [backcastDays, backcastKey, benchmarkReload, selectedBenchmark.symbol, settings.allowExternalData])
 
   const benchmarkSeries = useMemo<BenchmarkPoint[]>(() => {
     const history = analyticsHistory

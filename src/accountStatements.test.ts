@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+import './test/storage'
 import { afterEach, describe, expect, it } from 'vitest'
 import { latestUndoableAccount, planStatementImport, undoStatementImport, type StatementImportOptions } from './accountStatements'
 import { normalizePosition } from './instruments'

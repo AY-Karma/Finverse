@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+import './test/storage'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
 import { listingIdentity, migrateFolioIdentities, normalizePosition } from './instruments'

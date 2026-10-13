@@ -19,6 +19,37 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); refreshQuotes.mockReset() })
 
 describe('portfolio saving', () => {
+  it('starts manual USD conversion alongside quotes and keeps prepared holdings stable', async () => {
+    const position: Position = { id: 'overlap', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+    localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'test', name: 'Test', importedAt: 1, positions: [position] }]))
+    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true, currency: 'USD' }))
+    refreshQuotes.mockResolvedValue({ quotes: {}, updated: 0, failed: 0, skipped: 0 })
+    const fx = vi.spyOn(live, 'fetchUsdInrRate').mockResolvedValue({ usdInr: 85, at: 1 })
+    let store!: ReturnType<typeof useStore>
+    const Capture = () => { store = useStore(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
+      const preparedPositions = store.positions
+      let finishQuotes!: () => void
+      let finishFx!: () => void
+      refreshQuotes.mockImplementationOnce(() => new Promise((resolve) => {
+        finishQuotes = () => resolve({ quotes: { [quoteKey(position)]: { price: 150, at: Date.now(), source: 'yahoo' } }, updated: 1, failed: 0, skipped: 0 })
+      }))
+      fx.mockImplementationOnce(() => new Promise((resolve) => {
+        finishFx = () => resolve({ usdInr: 86, at: 2 })
+      }))
+      let pending!: ReturnType<typeof store.refreshNow>
+      await act(async () => { pending = store.refreshNow() })
+      expect(fx).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      await act(async () => { finishQuotes(); finishFx(); expect(await pending).toMatchObject({ ok: true }) })
+      expect(store.positions).toBe(preparedPositions)
+      expect(store.snapshot.currentValue).toBe(150)
+      expect(store.fxRate).toEqual({ usdInr: 86, at: 2 })
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('keeps a fresh workspace writable when StrictMode replays startup effects', async () => {
     let store!: ReturnType<typeof useStore>
     const Capture = () => { store = useStore(); return null }

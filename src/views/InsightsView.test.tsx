@@ -36,6 +36,20 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
+it('starts benchmark history while backcast is pending and cancels both when external data is disabled', async () => {
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcast>(() => {}))
+  await renderInsights([])
+  expect(state.benchmark).toHaveBeenCalledTimes(1)
+  const benchmarkSignal = state.benchmark.mock.calls[0][3] as AbortSignal
+  const backcastSignal = state.build.mock.calls[0][4] as AbortSignal
+  expect(benchmarkSignal.aborted).toBe(false)
+  expect(backcastSignal.aborted).toBe(false)
+  state.store.settings.allowExternalData = false
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(benchmarkSignal.aborted).toBe(true)
+  expect(backcastSignal.aborted).toBe(true)
+})
+
 it('does not turn an account addition into benchmark returns or risk', async () => {
   const history = [100, 200].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: value, pnl: 0, holdingCount: index + 1 }))
   await renderInsights([], history)

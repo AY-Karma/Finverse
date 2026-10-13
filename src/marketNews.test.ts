@@ -262,6 +262,55 @@ describe('market news adapter · wire', () => {
 })
 
 describe('market news adapter · company search', () => {
+  it('does not retry server-cached provider failures after 700ms', async () => {
+    const request = vi.fn(async () => { throw new Error('HTTP 502') })
+    const adapter = createMarketNewsAdapter(request)
+    let settled = false
+    const pending = adapter.fetchCompanyNews('TCS', {}).then((result) => { settled = true; return result })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(true)
+    expect((await pending).issues[0].message).toContain('Company news search failed')
+    await vi.advanceTimersByTimeAsync(700)
+    expect(request).toHaveBeenCalledTimes(1)
+    await adapter.fetchCompanyNews('TCS', {})
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels the retry delay without caching a failure or sending another request', async () => {
+    const request = vi.fn<(url: string, signal?: AbortSignal) => Promise<string>>()
+      .mockRejectedValueOnce(new Error('HTTP 500'))
+      .mockResolvedValue(BING_FEED)
+    const adapter = createMarketNewsAdapter(request)
+    const controller = new AbortController()
+    const pending = adapter.fetchCompanyNews('TCS', { signal: controller.signal })
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await rejected
+    await vi.advanceTimersByTimeAsync(700)
+    expect(request).toHaveBeenCalledTimes(1)
+
+    expect((await adapter.fetchCompanyNews('TCS', {})).items).toHaveLength(2)
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it('bounds search entries, keeps recently used queries and expires stale results', async () => {
+    const request = vi.fn(async () => BING_FEED)
+    const adapter = createMarketNewsAdapter(request)
+    for (let index = 0; index < 64; index += 1) await adapter.fetchCompanyNews(`Company ${index}`, {})
+    await adapter.fetchCompanyNews('Company 0', {})
+    await adapter.fetchCompanyNews('Company 64', {})
+    await adapter.fetchCompanyNews('Company 0', {})
+    expect(request).toHaveBeenCalledTimes(65)
+    await adapter.fetchCompanyNews('Company 1', {})
+    expect(request).toHaveBeenCalledTimes(66)
+
+    vi.advanceTimersByTime(15 * 60_000)
+    await adapter.fetchCompanyNews('Company 0', {})
+    expect(request).toHaveBeenCalledTimes(67)
+  })
+
   it('queries the local news API and keeps each query cached separately', async () => {
     const urls: string[] = []
     const adapter = createMarketNewsAdapter(async (url) => {

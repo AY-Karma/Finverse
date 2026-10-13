@@ -20,6 +20,7 @@ function readSaved(raw: string | null, label: string, fallback: unknown): unknow
 }
 
 function sameData(left: unknown, right: unknown): boolean {
+  if (JSON.stringify(left) === JSON.stringify(right)) return true
   const stable = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => isRecord(item)
     ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item)
   return stable(left) === stable(right)

@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+import './test/storage'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { holdingIdentity, type MonitorState } from './monitor'
 import { combinePositions } from './valuation'

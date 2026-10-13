@@ -20,23 +20,15 @@ afterEach(() => {
 })
 
 describe('market status text', () => {
-  it('does not claim latest provider prices before any quote is available', () => {
+  it('reports missing, loading, timestamped and disabled market data', () => {
     expect(marketStatusText(true)).toBe('Market Open - no provider prices yet')
     expect(marketStatusText(false)).toBe('Market Closed - no provider prices yet')
-  })
-  it('describes the initial fetch while the market is open', () => {
     expect(marketStatusText(true, true, true, true)).toBe('Market Open - fetching latest available data')
-  })
 
-  it('describes the initial fetch outside market hours', () => {
     expect(marketStatusText(false, true, true, true)).toBe('Market Closed - fetching latest available data')
-  })
 
-  it('keeps the fetch message visible while USD conversion is still loading', () => {
     expect(marketStatusText(true, true, false, true)).toBe('Market Open - fetching latest available data')
-  })
 
-  it('combines the market state and quote timestamp while preserving loading and disabled states', () => {
     const timestamp = '01 Oct, 15:15:00 IST'
     expect(marketStatusText(false, true, true, false, timestamp)).toBe(`Market Closed - showing prices as of ${timestamp}`)
     expect(marketStatusText(true, true, true, false, timestamp)).toBe(`Market Open - showing prices as of ${timestamp}`)
@@ -64,6 +56,52 @@ describe('market status text', () => {
 })
 
 describe('market data client', () => {
+  it('queues excess distinct history requests and removes cancelled waiters before fetching', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      await gate
+      return Response.json({ points: [{ date: '2026-09-22', close: 101 }] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-09-01T00:00:00Z')
+    const to = new Date('2026-09-23T00:00:00Z')
+    const first = Array.from({ length: 7 }, (_, i) => fetchHistory(`QUEUED${i}.NS`, from, to))
+    const cancelled = new AbortController()
+    const pending = fetchHistory('CANCELLED.NS', from, to, cancelled.signal)
+    const failure = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    const last = fetchHistory('LAST.NS', from, to)
+    await Promise.resolve()
+    expect(fetcher).toHaveBeenCalledTimes(7)
+    cancelled.abort()
+    await failure
+    release()
+    await Promise.all([...first, last])
+    expect(fetcher).toHaveBeenCalledTimes(8)
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes('CANCELLED.NS'))).toBe(false)
+  })
+
+  it('rechecks durable history after another tab replaces or removes it and isolates returned points', async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    })
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ points: [{ date: '2026-09-22', close: 101 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-09-01T00:00:00Z')
+    const to = new Date('2026-09-23T00:00:00Z')
+    const first = await fetchHistory('CACHECHECK.NS', from, to)
+    first[0].close = 999
+    expect((await fetchHistory('CACHECHECK.NS', from, to))[0].close).toBe(101)
+    const key = 'finverse:history:v2:CACHECHECK.NS'
+    const entry = JSON.parse(stored.get(key)!)
+    stored.set(key, JSON.stringify({ ...entry, points: [{ date: '2026-09-22', close: 102 }] }))
+    expect((await fetchHistory('CACHECHECK.NS', from, to))[0].close).toBe(102)
+    stored.clear()
+    expect((await fetchHistory('CACHECHECK.NS', from, to))[0].close).toBe(101)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
   it.each([{ nav: '120', fundChange: 10, total: 40 }, { nav: '110', fundChange: 0, total: 20 }])('includes a confirmed fund change in a complete same-session portfolio move: $fundChange', async ({ nav, fundChange, total }) => {
     const equity = normalizePosition({ ...position('RELIANCE'), exchangeSource: 'explicit', identityVersion: 2 })
     const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', quantity: 2, mfScheme: { code: 701, name: 'Fund Direct Growth', source: 'confirmed' } }
@@ -86,6 +124,7 @@ describe('market data client', () => {
       : [{ date: '24-09-2026', nav: '90' }, { date: '28-09-2026', nav: '99' }, { date: '27-09-2026', nav: '0' }, { date: 'invalid', nav: '999' }, { date: '25-09-2026', nav: '100' }, { date: '28-09-2026', nav: '98' }] })))
     const result = await fetchLiveQuotes([fund], {})
     expect(result.quotes[quoteKey(fund)]).toMatchObject({ price: 99, change: -1, changePct: -1, at: Date.parse('2026-09-28T00:00:00+05:30') })
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 
   it.each(['missing', 'failed'])('retains the latest NAV without inventing a move when prior history is %s', async (history) => {
@@ -345,13 +384,12 @@ describe('market data client', () => {
     const range = [new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z')] as const
     await expect(fetchNavHistory({ ...fund, name: 'Changed alias' }, ...range)).resolves.toEqual([{ date: '2026-09-22', close: 77.5 }])
     expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
-      'https://api.mfapi.in/mf/42/latest',
-      'https://api.mfapi.in/mf/42?startDate=2026-08-22&endDate=2026-09-22',
+      'https://api.mfapi.in/mf/42',
       'https://api.mfapi.in/mf/42?startDate=2026-09-01&endDate=2026-09-23',
     ])
     expect(stored.has('finverse:history:v2:mfapi:42')).toBe(true)
     await expect(fetchNavHistory({ ...fund, name: 'Another alias' }, ...range)).resolves.toHaveLength(1)
-    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(fetcher).toHaveBeenCalledTimes(2)
     await fetchNavHistory({ ...fund, mfScheme: { ...fund.mfScheme!, code: 43 } }, ...range)
     expect(String(fetcher.mock.calls.at(-1)?.[0])).toContain('/mf/43?')
   })
@@ -362,7 +400,7 @@ describe('market data client', () => {
     vi.stubGlobal('fetch', fetcher)
     const funds = ['First alias', 'Second alias'].map((name) => ({ ...position(name), type: 'mutual-fund' as const, mfScheme: mapping }))
     const results = await Promise.all(funds.map((fund) => fetchLiveQuotes([fund], {})))
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher).toHaveBeenCalledTimes(1)
     expect(results.map((result) => result.quotes['MF:mfapi:52'].price)).toEqual([120, 120])
   })
 

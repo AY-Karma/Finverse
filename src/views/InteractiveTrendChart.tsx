@@ -31,6 +31,8 @@ interface TrendMarker {
   comparable?: boolean
 }
 
+const NO_MARKERS: TrendMarker[] = []
+
 interface InteractiveTrendChartProps {
   rows: TrendRow[]
   lines: TrendLine[]
@@ -120,7 +122,7 @@ export function InteractiveTrendChart({
   yAxisLabel,
   includeZero = false,
   onReachStart,
-  markers = [],
+  markers = NO_MARKERS,
   showArea = true,
   appearance = 'default',
 }: InteractiveTrendChartProps) {
@@ -163,8 +165,11 @@ export function InteractiveTrendChart({
     () => chartRows.flatMap((row) => lines.map((line) => row[line.key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))),
     [chartRows, lines],
   )
-  const domain = yDomain([...values, ...markers.filter((marker) => Number.isFinite(marker.at) && Number.isFinite(marker.value)).map((marker) => marker.value)], includeZero)
-  const labels = domain.ticks.map(axisFormatter)
+  const domain = useMemo(
+    () => yDomain([...values, ...markers.filter((marker) => Number.isFinite(marker.at) && Number.isFinite(marker.value)).map((marker) => marker.value)], includeZero),
+    [values, markers, includeZero],
+  )
+  const labels = useMemo(() => domain.ticks.map(axisFormatter), [domain, axisFormatter])
   const isPriceChart = appearance === 'price'
   const isRightScaleChart = isPriceChart || appearance === 'insight'
   const axisWidth = clamp(Math.max(...labels.map((label) => label.length), yAxisLabel.length) * 6.6 + 22, 68, 132)
@@ -178,29 +183,48 @@ export function InteractiveTrendChart({
   const viewStart = clampViewportStart(viewStartState ?? preferredViewport.start, chartRows.length, visiblePointCount)
   const visibleStartIndex = chartRows.length ? Math.max(0, Math.floor(viewStart)) : 0
   const visibleEndIndex = chartRows.length ? Math.min(chartRows.length - 1, Math.ceil(viewStart + visiblePointCount - 1)) : -1
-  const visibleRows = visibleEndIndex >= visibleStartIndex ? chartRows.slice(visibleStartIndex, visibleEndIndex + 1) : []
+  const visibleRows = useMemo(
+    () => visibleEndIndex >= visibleStartIndex ? chartRows.slice(visibleStartIndex, visibleEndIndex + 1) : [],
+    [chartRows, visibleStartIndex, visibleEndIndex],
+  )
   const firstAt = chartRows[0]?.at ?? 0
   const visibleFirstAt = visibleRows[0]?.at ?? firstAt
   const visibleLastAt = visibleRows[visibleRows.length - 1]?.at ?? visibleFirstAt
   const visibleTimeSpan = Math.max(visibleLastAt - visibleFirstAt, 1)
   const dateTickCount = isRightScaleChart ? clamp(Math.floor(plotWidth / 140) + 1, 2, 5) : chartWidth < 480 ? 3 : 5
-  const domainRange = Math.max(domain.max - domain.min, 1)
   const pointSpacing = plotWidth / Math.max(visiblePointCount - 1, 1)
-  const xAtIndex = (index: number) => visiblePointCount <= 1 ? plotLeft + plotWidth / 2 : plotLeft + ((index - viewStart) / (visiblePointCount - 1)) * plotWidth
-  const yAt = (value: number) => PLOT_TOP + (1 - (value - domain.min) / domainRange) * plotHeight
-  const pathFor = (key: string) => {
-    let started = false
-    return chartRows.flatMap((row, index) => {
-      const value = row[key]
-      if (typeof value !== 'number' || !Number.isFinite(value)) {
-        started = false
-        return []
-      }
-      const command = started ? 'L' : 'M'
-      started = true
-      return [`${command}${xAtIndex(index).toFixed(1)},${yAt(value).toFixed(1)}`]
-    }).join(' ')
-  }
+  const primaryLine = lines[0]
+  const secondaryLine = lines[1]
+  const { xAtIndex, yAt, linePaths, areaPath, differencePath } = useMemo(() => {
+    const domainRange = Math.max(domain.max - domain.min, 1)
+    const xAtIndex = (index: number) => visiblePointCount <= 1 ? plotLeft + plotWidth / 2 : plotLeft + ((index - viewStart) / (visiblePointCount - 1)) * plotWidth
+    const yAt = (value: number) => PLOT_TOP + (1 - (value - domain.min) / domainRange) * plotHeight
+    const pathFor = (key: string) => {
+      let started = false
+      return chartRows.flatMap((row, index) => {
+        const value = row[key]
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          started = false
+          return []
+        }
+        const command = started ? 'L' : 'M'
+        started = true
+        return [`${command}${xAtIndex(index).toFixed(1)},${yAt(value).toFixed(1)}`]
+      }).join(' ')
+    }
+    const linePaths = lines.map((line) => pathFor(line.key))
+    const primaryPoints = primaryLine ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
+    const areaPath = showArea && primaryLine && primaryPoints.length > 1
+      ? `${linePaths[0]} L${xAtIndex(primaryPoints[primaryPoints.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(primaryPoints[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`
+      : ''
+    const pairedPoints = primaryLine && secondaryLine
+      ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
+      : []
+    const differencePath = appearance !== 'insight' && primaryLine && secondaryLine && pairedPoints.length > 1
+      ? `${pairedPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAtIndex(point.index).toFixed(1)},${yAt(point.row[primaryLine.key] as number).toFixed(1)}`).join(' ')} ${[...pairedPoints].reverse().map((point) => `L${xAtIndex(point.index).toFixed(1)},${yAt(point.row[secondaryLine.key] as number).toFixed(1)}`).join(' ')} Z`
+      : ''
+    return { xAtIndex, yAt, linePaths, areaPath, differencePath }
+  }, [chartRows, lines, primaryLine, secondaryLine, domain, visiblePointCount, plotLeft, plotWidth, viewStart, plotHeight, showArea, appearance])
   const markerPositions = useMemo(
     () => markers.flatMap((marker, markerIndex) => {
       if (!Number.isFinite(marker.at) || !Number.isFinite(marker.value) || chartRows.length === 0) return []
@@ -212,18 +236,6 @@ export function InteractiveTrendChart({
     }),
     [chartRows, markers],
   )
-  const primaryLine = lines[0]
-  const primaryPoints = primaryLine ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
-  const areaPath = showArea && primaryLine && primaryPoints.length > 1
-    ? `${pathFor(primaryLine.key)} L${xAtIndex(primaryPoints[primaryPoints.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(primaryPoints[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`
-    : ''
-  const secondaryLine = lines[1]
-  const pairedPoints = primaryLine && secondaryLine
-    ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
-    : []
-  const differencePath = appearance !== 'insight' && primaryLine && secondaryLine && pairedPoints.length > 1
-    ? `${pairedPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAtIndex(point.index).toFixed(1)},${yAt(point.row[primaryLine.key] as number).toFixed(1)}`).join(' ')} ${[...pairedPoints].reverse().map((point) => `L${xAtIndex(point.index).toFixed(1)},${yAt(point.row[secondaryLine.key] as number).toFixed(1)}`).join(' ')} Z`
-    : ''
   const hovered = hoveredIndex == null ? null : chartRows[hoveredIndex] ?? null
   const hoverX = hovered && hoveredIndex != null ? xAtIndex(hoveredIndex) : 0
   const tooltipLeft = clamp((hoverX / chartWidth) * 100, 8, 92)
@@ -256,24 +268,22 @@ export function InteractiveTrendChart({
     ? Math.round((comparisonTarget.at - comparisonMarker.at) / DAY_MS)
     : null
   const comparisonTone = comparisonDifference == null ? null : comparisonDifference > 0 ? 'gain' : comparisonDifference < 0 ? 'loss' : 'flat'
-  const comparisonPoints = comparisonMarker && comparison?.targetIndex != null && primaryLine
-    ? chartRows
-        .map((row, index) => ({ index, value: row[primaryLine.key] }))
-        .slice(Math.min(comparisonMarker.index, comparison.targetIndex), Math.max(comparisonMarker.index, comparison.targetIndex) + 1)
-        .filter((point): point is { index: number; value: number } => typeof point.value === 'number' && Number.isFinite(point.value))
-    : []
-  const comparisonAreaPath = comparisonPoints.length > 1
-    ? `${comparisonPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAtIndex(point.index).toFixed(1)},${yAt(point.value).toFixed(1)}`).join(' ')} L${xAtIndex(comparisonPoints[comparisonPoints.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(comparisonPoints[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`
-    : ''
+  const comparisonAreaPath = useMemo(() => {
+    if (!comparisonMarker || comparison?.targetIndex == null || !primaryLine) return ''
+    const startIndex = Math.min(comparisonMarker.index, comparison.targetIndex)
+    const points = chartRows
+      .slice(startIndex, Math.max(comparisonMarker.index, comparison.targetIndex) + 1)
+      .map((row, index) => ({ index: startIndex + index, value: row[primaryLine.key] }))
+      .filter((point): point is { index: number; value: number } => typeof point.value === 'number' && Number.isFinite(point.value))
+    return points.length > 1
+      ? `${points.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAtIndex(point.index).toFixed(1)},${yAt(point.value).toFixed(1)}`).join(' ')} L${xAtIndex(points[points.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(points[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`
+      : ''
+  }, [chartRows, primaryLine, comparisonMarker, comparison?.targetIndex, xAtIndex, yAt, plotHeight])
 
   const indexAtClientX = (clientX: number, bounds: DOMRect): number => {
     const x = ((clientX - bounds.left) / bounds.width) * chartWidth
     const targetIndex = viewStart + clamp((x - plotLeft) / plotWidth, 0, 1) * Math.max(visiblePointCount - 1, 1)
-    let nearest = 0
-    for (let index = 1; index < chartRows.length; index += 1) {
-      if (Math.abs(index - targetIndex) < Math.abs(nearest - targetIndex)) nearest = index
-    }
-    return nearest
+    return clamp(Math.ceil(targetIndex - 0.5), 0, chartRows.length - 1)
   }
 
   const onMove = (event: MouseEvent<SVGSVGElement>) => {
@@ -422,7 +432,7 @@ export function InteractiveTrendChart({
         <linearGradient id={`comparison-flat-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b9b9b4" stopOpacity="0.18" /><stop offset="100%" stopColor="#b9b9b4" stopOpacity="0.025" /></linearGradient>
         <clipPath id={`trend-plot-${chartId}`}><rect x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} /></clipPath>
       </defs>
-      {domain.ticks.map((tick) => <g key={tick}>{appearance !== 'minimal' && <line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - plotRight} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} />}<text x={isRightScaleChart ? chartWidth - plotRight + 14 : plotLeft - 12} y={yAt(tick) + 4} textAnchor={isRightScaleChart ? 'start' : 'end'} className="interactive-trend-axis-text">{axisFormatter(tick)}</text></g>)}
+      {domain.ticks.map((tick, index) => <g key={tick}>{appearance !== 'minimal' && <line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - plotRight} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} />}<text x={isRightScaleChart ? chartWidth - plotRight + 14 : plotLeft - 12} y={yAt(tick) + 4} textAnchor={isRightScaleChart ? 'start' : 'end'} className="interactive-trend-axis-text">{labels[index]}</text></g>)}
       {appearance === 'default' && <line x1={plotLeft} y1={PLOT_TOP} x2={plotLeft} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />}
       <line x1={plotLeft} y1={chartHeight - PLOT_BOTTOM} x2={chartWidth - plotRight} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />
       {visibleRows.length > 0 && tickIndices(visibleRows.length, dateTickCount).map((localIndex) => localIndex + visibleStartIndex).filter((index) => {
@@ -438,7 +448,7 @@ export function InteractiveTrendChart({
           <line x1={xAtIndex(comparisonMarker.index)} y1={PLOT_TOP} x2={xAtIndex(comparisonMarker.index)} y2={PLOT_TOP + plotHeight} />
           <line x1={xAtIndex(comparison.targetIndex)} y1={PLOT_TOP} x2={xAtIndex(comparison.targetIndex)} y2={PLOT_TOP + plotHeight} />
         </g>}
-        {lines.map((line) => <path key={line.key} d={pathFor(line.key)} className={line.dashed ? 'interactive-trend-line interactive-trend-line--dashed' : 'interactive-trend-line'} stroke={line.color} />)}
+        {lines.map((line, index) => <path key={line.key} d={linePaths[index]} className={line.dashed ? 'interactive-trend-line interactive-trend-line--dashed' : 'interactive-trend-line'} stroke={line.color} />)}
         {chartRows.length === 1 && lines.map((line) => {
           const pointValue = chartRows[0][line.key]
           return typeof pointValue === 'number' ? <circle key={line.key} cx={xAtIndex(0)} cy={yAt(pointValue)} r="5" fill={line.color} className="interactive-trend-dot" /> : null

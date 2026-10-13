@@ -1,5 +1,10 @@
-import { useEffect, useRef } from 'react'
-import { ImportView } from './ImportView'
+import { useEffect, useRef, useState } from 'react'
+
+const loadImportView = () => import('./ImportView')
+
+export function preloadPortfolioImport() {
+  void loadImportView().catch(() => { /* Opening the dialog retries and displays loading failures. */ })
+}
 
 interface PortfolioImportDialogProps {
   open: boolean
@@ -9,6 +14,20 @@ interface PortfolioImportDialogProps {
 export function PortfolioImportDialog({ open, onClose }: PortfolioImportDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
+  const [ImportView, setImportView] = useState<typeof import('./ImportView')['ImportView'] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || ImportView) return
+    let cancelled = false
+    setLoadError(null)
+    void loadImportView().then((module) => {
+      if (!cancelled) setImportView(() => module.ImportView)
+    }).catch(() => {
+      if (!cancelled) setLoadError('Could not load portfolio import. Close and reopen to try again.')
+    })
+    return () => { cancelled = true }
+  }, [open, ImportView])
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -48,7 +67,8 @@ export function PortfolioImportDialog({ open, onClose }: PortfolioImportDialogPr
           Need your latest holdings file? Open your broker below, download the latest holdings statement,
           then return here and choose Local files. Already have it? Go straight to Local files.
         </p>
-        <ImportView compact initialStep="sources" onImported={closeDialog} />
+        {ImportView ? <ImportView compact initialStep="sources" onImported={closeDialog} />
+          : open && <p role={loadError ? 'alert' : 'status'}>{loadError ?? 'Loading import...'}</p>}
         <p id="portfolio-import-privacy" className="portfolio-import-privacy">
           Broker sites open in a new tab. Finverse never asks for or receives your broker login.
         </p>

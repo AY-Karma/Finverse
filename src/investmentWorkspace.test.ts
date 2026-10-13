@@ -15,6 +15,21 @@ describe('quote coverage and session movement', () => {
     folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }], quotes, fxRate: null,
   })
 
+  it('reuses prepared holdings for new quotes and rejects preparation from a replaced account array', () => {
+    const folios = [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }]
+    const holdings = investmentWorkspace.prepareHoldings(folios)
+    const first = investmentWorkspace.readSnapshot({ folios, holdings, quotes: {}, fxRate: null })
+    const refreshed = investmentWorkspace.readSnapshot({ folios, holdings, quotes: { [aKey]: quote() }, fxRate: null })
+    expect(refreshed.positions).toBe(first.positions)
+    expect(refreshed.rawPositions).toBe(first.rawPositions)
+    expect(refreshed.currentValue).toBe(420)
+    const replacement = [{ ...folios[0], positions: [positions[1]] }]
+    const replaced = investmentWorkspace.readSnapshot({ folios: replacement, holdings, quotes: { [aKey]: quote() }, fxRate: null })
+    expect(replaced.positions.map((position) => position.id)).toEqual(['B'])
+    expect(replaced.currentValue).toBe(200)
+    expect(replaced.quotes).toEqual({})
+  })
+
   it('withholds whole-portfolio movement and return when only one holding reports a change', () => {
     const snapshot = read({ [aKey]: quote() })
     expect(snapshot.dailyChange).toBeNull()
