@@ -19,7 +19,7 @@ vi.mock('./views/MonitorView', () => ({
 }))
 vi.mock('./views/InsightsView', () => ({ InsightsView: () => <h1>Insights workspace</h1> }))
 vi.mock('./views/SettingsView', () => ({ SettingsView: () => <h1>Settings workspace</h1> }))
-vi.mock('./views/PortfolioImportDialog', () => ({ PortfolioImportDialog: () => null }))
+vi.mock('./views/PortfolioImportDialog', () => ({ PortfolioImportDialog: () => null, preloadPortfolioImport: vi.fn() }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 const holding: Position = {

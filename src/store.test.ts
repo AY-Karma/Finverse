@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+import './test/storage'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { loadFolios, loadSettings, sanitizeFolios, saveFolios, saveSettings } from './store'
 
@@ -42,14 +42,19 @@ describe('settings persistence', () => {
     expect(sessionStorage.length).toBe(0)
   })
 
-  it.each(['null', '[]', '"old settings"', '{invalid'])('replaces malformed settings with defaults: %s', (raw) => {
-    localStorage.setItem('finverse:settings', raw)
-    const preferences = loadSettings()
-    expect(preferences).toEqual({
-      currency: 'INR', allowExternalData: false, density: 'comfortable',
-      accent: 'indigo', mode: 'dark', hideValues: false,
-    })
-    expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
+  it('replaces malformed settings with defaults', () => {
+    for (const raw of ['null', '[]', '"old settings"', '{invalid']) {
+      expect.soft(() => {
+        localStorage.clear()
+        localStorage.setItem('finverse:settings', raw)
+        const preferences = loadSettings()
+        expect(preferences).toEqual({
+          currency: 'INR', allowExternalData: false, density: 'comfortable',
+          accent: 'indigo', mode: 'dark', hideValues: false,
+        })
+        expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
+      }, raw).not.toThrow()
+    }
   })
 
   it('uses defaults when browser storage cannot be read, cleaned or saved', () => {

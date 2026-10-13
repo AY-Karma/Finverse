@@ -5,7 +5,7 @@ import { effectivePrice, hasSupportedValuationCurrency, positionValue } from './
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MAX_HOLDINGS = 40
-const HISTORY_CONCURRENCY = 4
+const HISTORY_CONCURRENCY = 6
 
 interface PortfolioBackcastPoint {
   at: number

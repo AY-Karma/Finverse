@@ -39,6 +39,43 @@ async function fetchFeed(url: string, fetcher: typeof fetch, signal: AbortSignal
   }
 }
 
+function fetchCompanyFeed(urls: string[], fetcher: typeof fetch, signal: AbortSignal): Promise<string | null> {
+  if (signal.aborted) return Promise.resolve(null)
+  const controller = new AbortController()
+  const providerSignal = AbortSignal.any([signal, controller.signal])
+  return new Promise((resolve) => {
+    let settled = false
+    let failures = 0
+    let fallbackStarted = false
+    const finish = (feed: string | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(hedge)
+      signal.removeEventListener('abort', abort)
+      controller.abort()
+      resolve(feed)
+    }
+    const abort = () => finish(null)
+    const receive = (feed: string | null) => {
+      if (settled) return
+      if (feed) finish(feed)
+      else if (++failures === 2) finish(null)
+    }
+    const startFallback = () => {
+      if (fallbackStarted || settled) return
+      fallbackStarted = true
+      void fetchFeed(urls[1], fetcher, providerSignal).then(receive)
+    }
+    // Fast Google results retain precedence; after 500ms the first healthy feed wins.
+    const hedge = setTimeout(startFallback, 500)
+    signal.addEventListener('abort', abort, { once: true })
+    void fetchFeed(urls[0], fetcher, providerSignal).then((feed) => {
+      receive(feed)
+      if (!feed) startFallback()
+    })
+  })
+}
+
 export function createNewsHandler(
   dependencies: Partial<NewsHandlerDependencies> = {},
 ): (request: Request) => Promise<Response> {
@@ -72,11 +109,10 @@ export function createNewsHandler(
     }
 
     return budget(urls.join('|'), 300_000, async (signal) => {
-      for (const url of urls) {
-        if (signal.aborted) break
-        const feed = await fetchFeed(url, fetcher, signal)
-        if (feed) return new Response(feed, { status: 200, headers: HEADERS })
-      }
+      const feed = urls.length === 1
+        ? await fetchFeed(urls[0], fetcher, signal)
+        : await fetchCompanyFeed(urls, fetcher, signal)
+      if (feed) return new Response(feed, { status: 200, headers: HEADERS })
       return new Response('News providers are unavailable.', { status: 502, headers: { 'Cache-Control': 'no-store' } })
     })
   }

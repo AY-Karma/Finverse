@@ -47,10 +47,10 @@ describe('backcast coverage and cancellation', () => {
     }) }
     const pending = buildPortfolioBackcast(Array.from({ length: 20 }, (_, i) => holding(i)), {}, source, 366, controller.signal)
     const failure = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
-    expect(source.history).toHaveBeenCalledTimes(4)
+    expect(source.history).toHaveBeenCalledTimes(6)
     controller.abort()
     await failure
     expect(signals.every((signal) => signal.aborted)).toBe(true)
-    expect(source.history).toHaveBeenCalledTimes(4)
+    expect(source.history).toHaveBeenCalledTimes(6)
   })
 })

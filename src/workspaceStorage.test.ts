@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+import './test/storage'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { saveFolios } from './store'
 import { captureWorkspaceRecords, hasWorkspaceRecovery, recoverWorkspaceWrite, restorePreviousWorkspace, workspaceWritesBlocked, writeWorkspaceRecords } from './workspaceStorage'

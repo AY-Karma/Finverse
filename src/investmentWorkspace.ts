@@ -60,6 +60,13 @@ interface WorkspaceInput {
   quotes: Record<string, LiveQuote>
   fxRate: FxRate | null
   history?: PortfolioSnapshot[]
+  holdings?: PreparedHoldings
+}
+
+interface PreparedHoldings {
+  folios: Folio[]
+  rawPositions: Position[]
+  positions: Position[]
 }
 
 interface InvestmentWorkspace {
@@ -67,6 +74,7 @@ interface InvestmentWorkspace {
   readSnapshot(input: WorkspaceInput): InvestmentSnapshot
   /** Normalize imported positions at the storage seam. */
   normalizeImport(positions: Position[]): Position[]
+  prepareHoldings(folios: Folio[]): PreparedHoldings
 }
 
 // Scheme categories like "Equity - Large Cap Fund" are asset-class words, not
@@ -156,14 +164,21 @@ function lastUpdated(quotes: Record<string, LiveQuote>): number | null {
   return times.length ? Math.max(...times) : null
 }
 
+function prepareHoldings(folios: Folio[]): PreparedHoldings {
+  const rawPositions = positionsWithStatementDates(folios)
+  return { folios, rawPositions, positions: combinePositions(rawPositions) }
+}
+
 export const investmentWorkspace: InvestmentWorkspace = {
   normalizeImport(positions) {
     return positions.map(normalizePosition)
   },
 
+  prepareHoldings,
+
   readSnapshot(input) {
-    const rawPositions = positionsWithStatementDates(input.folios)
-    const positions = combinePositions(rawPositions)
+    const { rawPositions, positions } = input.holdings?.folios === input.folios
+      ? input.holdings : prepareHoldings(input.folios)
     const quotes = Object.fromEntries(positions.flatMap((position) => {
       const key = quoteKey(position)
       const quote = input.quotes[key]

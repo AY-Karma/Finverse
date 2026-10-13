@@ -1,3 +1,4 @@
+import { numberFormatter, dateFormatter } from '../formatters'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Position } from '../types'
 import type { View } from '../useStore'
@@ -15,7 +16,7 @@ import { useResearchNavigation } from './useResearchNavigation'
 import './research.css'
 
 const PAGE_SIZE = 24
-const DATE_FORMAT = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+const DATE_FORMAT = dateFormatter({ day: 'numeric', month: 'short', year: 'numeric' })
 
 function groupLabel(position: Position): string {
   return position.type === 'mutual-fund' ? position.category || 'Uncategorized funds' : position.sector || 'Uncategorized holdings'
@@ -86,7 +87,7 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
   const hasFx = fxRate?.usdInr != null && Number.isFinite(fxRate.usdInr) && fxRate.usdInr > 0
   const displayCurrency = settings.currency === 'USD' && hasFx ? 'USD' : 'INR'
   const formatAmount = (amount: number) => selected?.currency === 'USD'
-    ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(amount)
+    ? numberFormatter({ style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(amount)
     : formatCurrency(amount, displayCurrency, fxRate?.usdInr)
   const amount = (number: number | null, fallback = 'Unavailable') => privateValue(number == null ? fallback : formatAmount(number), settings.hideValues)
   const quote = selected ? quotes[quoteKey(selected)] : undefined
@@ -131,7 +132,7 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
           }}><ActionIcon name={tab.id} />{tab.label}</button>)}</div>
           <div className="rd-tab-content" id="rd-tab-panel" role="tabpanel" aria-labelledby={`rd-tab-${navigation.tab}`} tabIndex={0}>
             {navigation.tab === 'overview' && <>
-              <section className="rd-section"><div className="rd-section-head"><h3>Your holding</h3><span className="rd-basis">{basis}</span></div><dl className="rd-metrics"><Metric label="Holding value" value={amount(value, 'Unpriced')} /><Metric label="Unrealized return" value={privateValue(pnlPct == null ? 'Unavailable' : formatPercent(pnlPct), settings.hideValues)} movement={!settings.hideValues && pnl != null ? pnl >= 0 ? 'up' : 'down' : ''} /><Metric label="Portfolio weight" value={privateValue(weight == null ? 'Unavailable' : `${weight.toFixed(1)}%`, settings.hideValues)} /><Metric label="Invested amount" value={amount(selected.invested)} /><Metric label={selected.type === 'mutual-fund' ? 'Units held' : 'Quantity held'} value={privateValue(new Intl.NumberFormat('en-IN', { maximumFractionDigits: 4 }).format(selected.quantity), settings.hideValues)} /><Metric label={selected.type === 'mutual-fund' ? 'NAV per unit' : 'Price per unit'} value={amount(effectivePrice(selected, quotes))} /></dl>{weight == null && <p className="rd-footnote">Portfolio weight needs complete prices in one currency.</p>}<p className="rd-footnote">{selected.currency === 'USD' ? 'Values shown in USD, the asset currency.' : displayCurrency === 'USD' ? 'INR asset values displayed in USD using the available FX rate.' : settings.currency === 'USD' ? 'Values shown in INR because an FX rate is unavailable.' : 'Values shown in INR.'} Unrealized return is since purchase, not today.</p></section>
+              <section className="rd-section"><div className="rd-section-head"><h3>Your holding</h3><span className="rd-basis">{basis}</span></div><dl className="rd-metrics"><Metric label="Holding value" value={amount(value, 'Unpriced')} /><Metric label="Unrealized return" value={privateValue(pnlPct == null ? 'Unavailable' : formatPercent(pnlPct), settings.hideValues)} movement={!settings.hideValues && pnl != null ? pnl >= 0 ? 'up' : 'down' : ''} /><Metric label="Portfolio weight" value={privateValue(weight == null ? 'Unavailable' : `${weight.toFixed(1)}%`, settings.hideValues)} /><Metric label="Invested amount" value={amount(selected.invested)} /><Metric label={selected.type === 'mutual-fund' ? 'Units held' : 'Quantity held'} value={privateValue(numberFormatter({ maximumFractionDigits: 4 }).format(selected.quantity), settings.hideValues)} /><Metric label={selected.type === 'mutual-fund' ? 'NAV per unit' : 'Price per unit'} value={amount(effectivePrice(selected, quotes))} /></dl>{weight == null && <p className="rd-footnote">Portfolio weight needs complete prices in one currency.</p>}<p className="rd-footnote">{selected.currency === 'USD' ? 'Values shown in USD, the asset currency.' : displayCurrency === 'USD' ? 'INR asset values displayed in USD using the available FX rate.' : settings.currency === 'USD' ? 'Values shown in INR because an FX rate is unavailable.' : 'Values shown in INR.'} Unrealized return is since purchase, not today.</p></section>
               <section className="rd-section"><div className="rd-section-head"><div><h3>A starting point for your review</h3><p>{selected.type === 'mutual-fund' ? 'Understand the mandate, costs and risk before comparing returns.' : selected.type === 'etf' ? 'Understand what it tracks and the cost of holding it.' : 'Follow the evidence, then revisit your reason to own.'}</p></div></div><ol className="rd-review-guide">{questions.slice(0, 3).map((question, index) => <li key={question.id}><span>{String(index + 1).padStart(2, '0')}</span>{question.text}</li>)}</ol><button type="button" className="btn btn--secondary" onClick={() => updateNavigation({ tab: 'sources' })}><ActionIcon name="research" />Start my research</button></section>
               <section className="rd-section"><div className="rd-section-head"><h3>Go to the evidence</h3><button type="button" className="workspace-action" onClick={() => updateNavigation({ tab: 'sources' })}><ActionIcon name="sources" />All sources</button></div><SourceList links={links.slice(0, 2)} /><p className="rd-footnote">Sources open in a new tab and receive the investment name or symbol.</p></section>
               {!settings.hideValues && selected.type !== 'other' && <ResearchHistory key={key} position={selected} allowed={settings.allowExternalData} active={active} format={formatAmount} />}

@@ -168,9 +168,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     catch (cause) { setWorkspaceError(cause instanceof Error ? cause.message : 'Preferences could not be changed.') }
   }, [assertCurrentWorkspace])
 
+  const holdings = useMemo(() => investmentWorkspace.prepareHoldings(folios), [folios])
   const snapshot = useMemo(
-    () => investmentWorkspace.readSnapshot({ folios, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, fxRate, history: portfolioHistory }),
-    [folios, liveQuotes, settings.allowExternalData, fxRate, portfolioHistory],
+    () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, fxRate, history: portfolioHistory }),
+    [folios, holdings, liveQuotes, settings.allowExternalData, fxRate, portfolioHistory],
   )
   const rawPositions = snapshot.rawPositions
   const positions = snapshot.positions
@@ -345,6 +346,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     manualRefreshControllers.current.add(controller)
     try {
+      const fxRefresh = settings.currency === 'USD' ? fetchUsdInrRate(controller.signal).catch(() => null) : Promise.resolve(null)
       const result = await marketData.refreshQuotes(positions, liveQuotesRef.current, controller.signal)
       controller.signal.throwIfAborted()
       setMarketDataResult(result)
@@ -353,16 +355,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       setLiveQuotes(result.quotes)
       recordManualRefresh()
-      if (settings.currency === 'USD') {
-        const rate = await fetchUsdInrRate(controller.signal)
-        controller.signal.throwIfAborted()
-        if (rate) setFxRateState(rate)
-      }
+      const rate = await fxRefresh
+      controller.signal.throwIfAborted()
+      if (rate) setFxRateState(rate)
       return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
     } catch {
       if (!controller.signal.aborted) setMarketDataResult({ quotes: liveQuotesRef.current, updated: 0, failed: positions.length, skipped: 0 })
       return { ok: false, reason: 'failed', retryInMs: 0 }
     } finally {
+      controller.abort()
       manualRefreshControllers.current.delete(controller)
     }
   }, [assertCurrentWorkspace, positions, settings.allowExternalData, settings.currency, setLiveQuotes])
@@ -495,7 +496,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })
   }, [settings.allowExternalData, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length, snapshot.valuationComplete])
 
-  const value: Store = {
+  const value = useMemo<Store>(() => ({
     folios,
     positions,
     rawPositions,
@@ -519,7 +520,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     workspaceReadOnly: workspaceChanged,
     settingsSaved: !settingsSaveFailed && !workspaceChanged,
     refreshNow,
-  }
+  }), [folios, positions, rawPositions, liveQuotes, fxRate, snapshot, portfolioHistory, marketDataRefreshing,
+    marketDataResult, removeFolio, settings, setSettings, previewFile, commitImport, commitImports,
+    undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, workspaceChanged, settingsSaveFailed, refreshNow])
 
   return <StoreContext.Provider value={value}>
     {!!snapshot.unsupportedCurrencyCount && <div className="folio-save-warning" role="status"><span>Partial INR totals. {snapshot.unsupportedCurrencyCount} holding{snapshot.unsupportedCurrencyCount === 1 ? '' : 's'} in unsupported native currencies excluded. Native currency conversion is not supported; original amounts remain in exports.</span></div>}

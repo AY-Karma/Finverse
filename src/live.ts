@@ -195,17 +195,21 @@ function fetchNavByCode(code: number, signal?: AbortSignal): Promise<LiveQuote |
 
 async function fetchNavUncached(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
   try {
-    const navRes = await fetch(`https://api.mfapi.in/mf/${code}/latest`, {
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
-    })
-    if (!navRes.ok) return null
-    const data = (await navRes.json()) as { data?: { date?: string; nav?: string }[] }
-    const latest = data?.data?.[0]
-    const nav = Number(latest?.nav)
-    const date = navDate(latest?.date)
-    if (!Number.isFinite(nav) || nav <= 0 || !date) return null
-    const history = await fetchNavHistoryUncached(code, adjacentDay(date, -31), date, signal ?? AbortSignal.timeout(12000))
-    const previous = history.filter((point) => point.date < date).at(-1)
+    const requestSignal = signal ?? AbortSignal.timeout(12000)
+    const history = await fetchNavHistoryUncached(code, undefined, undefined, requestSignal)
+    requestSignal.throwIfAborted()
+    let latest = history.at(-1)
+    if (!latest) {
+      const response = await fetch(`https://api.mfapi.in/mf/${code}/latest`, {
+        signal: AbortSignal.any([requestSignal, AbortSignal.timeout(10000)]),
+      })
+      if (!response.ok) return null
+      const data = (await response.json()) as { data?: { date?: string; nav?: string }[] }
+      latest = navPoints(data.data).at(-1)
+    }
+    if (!latest) return null
+    const { close: nav, date } = latest
+    const previous = history.at(-2)
     const change = previous ? nav - previous.close : undefined
     const changePct = previous && change != null ? change / previous.close * 100 : undefined
     const fetchedAt = Date.now()
@@ -373,6 +377,18 @@ interface HistoryCacheEntry {
   at: number
 }
 
+const parsedHistory = new Map<string, { raw: string; entry: HistoryCacheEntry }>()
+const cleanedHistoryStores = new WeakSet<Storage>()
+
+function rememberHistory(key: string, raw: string, entry: HistoryCacheEntry): HistoryCacheEntry {
+  if (parsedHistory.size >= 128 && !parsedHistory.has(key)) {
+    const oldest = parsedHistory.keys().next().value
+    if (oldest) parsedHistory.delete(oldest)
+  }
+  parsedHistory.set(key, { raw, entry })
+  return entry
+}
+
 function historyCacheKey(symbol: string): string {
   return `finverse:history:v2:${symbol}`
 }
@@ -380,10 +396,11 @@ function historyCacheKey(symbol: string): string {
 function readHistoryCache(key: string): HistoryCacheEntry | null {
   try {
     const raw = localStorage.getItem(key)
-    if (!raw) return null
-    const entry = JSON.parse(raw) as HistoryCacheEntry
+    if (!raw) { parsedHistory.delete(key); return null }
+    const cached = parsedHistory.get(key)
+    const entry = cached?.raw === raw ? cached.entry : JSON.parse(raw) as HistoryCacheEntry
     if (!Array.isArray(entry?.points) || !entry.from || !entry.to || !Number.isFinite(entry.at) || Date.now() - entry.at > HISTORY_TTL_MS) return null
-    return entry
+    return rememberHistory(key, raw, entry)
   } catch {
     return null
   }
@@ -391,12 +408,16 @@ function readHistoryCache(key: string): HistoryCacheEntry | null {
 
 function writeHistoryCache(key: string, entry: HistoryCacheEntry): void {
   try {
-    const legacyPrefix = key.replace('finverse:history:v2:', 'finverse:history:') + ':'
-    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-      const storedKey = localStorage.key(index)
-      if (storedKey?.startsWith(legacyPrefix)) localStorage.removeItem(storedKey)
+    if (!cleanedHistoryStores.has(localStorage)) {
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const storedKey = localStorage.key(index)
+        if (storedKey?.startsWith('finverse:history:') && !storedKey.startsWith('finverse:history:v2:')) localStorage.removeItem(storedKey)
+      }
+      cleanedHistoryStores.add(localStorage)
     }
-    localStorage.setItem(key, JSON.stringify(entry))
+    const raw = JSON.stringify(entry)
+    localStorage.setItem(key, raw)
+    rememberHistory(key, raw, entry)
   } catch {
     /* storage unavailable or full — refetch next time */
   }
@@ -409,7 +430,7 @@ function adjacentDay(date: string, offset: number): string {
 }
 
 function historyInRange(points: HistoryPoint[], from: string, to: string): HistoryPoint[] {
-  return points.filter((point) => point.date >= from && point.date <= to)
+  return points.filter((point) => point.date >= from && point.date <= to).map((point) => ({ ...point }))
 }
 
 function fetchCachedHistory(
@@ -460,6 +481,28 @@ export function fetchHistory(symbol: string, from: Date, to: Date, signal?: Abor
   return fetchCachedHistory(cacheIdentity, from, to, (rangeFrom, rangeTo, requestSignal) => fetchHistoryUncached(symbol, rangeFrom, rangeTo, requestSignal), signal)
 }
 
+let activeHistoryRequests = 0
+const historyWaiters = new Set<() => void>()
+
+async function withHistorySlot<T>(signal: AbortSignal, load: () => Promise<T>): Promise<T> {
+  signal.throwIfAborted()
+  while (activeHistoryRequests >= 7) {
+    await new Promise<void>((resolve, reject) => {
+      const ready = () => { historyWaiters.delete(ready); signal.removeEventListener('abort', abort); resolve() }
+      const abort = () => { historyWaiters.delete(ready); reject(signal.reason) }
+      historyWaiters.add(ready)
+      signal.addEventListener('abort', abort, { once: true })
+    })
+    signal.throwIfAborted()
+  }
+  activeHistoryRequests += 1
+  try { return await load() }
+  finally {
+    activeHistoryRequests -= 1
+    historyWaiters.values().next().value?.()
+  }
+}
+
 async function fetchHistoryUncached(symbol: string, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
   const params = new URLSearchParams({
     symbol,
@@ -467,13 +510,14 @@ async function fetchHistoryUncached(symbol: string, from: string, to: string, si
     to,
   })
   try {
-    const res = await fetch(`/api/history?${params}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) })
-    if (!res.ok) return []
-    const json = (await res.json()) as HistoryPayload
-    const points = (json.points ?? []).filter(
-      (point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.close) && point.close > 0,
-    )
-    return points
+    return await withHistorySlot(signal, async () => {
+      const res = await fetch(`/api/history?${params}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) })
+      if (!res.ok) return []
+      const json = (await res.json()) as HistoryPayload
+      return (json.points ?? []).filter(
+        (point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.close) && point.close > 0,
+      )
+    })
   } catch {
     return []
   }
@@ -493,24 +537,26 @@ export function fetchNavHistory(
     fetchNavHistoryUncached(code, rangeFrom, rangeTo, requestSignal), signal)
 }
 
-async function fetchNavHistoryUncached(code: number, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
+function navPoints(rows: { date?: string; nav?: string }[] = []): HistoryPoint[] {
+  const points = new Map<string, HistoryPoint>()
+  for (const row of rows) {
+    const close = Number(row.nav)
+    const date = navDate(row.date)
+    if (!date || !Number.isFinite(close) || close <= 0 || points.has(date)) continue
+    points.set(date, { date, close })
+  }
+  return [...points.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
+async function fetchNavHistoryUncached(code: number, from: string | undefined, to: string | undefined, signal: AbortSignal): Promise<HistoryPoint[]> {
   try {
     const res = await fetch(
-      `https://api.mfapi.in/mf/${code}?startDate=${from}&endDate=${to}`,
+      `https://api.mfapi.in/mf/${code}${from && to ? `?startDate=${from}&endDate=${to}` : ''}`,
       { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) },
     )
     if (!res.ok) return []
     const data = (await res.json()) as { data?: { date?: string; nav?: string }[] }
-    const points: HistoryPoint[] = []
-    for (const row of data?.data ?? []) {
-      const nav = Number(row.nav)
-      const date = navDate(row.date)
-      if (!date || !Number.isFinite(nav) || nav <= 0) continue
-      points.push({ date, close: nav })
-    }
-    // mfapi returns newest-first; we want ascending so the chart reads left→right.
-    points.sort((a, b) => a.date.localeCompare(b.date))
-    return points
+    return navPoints(data.data)
   } catch {
     return []
   }
