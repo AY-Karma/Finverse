@@ -165,7 +165,7 @@ describe('overview valuation and visible work', () => {
       id: ticker, ticker, name: ticker, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110,
     }))
     const folios = [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }]
-    const quotes = { 'EQ:A': { price: 110, change: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' as const } }
+    const quotes = { [quoteKey(positions[0])]: { price: 110, change: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' as const } }
     const snapshot = investmentWorkspace.readSnapshot({ folios, quotes, fxRate: null })
     state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: quotes, fxRate: null, settings: { ...loadSettings(), hideValues: false, allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')

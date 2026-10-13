@@ -67,4 +67,15 @@ describe('mobile watch rule actions', () => {
     await act(async () => { editButton.click() })
     expect(container.querySelector('#mp-rule-title')?.textContent).toBe('Edit watch rule')
   })
+
+  it('shows a flagged rule as unavailable even when its old holding ID still exists', async () => {
+    await renderMonitor()
+    const saved = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!)
+    saved.rules[0].unresolved = true
+    saved.rules[0].instrumentIdentity += '|old-mapping'
+    localStorage.setItem(MONITOR_STORAGE_KEY, JSON.stringify(saved))
+    await act(async () => window.dispatchEvent(new Event('finverse:monitor-restored')))
+    expect(container.querySelector('.mp-rule-state')?.textContent).toBe('Unavailable')
+    expect(container.querySelector('.mp-rule-menu')).toBeNull()
+  })
 })

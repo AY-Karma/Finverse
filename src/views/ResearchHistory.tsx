@@ -4,6 +4,7 @@ import { marketData } from '../marketData'
 import type { HistoryPoint } from '../live'
 import { downsampleSeries } from '../timeSeries'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
+import { quoteKey } from '../valuation'
 
 const DAY_MS = 86400000
 type HistoryRow = { at: number; price: number | undefined }
@@ -63,9 +64,7 @@ export function ResearchHistory({ position, allowed, active, format }: {
   const [retry, setRetry] = useState(0)
   const positionRef = useRef(position)
   positionRef.current = position
-  const requestIdentity = JSON.stringify(position.type === 'mutual-fund'
-    ? [position.type, position.name || position.ticker]
-    : [position.type, position.ticker, position.exchange || '', position.providerSymbol || ''])
+  const requestIdentity = JSON.stringify([quoteKey(position), position.identityIssue ?? ''])
   useEffect(() => {
     if (!allowed || !active || !requested) { setPoints([]); setLoading(false); return }
     const controller = new AbortController()

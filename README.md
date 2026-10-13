@@ -30,7 +30,9 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite to enter the portfolio workspace. Import a holdings export to create your first folio. You can review each file before saving it, and each accepted file becomes a separate folio.
+Open the local URL printed by Vite to enter the portfolio workspace. In Settings, import a holdings export and choose Add another account or Update existing account. Updates require selecting the account and confirming a complete statement with no rejected rows. Review the position changes and resulting totals before saving. The previous statement is retained for undo, including after a reload.
+
+Statements have a date separate from their upload time. Provider quotes take precedence when enabled. Across accounts, imported prices use the latest dated statement with a usable price. Equal dates or wholly undated statements use import order. Conflicting prices and missing dates appear in a review notice. Account changes record tracked balances, not investment returns.
 
 Run `npm run build` to check the TypeScript code and create a production build.
 
@@ -38,6 +40,8 @@ Run `npm run build` to check the TypeScript code and create a production build.
 
 Finverse stores holdings and preferences in your browser. External market data is off by default; turning it on sends instrument identifiers to market data providers for quotes, history, and news.
 
+Portfolio totals use INR holdings. USD holdings retain their native amounts in storage and exports, but are excluded from aggregate INR cost and valuation with a partial-total notice. Choosing USD as the display currency converts the INR subtotal; it does not combine native USD holdings into it.
+
 Historical backcasts apply **today's holdings** to past prices, so they do not represent past trades. Tracked history starts when daily portfolio snapshots begin accumulating on this device.
 
-Clearing browser data removes your local portfolio and tracked history. Keep your original holdings files if you want to set up Finverse in another browser; the app does not currently import its JSON export.
+Clearing browser data removes your local workspace. In Settings, use Backup JSON to save accounts, preferences, tracked balances and Monitor data, then Restore backup to review and recover them in another browser. Backups are unencrypted financial records; keep them private. Restoring replaces the current workspace, keeps a recovery copy for undo, and leaves external market data off until you enable it again. Older holdings-only JSON exports can also be restored, but cannot recover omitted history or Monitor data.

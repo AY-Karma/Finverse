@@ -1,6 +1,6 @@
 import type { Folio, FxRate, LiveQuote, PortfolioSnapshot, Position } from './types'
 import { assetTypeLabel, instrumentLabel, normalizePosition } from './instruments'
-import { combinePositions, computePortfolioStats, effectivePrice, positionPnl, positionValue, quoteKey } from './valuation'
+import { combinePositions, computePortfolioStats, effectivePrice, hasSupportedValuationCurrency, positionPnl, positionsWithStatementDates, positionValue, quoteKey } from './valuation'
 
 interface Contribution {
   symbol: string
@@ -35,6 +35,7 @@ export interface InvestmentSnapshot {
   pricedCount: number
   unpricedCount: number
   valuationComplete: boolean
+  unsupportedCurrencyCount: number
   currentValue: number
   pnl: number
   pnlPct: number
@@ -81,6 +82,7 @@ function sectorOf(position: Position): string {
 }
 
 function quoteChange(position: Position, quotes: Record<string, LiveQuote>): number | null {
+  if (!hasSupportedValuationCurrency(position)) return null
   const quote = quotes[quoteKey(position)]
   if (quote?.change != null && Number.isFinite(quote.change)) {
     const change = quote.change * position.quantity
@@ -108,7 +110,7 @@ function buildContributions(positions: Position[], quotes: Record<string, LiveQu
   return positions
     .map((position) => {
       const value = positionValue(position, quotes)
-      const quote = quotes[quoteKey(position)]
+      const quote = hasSupportedValuationCurrency(position) ? quotes[quoteKey(position)] : undefined
       const inSession = quote != null && quoteDate(quote.at) === sessionDate
       const dailyChange = inSession ? quoteChange(position, quotes) : null
       return {
@@ -158,9 +160,7 @@ export const investmentWorkspace: InvestmentWorkspace = {
   },
 
   readSnapshot(input) {
-    // Folios are normalized when they enter storage; quote refreshes can now
-    // reuse the same position objects without rebuilding their identity.
-    const rawPositions = input.folios.flatMap((folio) => folio.positions)
+    const rawPositions = positionsWithStatementDates(input.folios)
     const positions = combinePositions(rawPositions)
     const quotes = Object.fromEntries(positions.flatMap((position) => {
       const key = quoteKey(position)
@@ -188,6 +188,7 @@ export const investmentWorkspace: InvestmentWorkspace = {
       pricedCount: stats.pricedCount,
       unpricedCount: stats.unpricedCount,
       valuationComplete: stats.valuationComplete,
+      unsupportedCurrencyCount: positions.filter((position) => !hasSupportedValuationCurrency(position)).length,
       currentValue: stats.currentValue,
       pnl: stats.pnl,
       pnlPct: stats.pnlPct,
@@ -212,15 +213,17 @@ export function importIdentitySummary(positions: Position[]): { normalized: Posi
   return {
     normalized,
     duplicateCount: normalized.length - combinePositions(normalized).length,
-    unmatchedCount: normalized.filter((position) => position.type === 'other').length,
+    unmatchedCount: normalized.filter((position) => position.type === 'other' || position.identityIssue).length,
   }
 }
 
 export function exportPortfolioCsv(positions: Position[]): string {
-  const headers = ['Symbol', 'Name', 'Type', 'Exchange', 'ISIN', 'Quantity', 'Average cost', 'Last price', 'Invested', 'Sector']
+  const headers = ['Symbol', 'Name', 'Type', 'Exchange', 'ISIN', 'Quantity', 'Average cost', 'Last price', 'Invested', 'Sector', 'Industry', 'Currency', 'Provider symbol', 'Exchange source', 'Identity issue', 'Reported exchange', 'Reported currency', 'MF scheme code', 'MF scheme name', 'MF mapping source']
   const cells = (position: Position): (string | number)[] => [
     instrumentLabel(position), position.name, assetTypeLabel(position.type), position.exchange ?? '', position.isin ?? '',
     position.quantity, position.buyPrice, position.lastPrice ?? '', position.invested, position.sector ?? position.category ?? '',
+    position.industry ?? '', position.currency ?? '', position.providerSymbol ?? '', position.exchangeSource ?? '', position.identityIssue ?? '',
+    position.reportedExchange ?? '', position.reportedCurrency ?? '', position.mfScheme?.code ?? '', position.mfScheme?.name ?? '', position.mfScheme?.source ?? '',
   ]
   const escape = (value: string | number) => {
     const text = String(value)

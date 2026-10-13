@@ -3,6 +3,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { investmentWorkspace } from '../investmentWorkspace'
+import { quoteKey } from '../valuation'
+import type { Position } from '../types'
 import { loadSettings } from '../store'
 import { InsightsView } from './InsightsView'
 
@@ -46,11 +48,12 @@ describe('Insights privacy', () => {
 
   it('dates older-session movers and reports partial coverage without a portfolio return', async () => {
     state.settings = { ...loadSettings(), allowExternalData: true, hideValues: false }
+    const positions: Position[] = ['A', 'B'].map((ticker) => (
+      { id: ticker, ticker, name: ticker, type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 110, invested: 100 }
+    ))
     state.snapshot = investmentWorkspace.readSnapshot({
-      folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions: ['A', 'B'].map((ticker) => (
-        { id: ticker, ticker, name: ticker, type: 'stock' as const, quantity: 1, buyPrice: 100, lastPrice: 110, invested: 100 }
-      )) }],
-      quotes: { 'EQ:A': { price: 110, change: 10, changePct: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' } }, fxRate: null,
+      folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }],
+      quotes: { [quoteKey(positions[0])]: { price: 110, change: 10, changePct: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' } }, fxRate: null,
     })
     container = document.createElement('div')
     root = createRoot(container)
@@ -67,14 +70,15 @@ describe('Insights privacy', () => {
   it('removes allocation and mover identities, colours, and proportions while masked', async () => {
     const settings = { ...loadSettings(), allowExternalData: true, hideValues: false }
     state.settings = settings
+    const positions: Position[] = [
+      { id: 'up', ticker: 'SECRETUP', name: 'SECRETUP', type: 'stock', quantity: 10, buyPrice: 100, lastPrice: 120, invested: 1000 },
+      { id: 'down', ticker: 'SECRETDOWN', name: 'SECRETDOWN', type: 'stock', quantity: 2, buyPrice: 100, lastPrice: 80, invested: 200 },
+    ]
     state.snapshot = investmentWorkspace.readSnapshot({
-      folios: [{ id: 'portfolio', name: 'Portfolio', importedAt: 1, positions: [
-        { id: 'up', ticker: 'SECRETUP', name: 'SECRETUP', type: 'stock', quantity: 10, buyPrice: 100, lastPrice: 120, invested: 1000 },
-        { id: 'down', ticker: 'SECRETDOWN', name: 'SECRETDOWN', type: 'stock', quantity: 2, buyPrice: 100, lastPrice: 80, invested: 200 },
-      ] }],
+      folios: [{ id: 'portfolio', name: 'Portfolio', importedAt: 1, positions }],
       quotes: {
-        'EQ:SECRETUP': { price: 120, change: 5, changePct: 4, at: Date.now(), source: 'yahoo' },
-        'EQ:SECRETDOWN': { price: 80, change: -3, changePct: -4, at: Date.now(), source: 'yahoo' },
+        [quoteKey(positions[0])]: { price: 120, change: 5, changePct: 4, at: Date.now(), source: 'yahoo' },
+        [quoteKey(positions[1])]: { price: 80, change: -3, changePct: -4, at: Date.now(), source: 'yahoo' },
       },
       fxRate: null,
     })

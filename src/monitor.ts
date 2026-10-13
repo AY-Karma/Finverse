@@ -1,5 +1,6 @@
 import type { LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
+import { workspaceWritesBlocked } from './workspaceStorage'
 
 export type RuleCondition = 'price_above' | 'price_below' | 'daily_move'
 export type AlertState = 'open' | 'reviewed' | 'snoozed'
@@ -29,6 +30,7 @@ export interface MonitorRule {
   condition: RuleCondition
   threshold: number
   active: boolean
+  unresolved?: boolean
 }
 export interface MonitorEvent {
   id: string
@@ -38,6 +40,7 @@ export interface MonitorEvent {
   date: string
   kind: 'Reminder'
   reminder: boolean
+  unresolved?: boolean
 }
 export interface MonitorState { rules: MonitorRule[]; events: MonitorEvent[]; alerts: MonitorAlert[] }
 
@@ -74,12 +77,12 @@ export function sanitizeMonitorState(value: unknown): MonitorState {
   const rules: MonitorRule[] = []
   for (const item of Array.isArray(value.rules) ? value.rules.slice(0, MAX_ITEMS) : []) {
     if (!record(item) || !text(item.id) || !text(item.holdingId) || !text(item.instrumentIdentity) || !conditions.includes(item.condition as RuleCondition) || !finite(item.threshold) || item.threshold <= 0 || typeof item.active !== 'boolean') continue
-    rules.push({ id: text(item.id), holding: text(item.holding), holdingId: text(item.holdingId), instrumentIdentity: text(item.instrumentIdentity), condition: item.condition as RuleCondition, threshold: item.threshold, active: item.active })
+    rules.push({ id: text(item.id), holding: text(item.holding), holdingId: text(item.holdingId), instrumentIdentity: text(item.instrumentIdentity), condition: item.condition as RuleCondition, threshold: item.threshold, active: item.active, ...(item.unresolved === true ? { unresolved: true } : {}) })
   }
   const events: MonitorEvent[] = []
   for (const item of Array.isArray(value.events) ? value.events.slice(0, MAX_ITEMS) : []) {
     if (!record(item) || !text(item.id) || !text(item.title) || !validReminderDate(text(item.date)) || typeof item.reminder !== 'boolean') continue
-    events.push({ id: text(item.id), holding: text(item.holding) || 'Portfolio', holdingId: text(item.holdingId) || undefined, title: text(item.title, 160), date: text(item.date), kind: 'Reminder', reminder: item.reminder })
+    events.push({ id: text(item.id), holding: text(item.holding) || 'Portfolio', holdingId: text(item.holdingId) || undefined, title: text(item.title, 160), date: text(item.date), kind: 'Reminder', reminder: item.reminder, ...(item.unresolved === true ? { unresolved: true } : {}) })
   }
   const alerts: MonitorAlert[] = []
   for (const item of Array.isArray(value.alerts) ? value.alerts.slice(0, MAX_ITEMS) : []) {
@@ -107,6 +110,7 @@ export function loadMonitorState(): { state: MonitorState; error: string } {
 }
 
 export function saveMonitorState(state: MonitorState): boolean {
+  if (workspaceWritesBlocked()) return false
   try {
     if (typeof localStorage === 'undefined') return false
     localStorage.setItem(MONITOR_STORAGE_KEY, JSON.stringify({ version: 1, ...state }))
@@ -123,7 +127,7 @@ export function freshQuote(quote: LiveQuote, now: number): boolean {
 }
 
 export function ruleMatches(rule: MonitorRule, quote: LiveQuote): boolean {
-  if (!rule.active || !finite(rule.threshold) || rule.threshold <= 0) return false
+  if (!rule.active || rule.unresolved || !finite(rule.threshold) || rule.threshold <= 0) return false
   if (rule.condition === 'price_above') return quote.price > rule.threshold
   if (rule.condition === 'price_below') return quote.price < rule.threshold
   return finite(quote.changePct) && Math.abs(quote.changePct) > rule.threshold
@@ -160,9 +164,10 @@ function findRulePosition(rule: MonitorRule, positions: Position[], identities: 
 
 export function reconcileMonitorRules(rules: MonitorRule[], positions: Position[]): MonitorRule[] {
   const identities = quoteIdentities(positions)
-  return rules.flatMap((rule) => {
+  return rules.map((rule) => {
+    if (rule.unresolved) return rule
     const position = findRulePosition(rule, positions, identities)
-    return position ? [{ ...rule, holdingId: position.id, holding: position.name || rule.holding || position.ticker }] : []
+    return position ? { ...rule, holdingId: position.id, holding: position.name || rule.holding || position.ticker } : { ...rule, unresolved: true }
   })
 }
 

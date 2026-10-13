@@ -8,7 +8,7 @@ import { ManageHoldings } from './ManageHoldings'
 
 const state = vi.hoisted(() => ({
   folios: [] as Folio[], positions: [] as Position[],
-  previewFile: vi.fn(), commitImport: vi.fn(), removeFolio: vi.fn(),
+  previewFile: vi.fn(), commitImport: vi.fn(), commitImports: vi.fn(), removeFolio: vi.fn(),
   exportPortfolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null as string | null,
 }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
@@ -19,6 +19,9 @@ const folio: Folio = { id: 'import-one', name: 'holdings.xlsx', positions: [posi
 
 beforeEach(() => {
   vi.clearAllMocks()
+  state.commitImport.mockResolvedValue(true)
+  state.commitImports.mockResolvedValue(true)
+  state.undoLastImport.mockResolvedValue(true)
   state.folios = [folio]
   state.positions = [position]
   state.undoImportFolioId = folio.id
@@ -51,7 +54,7 @@ describe('holdings management', () => {
   })
 
   it('keeps import review, exports and confirmed undo available in settings', async () => {
-    const preview = { id: 'preview', fileName: 'new.csv', positions: [position], duplicateCount: 0, unmatchedCount: 0, rejectedCount: 0, issues: [] }
+    const preview = { id: 'preview', fileName: 'new.csv', positions: [position], duplicateCount: 0, unmatchedCount: 0, rejectedCount: 0, issues: [], createdAt: 1234 }
     state.previewFile.mockResolvedValue(preview)
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -68,16 +71,16 @@ describe('holdings management', () => {
       expect(state.undoLastImport).toHaveBeenCalledOnce()
       await act(async () => findButton('Import holdings').click())
       expect(findButton('Close import').getAttribute('aria-expanded')).toBe('true')
-      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+      const input = container.querySelector<HTMLInputElement>('.holdings-import input[type="file"]')!
       const file = new File(['Ticker'], 'new.csv')
       Object.defineProperty(input, 'files', { value: [file] })
       await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
       expect(state.previewFile).toHaveBeenCalledExactlyOnceWith(file)
       expect(state.commitImport).not.toHaveBeenCalled()
       await act(async () => findButton('Add to portfolio').click())
-      expect(state.commitImport).toHaveBeenCalledExactlyOnceWith(preview)
+      expect(state.commitImport).toHaveBeenCalledExactlyOnceWith(preview, expect.objectContaining({ operation: 'add', statementDate: null, complete: false }))
       await act(async () => findButton('Close import').click())
-      expect(container.querySelector('input[type="file"]')).toBeNull()
+      expect(container.querySelector('.holdings-import input[type="file"]')).toBeNull()
     } finally { await act(async () => root.unmount()) }
   })
 
@@ -90,7 +93,26 @@ describe('holdings management', () => {
     try {
       await act(async () => root.render(<ManageHoldings />))
       const buttons = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')]
-      expect(buttons.map((button) => button.disabled)).toEqual([false, true, true, true])
+      expect(buttons.map((button) => button.disabled)).toEqual([false, true, false, true])
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('keeps confirmed undo available after a failed save and describes persistent account undo', async () => {
+    state.undoLastImport.mockResolvedValueOnce(false)
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const undo = () => container.querySelector<HTMLButtonElement>('.undo-import')!
+    try {
+      await act(async () => root.render(<ManageHoldings />))
+      expect(undo().title).toContain('after reload')
+      expect(undo().title).not.toContain('this session')
+      await act(async () => undo().click())
+      await act(async () => undo().click())
+      expect(state.undoLastImport).toHaveBeenCalledOnce()
+      expect(undo().textContent).toBe('Confirm undo')
+      await act(async () => undo().click())
+      expect(state.undoLastImport).toHaveBeenCalledTimes(2)
+      expect(undo().textContent).toBe('Undo import')
     } finally { await act(async () => root.unmount()) }
   })
 })

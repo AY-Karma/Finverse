@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { holdingIdentity, MONITOR_STORAGE_KEY } from '../monitor'
 import { loadSettings } from '../store'
+import { quoteKey } from '../valuation'
 import type { useStore } from '../useStore'
 import { MonitorView } from './MonitorView'
 
@@ -26,8 +27,8 @@ async function renderWatch(hideValues: boolean) {
   ] }))
   state.store = {
     positions, liveQuotes: {
-      'EQ:UP': { price: 120, changePct: 10, at: Date.now(), source: 'yahoo' },
-      'EQ:DOWN': { price: 80, changePct: -10, at: Date.now(), source: 'yahoo' },
+      [quoteKey(positions[0])]: { price: 120, changePct: 10, at: Date.now(), source: 'yahoo' },
+      [quoteKey(positions[1])]: { price: 80, changePct: -10, at: Date.now(), source: 'yahoo' },
     },
     settings: { ...loadSettings(), allowExternalData: true, hideValues },
     refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null,
@@ -170,8 +171,8 @@ describe('Portfolio Watch masking', () => {
     await renderWatch(false)
     state.store.liveQuotes = {
       ...state.store.liveQuotes,
-      'EQ:UP': { ...state.store.liveQuotes['EQ:UP'], change: 20 },
-      'EQ:DOWN': { ...state.store.liveQuotes['EQ:DOWN'], change: -30 },
+      [quoteKey(state.store.positions[0])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[0])], change: 20 },
+      [quoteKey(state.store.positions[1])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[1])], change: -30 },
     }
     await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
     const lead = container.querySelector('.pa-summary-lead')!
@@ -193,7 +194,7 @@ describe('Portfolio Watch masking', () => {
     await renderWatch(false)
     state.store.liveQuotes = {
       ...state.store.liveQuotes,
-      'EQ:DOWN': { price: 80, at: Date.now(), source: 'yahoo' },
+      [quoteKey(state.store.positions[1])]: { price: 80, at: Date.now(), source: 'yahoo' },
     }
     await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
     expect(container.querySelector('.pa-summary-lead .pa-summary-value')?.textContent).toBe('Not reported')
@@ -220,7 +221,7 @@ describe('Portfolio Watch masking', () => {
   it('keeps large summary amounts compact while exposing the complete signed amount', async () => {
     await renderWatch(false)
     state.store.positions = state.store.positions.map((position) => ({ ...position, quantity: 10000 }))
-    state.store.liveQuotes = { ...state.store.liveQuotes, 'EQ:UP': { ...state.store.liveQuotes['EQ:UP'], change: 20 } }
+    state.store.liveQuotes = { ...state.store.liveQuotes, [quoteKey(state.store.positions[0])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[0])], change: 20 } }
     await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
     const value = container.querySelector('.pa-summary-lead .pa-summary-value')!
     expect(value.textContent).toBe('+₹2L')
@@ -245,8 +246,8 @@ describe('Portfolio Watch masking', () => {
     expect([...container.querySelectorAll('.pa-impact')].every((item) => item.getAttribute('data-trend') === 'neutral')).toBe(true)
     state.store.liveQuotes = {
       ...state.store.liveQuotes,
-      'EQ:UP': { ...state.store.liveQuotes['EQ:UP'], change: 20 },
-      'EQ:DOWN': { ...state.store.liveQuotes['EQ:DOWN'], change: -20 },
+      [quoteKey(state.store.positions[0])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[0])], change: 20 },
+      [quoteKey(state.store.positions[1])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[1])], change: -20 },
     }
     await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
     expect(container.querySelector('.pa-impact[data-trend="up"]')?.textContent).toBe('+₹20.00')
@@ -308,7 +309,7 @@ describe('Portfolio Watch masking', () => {
     await renderWatch(false)
     const fund = { ...state.store.positions[0], id: 'fund', ticker: 'FUND', name: 'Example Flexi Cap Fund', type: 'mutual-fund' as const }
     state.store.positions = [fund]
-    state.store.liveQuotes = { 'MF:example flexi cap fund': { price: 83.14, source: 'nav', at: Date.now() } }
+    state.store.liveQuotes = { [quoteKey(fund)]: { price: 83.14, source: 'nav', at: Date.now() } }
     await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
     const nav = container.querySelector('[aria-label="Latest published fund NAVs"]')!
     expect(nav.textContent).toContain('83.14')

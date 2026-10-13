@@ -2,6 +2,8 @@ import type { FxRate, LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
 import { createSharedRequest } from './sharedRequest'
 import { isRegularMarketOpen } from './marketCalendar'
+import { hasCompatibleFundScheme } from './fundSchemes'
+import { normalizePosition } from './instruments'
 import {
   MAX_MARKET_SYMBOLS,
   isMarketSymbol,
@@ -56,54 +58,20 @@ export function marketStatusText(
 // Symbol resolution: imported ticker -> Yahoo symbol
 // ---------------------------------------------------------------------------
 
-const YAHOO_ALIASES: Record<string, string> = {
-  TATAMOTORS: 'TATAMOTORS.NS',
-  'TATA MOTORS': 'TATAMOTORS.NS',
-  'TATA STEEL': 'TATASTEEL.NS',
-  BHARTIARTL: 'BHARTIARTL.NS',
-  'HDFC BANK': 'HDFCBANK.NS',
-  'HDFC BANK NIFTY50 ETF': 'HDFCBANK.NS',
-  'ICICI BANK': 'ICICIBANK.NS',
-  'AXIS BANK': 'AXISBANK.NS',
-  'KOTAK BANK': 'KOTAKBANK.NS',
-  'INFOSYS (INFY)': 'INFY.NS',
-  NIFTYBEES: 'NIFTYBEES.NS',
-  NIFTY50BEES: 'NIFTYBEES.NS',
-  JUNIORBEES: 'JUNIORBEES.NS',
-  BANKBEES: 'BANKBEES.NS',
-  'NIFTY 50': '^NSEI',
-}
-
 /**
- * Resolve a holding to a Yahoo symbol. Equity/ETF rows with a known ticker map
- * to NSE (.NS) by default; symbols that already carry a suffix pass through.
- * NSE series suffixes (-EQ, -BE, -SM, -ST, -T, -BL, -Z, -E, -B, -N, -W) are stripped before
- * appending .NS (e.g. "KRN-T" → "KRN.NS", "MON100-E" → "MON100.NS").
- * Mutual funds have no intraday Yahoo price — they return null (handled by NAV).
+ * Only a supported, resolved listing reaches the provider. Names and uncertain
+ * venue/currency metadata remain on imported prices until reviewed.
  */
 export function resolveYahooSymbol(p: Position): string | null {
   if (p.type === 'mutual-fund') return null
-  if (p.providerSymbol) return p.providerSymbol
-  const raw = p.ticker.trim()
-  if (!raw) return null
-  const upper = raw.toUpperCase()
-  const aliased = YAHOO_ALIASES[upper]
-  if (aliased) return aliased
-  if (upper.includes('.') || upper.startsWith('^')) return upper
-  // Strip NSE series suffixes (e.g. KRN-T → KRN, RELIANCE-EQ → RELIANCE, MON100-E → MON100)
-  const suffixPattern = /-(EQ|BE|SM|ST|T|BL|Z|E|B|N|W)$/
-  const withoutSeries = upper.replace(suffixPattern, '')
-  if (p.exchange === 'BSE') return `${withoutSeries}.BO`
-  if (p.exchange === 'NASDAQ' || p.exchange === 'NYSE' || p.exchange === 'LSE') return withoutSeries
-  return `${withoutSeries}.NS`
+  const normalized = normalizePosition(p)
+  return normalized.identityIssue ? null : normalized.providerSymbol ?? null
 }
 
-/** Ordered provider candidates; adapters can fall back without leaking symbol syntax into views. */
+/** An explicit provider mapping never falls back to a guessed different listing. */
 export function resolveYahooSymbolCandidates(position: Position): string[] {
-  if (position.type === 'mutual-fund') return []
   const primary = resolveYahooSymbol(position)
-  const inferred = resolveYahooSymbol({ ...position, providerSymbol: undefined })
-  return Array.from(new Set([primary, inferred].filter((symbol): symbol is string => Boolean(symbol))))
+  return primary ? [primary] : []
 }
 
 // ---------------------------------------------------------------------------
@@ -210,64 +178,22 @@ export async function fetchUsdInrRate(signal?: AbortSignal): Promise<FxRate | nu
 // Mutual-fund NAV (mfapi.in — keyless, CORS-friendly; NAV publishes once daily)
 // ---------------------------------------------------------------------------
 
-/** Lowercase + strip everything but letters/digits so scheme names can be compared. */
-function normalizeScheme(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
-}
-
-/** Pick the best-matching scheme from a mfapi search result for a normalized target. */
-function pickScheme(
-  matches: { schemeCode: number; schemeName: string }[],
-  target: string,
-): { schemeCode: number; schemeName: string } | undefined {
-  const direct = matches.find((m) => normalizeScheme(m.schemeName) === target)
-  if (direct) return direct
-  const hasDirect = /direct/.test(target)
-  const hasGrowth = /growth/.test(target)
-  const hasIdcw = /idcw|dividend/.test(target)
-  const scored = matches
-    .map((m) => {
-      const n = normalizeScheme(m.schemeName)
-      const isDirect = /direct/.test(n) === hasDirect
-      const isGrowth = hasIdcw ? !/idcw|dividend/.test(n) : /growth/.test(n) === hasGrowth
-      const len = Math.min(n.length, target.length)
-      const sim =
-        (len > 0 ? [...target].filter((c, i) => n[i] === c).length / len : 0) +
-        (n.includes(target) || target.includes(n) ? 1 : 0)
-      return { m, score: sim + (isDirect ? 2 : 0) + (isGrowth ? 1 : 0) }
-    })
-    .sort((a, b) => b.score - a.score)
-  return scored[0]?.score >= 2 ? scored[0].m : undefined
-}
-
-/** Resolve a scheme name to its mfapi.in scheme code via the search endpoint. */
-async function resolveScheme(schemeName: string, signal?: AbortSignal): Promise<number | null> {
-  const target = normalizeScheme(schemeName)
-  if (!target) return null
-  try {
-    const res = await fetch(
-      `https://api.mfapi.in/mf/search?q=${encodeURIComponent(schemeName)}`,
-      { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000) },
-    )
-    if (!res.ok) return null
-    const matches = (await res.json()) as { schemeCode: number; schemeName: string }[]
-    if (!Array.isArray(matches) || matches.length === 0) return null
-    const chosen = pickScheme(matches, target)
-    return chosen ? chosen.schemeCode : null
-  } catch {
-    return null
-  }
+function navDate(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const parts = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value)
+  if (!parts) return null
+  const date = `${parts[3]}-${parts[2]}-${parts[1]}`
+  const parsed = new Date(`${date}T00:00:00Z`)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : null
 }
 
 const sharedNav = createSharedRequest<LiveQuote | null>()
 
-function fetchNavByName(schemeName: string, signal?: AbortSignal): Promise<LiveQuote | null> {
-  return sharedNav(normalizeScheme(schemeName), (requestSignal) => fetchNavUncached(schemeName, requestSignal), signal)
+function fetchNavByCode(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
+  return sharedNav(String(code), (requestSignal) => fetchNavUncached(code, requestSignal), signal)
 }
 
-async function fetchNavUncached(schemeName: string, signal?: AbortSignal): Promise<LiveQuote | null> {
-  const code = await resolveScheme(schemeName, signal)
-  if (code == null) return null
+async function fetchNavUncached(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
   try {
     const navRes = await fetch(`https://api.mfapi.in/mf/${code}/latest`, {
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
@@ -276,15 +202,12 @@ async function fetchNavUncached(schemeName: string, signal?: AbortSignal): Promi
     const data = (await navRes.json()) as { data?: { date?: string; nav?: string }[] }
     const latest = data?.data?.[0]
     const nav = Number(latest?.nav)
-    if (!Number.isFinite(nav) || nav <= 0) return null
-    const [day, month, year] = latest?.date?.split('-') ?? []
-    const navAt = day && month && year
-      ? Date.parse(`${year}-${month}-${day}T00:00:00+05:30`)
-      : Number.NaN
+    const date = navDate(latest?.date)
+    if (!Number.isFinite(nav) || nav <= 0 || !date) return null
     const fetchedAt = Date.now()
     return {
       price: nav,
-      at: Number.isFinite(navAt) ? navAt : fetchedAt,
+      at: Date.parse(`${date}T00:00:00+05:30`),
       fetchedAt,
       source: 'nav',
     }
@@ -321,7 +244,9 @@ export async function fetchLiveQuotes(
   prev: Record<string, LiveQuote>,
   signal?: AbortSignal,
 ): Promise<LiveQuotesResult> {
-  const quotes: Record<string, LiveQuote> = { ...prev }
+  const activeKeys = new Set(positions.filter((position) => position.type === 'mutual-fund'
+    ? hasCompatibleFundScheme(position) : Boolean(resolveYahooSymbol(position))).map(quoteKey))
+  const quotes: Record<string, LiveQuote> = Object.fromEntries(Object.entries(prev).filter(([key]) => activeKeys.has(key)))
   const today = istDate()
 
   // combinePositions normally makes this unique already, but keeping the
@@ -372,6 +297,10 @@ export async function fetchLiveQuotes(
       signal?.throwIfAborted()
       const position = funds[nextFund++]
       const key = quoteKey(position)
+      if (!hasCompatibleFundScheme(position)) {
+        outcomes.push({ key, status: 'failed' })
+        continue
+      }
       const existing = prev[key]
       if (
         existing &&
@@ -381,7 +310,7 @@ export async function fetchLiveQuotes(
         outcomes.push({ key, status: 'skipped' })
       } else {
         if (requestedFund) await delay(NAV_REQUEST_GAP_MS, signal)
-        const nav = await fetchNavByName(position.name || position.ticker, signal)
+        const nav = await fetchNavByCode(position.mfScheme!.code, signal)
         signal?.throwIfAborted()
         requestedFund = true
         outcomes.push(nav
@@ -519,8 +448,8 @@ function fetchCachedHistory(
 }
 
 /** Daily close series for an equity/ETF market symbol. */
-export function fetchHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]> {
-  return fetchCachedHistory(symbol, from, to, (rangeFrom, rangeTo, requestSignal) => fetchHistoryUncached(symbol, rangeFrom, rangeTo, requestSignal), signal)
+export function fetchHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal, cacheIdentity = symbol): Promise<HistoryPoint[]> {
+  return fetchCachedHistory(cacheIdentity, from, to, (rangeFrom, rangeTo, requestSignal) => fetchHistoryUncached(symbol, rangeFrom, rangeTo, requestSignal), signal)
 }
 
 async function fetchHistoryUncached(symbol: string, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
@@ -542,20 +471,21 @@ async function fetchHistoryUncached(symbol: string, from: string, to: string, si
   }
 }
 
-/** Daily NAV series for a mutual-fund scheme, matched by name via mfapi.in. */
+/** Daily NAV series uses the same saved scheme code as latest NAV. */
 export function fetchNavHistory(
-  schemeName: string,
+  position: Position,
   from: Date,
   to: Date,
   signal?: AbortSignal,
 ): Promise<HistoryPoint[]> {
-  return fetchCachedHistory(`mf:${normalizeScheme(schemeName)}`, from, to, (rangeFrom, rangeTo, requestSignal) =>
-    fetchNavHistoryUncached(schemeName, rangeFrom, rangeTo, requestSignal), signal)
+  signal?.throwIfAborted()
+  if (!hasCompatibleFundScheme(position)) return Promise.resolve([])
+  const code = position.mfScheme!.code
+  return fetchCachedHistory(`mfapi:${code}`, from, to, (rangeFrom, rangeTo, requestSignal) =>
+    fetchNavHistoryUncached(code, rangeFrom, rangeTo, requestSignal), signal)
 }
 
-async function fetchNavHistoryUncached(schemeName: string, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
-  const code = await resolveScheme(schemeName, signal)
-  if (code == null) return []
+async function fetchNavHistoryUncached(code: number, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
   try {
     const res = await fetch(
       `https://api.mfapi.in/mf/${code}?startDate=${from}&endDate=${to}`,
@@ -566,10 +496,9 @@ async function fetchNavHistoryUncached(schemeName: string, from: string, to: str
     const points: HistoryPoint[] = []
     for (const row of data?.data ?? []) {
       const nav = Number(row.nav)
-      if (!row.date || !Number.isFinite(nav) || nav <= 0) continue
-      const [dd, mm, yyyy] = row.date.split('-') // mfapi returns DD-MM-YYYY
-      if (!dd || !mm || !yyyy) continue
-      points.push({ date: `${yyyy}-${mm}-${dd}`, close: nav })
+      const date = navDate(row.date)
+      if (!date || !Number.isFinite(nav) || nav <= 0) continue
+      points.push({ date, close: nav })
     }
     // mfapi returns newest-first; we want ascending so the chart reads left→right.
     points.sort((a, b) => a.date.localeCompare(b.date))

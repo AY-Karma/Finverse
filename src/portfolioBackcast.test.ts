@@ -6,6 +6,19 @@ import { calculatePortfolioRisk } from './portfolioRisk'
 const holding = (i: number): Position => ({ id: String(i), ticker: `BACK${i}`, name: '', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: i === 0 ? 120 : null })
 
 describe('backcast coverage and cancellation', () => {
+  it('excludes USD and unsupported native currencies from INR history values and cost', async () => {
+    const inr = { ...holding(0), currency: 'INR' as const }
+    const usd = { ...holding(1), ticker: 'AAPL', exchange: 'NASDAQ' as const, currency: 'USD' as const, lastPrice: 200, invested: 200 }
+    const unknown = { ...holding(2), reportedCurrency: 'EUR', lastPrice: 300, invested: 300 }
+    const source = { history: vi.fn(async (_position: Position) => [{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 120 }]) }
+    const result = await buildPortfolioBackcast([inr, usd, unknown], {}, source)
+    expect(source.history).toHaveBeenCalledTimes(1)
+    expect(source.history.mock.calls[0]?.[0]).toEqual(inr)
+    expect(result).toMatchObject({ holdingsIncluded: 1, holdingsTotal: 3 })
+    expect(result.points.map((point) => point.value)).toEqual([100, 120, 120])
+    expect(result.points.every((point) => point.invested === 100)).toBe(true)
+  })
+
   it('retains a one-day 50% trough in long histories for risk calculations', async () => {
     const points = Array.from({ length: 1000 }, (_, index) => ({
       date: new Date(Date.UTC(2023, 0, 1 + index)).toISOString().slice(0, 10),

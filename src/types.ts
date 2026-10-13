@@ -8,6 +8,12 @@ export type Density = 'comfortable' | 'compact'
 export type Accent = 'indigo' | 'emerald' | 'cobalt' | 'amber' | 'custom'
 export type Mode = 'dark' | 'light'
 
+export interface MfSchemeMapping {
+  code: number
+  name: string
+  source: 'exact' | 'confirmed'
+}
+
 export interface Position {
   id: string
   ticker: string
@@ -16,6 +22,8 @@ export interface Position {
   quantity: number
   buyPrice: number
   lastPrice: number | null
+  /** Statement date attached to derived imported-price copies. */
+  priceAsOf?: string | null
   invested: number
   // Mutual-fund holdings metadata (optional; equity rows leave these unset).
   amc?: string
@@ -25,6 +33,8 @@ export interface Position {
   source?: string
   returns?: number | null
   xirr?: number | null
+  /** Reviewed provider identity shared by NAV and historical prices. */
+  mfScheme?: MfSchemeMapping
   /** Canonical identity fields filled by the investment workspace. */
   instrumentKey?: string
   isin?: string
@@ -33,6 +43,24 @@ export interface Position {
   currency?: Currency
   sector?: string
   industry?: string
+  identityVersion?: 2
+  exchangeSource?: 'explicit' | 'inferred'
+  identityIssue?: string
+  reportedExchange?: string
+  reportedCurrency?: string
+}
+
+export interface AccountStatement {
+  id: string
+  fileName: string
+  statementDate: string | null
+  completeness: 'complete' | 'partial' | 'unknown'
+}
+
+export interface AccountRevision {
+  statement: AccountStatement
+  importedAt: number
+  positions: Position[]
 }
 
 export interface Folio {
@@ -40,6 +68,10 @@ export interface Folio {
   name: string
   importedAt: number
   positions: Position[]
+  statement?: AccountStatement
+  previousRevision?: AccountRevision
+  lastOperation?: 'added' | 'updated'
+  operationAt?: number
 }
 
 export interface Settings {
@@ -76,4 +108,11 @@ export interface PortfolioSnapshot {
   pnl: number
   /** Number of valued positions when the snapshot was captured. */
   holdingCount: number
+  /** Original recorded balances are preserved after identity corrections. */
+  dataQuality?: 'legacy-instrument-identity'
+  event?: {
+    kind: 'account-import' | 'account-update' | 'account-undo' | 'account-remove'
+    accountId: string
+    statementId: string
+  }
 }

@@ -1,5 +1,7 @@
 import * as XLSX from '@e965/xlsx'
-import type { AssetType, Position } from './types'
+import type { AssetType, Exchange, Position } from './types'
+import { hasCompatibleFundScheme, isMfSchemeMapping } from './fundSchemes'
+import { normalizePosition } from './instruments'
 import { MAX_IMPORT_FILE_BYTES } from './importLimits'
 const MAX_IMPORT_ROWS = 100_000
 const MAX_IMPORT_POSITIONS = 5_000
@@ -12,7 +14,7 @@ const MAX_IMPORT_ISSUES = 100
 export interface ImportRowIssue {
   sheet: string
   row: number
-  field: 'Quantity' | 'Cost'
+  field: 'Quantity' | 'Cost' | 'Identity'
   message: string
 }
 
@@ -102,7 +104,18 @@ function validateSheetDimensions(sheetName: string, sheet: unknown, totalCells: 
   return totalCells + cells
 }
 
-type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'investedValue' | 'currentValue' | 'name' | 'type' | 'isin'
+type IdentityField = 'isin' | 'exchange' | 'currency' | 'sector' | 'industry' | 'providerSymbol' | 'exchangeSource' | 'identityIssue' | 'reportedExchange' | 'reportedCurrency' | 'mfSchemeCode' | 'mfSchemeName' | 'mfMappingSource'
+type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'investedValue' | 'currentValue' | 'name' | 'type' | IdentityField
+
+const IDENTITY_ALIASES: Record<IdentityField, string[]> = {
+  isin: ['isin', 'isin code'], exchange: ['exchange', 'venue', 'stock exchange', 'listing exchange'],
+  currency: ['currency', 'asset currency', 'quote currency', 'currency code'],
+  sector: ['sector', 'sector name', 'industry sector'], industry: ['industry', 'industry name'],
+  providerSymbol: ['provider symbol', 'market symbol', 'yahoo symbol'],
+  exchangeSource: ['exchange source'], identityIssue: ['identity issue'],
+  reportedExchange: ['reported exchange'], reportedCurrency: ['reported currency'],
+  mfSchemeCode: ['mf scheme code', 'nav scheme code'], mfSchemeName: ['mf scheme name'], mfMappingSource: ['mf mapping source'],
+}
 
 const FIELD_ALIASES: Record<FieldKey, string[]> = {
   ticker: ['ticker', 'symbol', 'trading symbol', 'tradingsymbol', 'code', 'scrip', 'scrip code', 'script', 'security', 'instrument', 'stock', 'stock name', 'name', 'company name', 'security name'],
@@ -144,7 +157,7 @@ const FIELD_ALIASES: Record<FieldKey, string[]> = {
   ],
   name: ['company', 'companyname', 'securityname', 'stock name', 'name', 'fund', 'fundname', 'scheme', 'description'],
   type: ['type', 'assettype', 'assetclass', 'instrument type', 'class', 'category'],
-  isin: ['isin', 'isin code'],
+  ...IDENTITY_ALIASES,
 }
 
 type MfField =
@@ -161,6 +174,7 @@ type MfField =
   | 'source'
   | 'returns'
   | 'xirr'
+  | IdentityField
 
 const MF_ALIASES: Record<MfField, string[]> = {
   buyPrice: ['buy price', 'purchase price', 'average price', 'avg price', 'average nav', 'avg nav', 'average cost', 'avg cost'],
@@ -247,6 +261,7 @@ const MF_ALIASES: Record<MfField, string[]> = {
   source: ['source', 'platform', 'agent', 'broker', 'distributor', 'source of investment', 'selling', 'origin'],
   returns: ['returns', 'return', 'pnl', 'profit/loss', 'profit loss', 'gain', 'unrealised', 'total returns', 'returns value'],
   xirr: ['xirr', 'irr', 'annualized return', 'annualised return', 'return', 'yield'],
+  ...IDENTITY_ALIASES,
 }
 
 function normalizeHeader(s: string): string {
@@ -319,7 +334,8 @@ function detectHeader(head: string[]) {
   }
   if ((equity.ticker != null || equity.isin != null) && equity.quantity != null &&
     (equity.buyPrice != null || equity.lastPrice != null || equity.investedValue != null || equity.currentValue != null)) {
-    return { mode: 'equity' as const, cols: equity }
+    const nameOnly = equity.ticker != null && ['name', 'companyname', 'securityname', 'stockname', 'description'].includes(normalizeHeader(head[equity.ticker]))
+    return { mode: 'equity' as const, cols: equity, nameOnly }
   }
   return null
 }
@@ -357,42 +373,105 @@ function validCost(row: unknown[], buyColumn: number | null, investedColumn: num
   const invested = investedColumn != null ? parseNumber(row[investedColumn]) : null
   for (const [column, parsed] of [[buyColumn, buy], [investedColumn, invested]] as const) {
     const raw = column != null ? row[column] : null
-    if (raw != null && String(raw).trim() !== '' && (parsed == null || parsed < 0)) return null
+    if (raw != null && String(raw).trim() !== '' && (parsed == null || !safeAmount(parsed))) return null
   }
   return buy == null && invested == null ? null : { buy, invested }
 }
 
-function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation: RowValidation, defaultType?: AssetType): Position[] {
+function identityFields(row: unknown[], cols: Columns<IdentityField>): Partial<Position> {
+  const text = (key: IdentityField) => cols[key] == null ? '' : String(row[cols[key]!] ?? '').trim()
+  const rawExchange = text('exchange').toUpperCase()
+  const rawCurrency = text('currency').toUpperCase()
+  const exchange = ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER'].includes(rawExchange) ? rawExchange as Exchange : rawExchange ? 'OTHER' : undefined
+  const source = text('exchangeSource')
+  const mapping = { code: parseNumber(cols.mfSchemeCode == null ? null : row[cols.mfSchemeCode]), name: text('mfSchemeName'), source: text('mfMappingSource') }
+  return {
+    identityVersion: 2, exchange, exchangeSource: source === 'explicit' || source === 'inferred' ? source : rawExchange ? 'explicit' : 'inferred',
+    currency: rawCurrency === 'INR' || rawCurrency === 'USD' ? rawCurrency : undefined,
+    reportedExchange: text('reportedExchange') || (rawExchange && exchange === 'OTHER' ? rawExchange : undefined),
+    reportedCurrency: text('reportedCurrency') || (rawCurrency && rawCurrency !== 'INR' && rawCurrency !== 'USD' ? rawCurrency : undefined),
+    isin: text('isin').toUpperCase() || undefined, sector: text('sector') || undefined, industry: text('industry') || undefined,
+    providerSymbol: text('providerSymbol').toUpperCase() || undefined, identityIssue: text('identityIssue') || undefined,
+    ...(isMfSchemeMapping(mapping) ? { mfScheme: mapping } : {}),
+  }
+}
+
+function oversizedIdentity(row: unknown[], cols: Columns<IdentityField>): boolean {
+  return (Object.keys(IDENTITY_ALIASES) as IdentityField[]).some((key) => cols[key] != null && String(row[cols[key]!] ?? '').length > 500)
+}
+
+function safeAmount(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER
+}
+
+function hasFinancialData(row: unknown[], columns: (number | null)[]): boolean {
+  const firstCell = row.find((cell) => String(cell ?? '').trim() !== '')
+  if (SUMMARY_LABELS.test(String(firstCell ?? ''))) return false
+  return columns.some((column) => column != null && String(row[column] ?? '').trim() !== '')
+}
+
+function prepareHolding(position: Position, validation: RowValidation, index: number): Position | null {
+  if (position.mfScheme && !hasCompatibleFundScheme(position)) {
+    rejectRow(validation, index, 'Identity', 'The MF scheme mapping conflicts with the holding plan, option or native currency. Correct the mapping before importing.')
+    return null
+  }
+  const normalized = normalizePosition(position)
+  if (Object.values(normalized).some((value) => typeof value === 'string' && value.length > 500)) {
+    rejectRow(validation, index, 'Identity', 'Holding text fields must be 500 characters or fewer. Shorten the fields before importing.')
+    return null
+  }
+  return normalized
+}
+
+function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation: RowValidation, defaultType?: AssetType, nameOnly = false): Position[] {
   const positions: Position[] = []
   for (const [index, row] of rows.entries()) {
-    const ticker = row[cols.ticker ?? cols.isin ?? -1]
-    if (ticker == null || String(ticker).trim() === '' || SUMMARY_LABELS.test(String(ticker))) continue
+    const symbol = cols.ticker != null ? String(row[cols.ticker] ?? '').trim() : ''
+    const isin = cols.isin != null ? String(row[cols.isin] ?? '').trim() : ''
+    const ticker = symbol || isin
+    if (SUMMARY_LABELS.test(ticker)) continue
+    if (!ticker) {
+      if (hasFinancialData(row, [cols.quantity, cols.buyPrice, cols.investedValue, cols.lastPrice, cols.currentValue])) {
+        rejectRow(validation, index, 'Identity', 'Enter a symbol or ISIN for this holding. Financial cells are populated but its identity is missing.')
+      }
+      continue
+    }
+    if (ticker.length > 500 || oversizedIdentity(row, cols)) {
+      rejectRow(validation, index, 'Identity', 'Holding identity fields must be 500 characters or fewer. Shorten the fields before importing.')
+      continue
+    }
 
     const qtyRaw = cols.quantity != null ? parseNumber(row[cols.quantity]) : null
-    if (qtyRaw == null || qtyRaw <= 0) {
-      rejectRow(validation, index, 'Quantity', 'Enter a positive numeric quantity; zero, negative, missing and mixed-text quantities are unsupported.')
+    if (qtyRaw == null || qtyRaw <= 0 || !safeAmount(qtyRaw)) {
+      rejectRow(validation, index, 'Quantity', 'Enter a positive numeric quantity no greater than 9,007,199,254,740,991; zero, negative, missing and mixed-text quantities are unsupported.')
       continue
     }
     const cost = validCost(row, cols.buyPrice, cols.investedValue)
     if (!cost) {
-      rejectRow(validation, index, 'Cost', 'Enter a non-negative numeric buy price or invested value. Correct any malformed cost cells.')
+      rejectRow(validation, index, 'Cost', 'Enter a non-negative numeric buy price or invested value no greater than 9,007,199,254,740,991. Correct any malformed cost cells.')
       continue
     }
     const { buy: buyRaw, invested } = cost
     const lastRaw = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
     const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
-    const buyPrice = buyRaw ?? invested! / qtyRaw
-    if (!Number.isFinite(buyPrice) || !Number.isFinite(invested ?? qtyRaw * buyPrice)) {
-      rejectRow(validation, index, 'Cost', 'Cost or quantity is too large to value safely.')
+    if ([lastRaw, value].some((amount) => amount != null && !safeAmount(amount))) {
+      rejectRow(validation, index, 'Cost', 'Last price and current value must be non-negative and no greater than 9,007,199,254,740,991.')
       continue
     }
-    const isin = cols.isin != null ? String(row[cols.isin] ?? '').trim().toUpperCase() : ''
+    const buyPrice = buyRaw ?? invested! / qtyRaw
+    const lastPrice = lastRaw ?? (value != null ? value / qtyRaw : null)
+    if (!safeAmount(buyPrice) || !safeAmount(invested ?? qtyRaw * buyPrice)
+      || (lastPrice != null && (!safeAmount(lastPrice) || !safeAmount(lastPrice * qtyRaw)))) {
+      rejectRow(validation, index, 'Cost', 'A derived cost or valuation is too large to value safely.')
+      continue
+    }
     const typeCell = cols.type != null ? row[cols.type] : null
     const type = defaultType && /^(?:-|—|n\/a)?$/i.test(String(typeCell ?? '').trim())
       ? defaultType
       : cols.type != null ? inferType(typeCell) : 'stock'
+    const metadata = identityFields(row, cols)
 
-    positions.push({
+    const position = prepareHolding({
       id: crypto.randomUUID(),
       ticker: String(ticker).trim().toUpperCase(),
       name: cols.name != null ? String(row[cols.name] ?? '').trim() : '',
@@ -401,10 +480,14 @@ function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation:
       type,
       quantity: qtyRaw,
       buyPrice,
-      lastPrice: lastRaw != null && lastRaw >= 0 ? lastRaw : value != null && value >= 0 && Number.isFinite(value / qtyRaw) ? value / qtyRaw : null,
+      lastPrice,
       invested: invested ?? qtyRaw * buyPrice,
-      ...(isin ? { isin } : {}),
-    })
+      ...metadata,
+      mfScheme: type === 'mutual-fund' ? metadata.mfScheme : undefined,
+      ...(!symbol && isin && type !== 'mutual-fund' ? { identityIssue: 'An ISIN alone does not identify a supported listing. Confirm its ticker and venue.' } : {}),
+      ...(nameOnly && !metadata.providerSymbol && type !== 'mutual-fund' ? { identityIssue: 'A company name alone does not identify a supported listing. Confirm its ticker and exchange.' } : {}),
+    }, validation, index)
+    if (position) positions.push(position)
   }
   return positions
 }
@@ -417,25 +500,41 @@ function parseMfRows(rows: unknown[][], cols: Columns<MfField>, validation: RowV
   for (const [index, row] of rows.entries()) {
     const schemeCell = cols.scheme != null ? row[cols.scheme] : null
     const schemeStr = schemeCell != null ? String(schemeCell).trim() : ''
-    if (schemeStr === '' || SUMMARY_LABELS.test(schemeStr)) continue
+    if (SUMMARY_LABELS.test(schemeStr)) continue
+    if (!schemeStr) {
+      if (hasFinancialData(row, [cols.units, cols.buyPrice, cols.investedValue, cols.lastPrice, cols.currentValue])) {
+        rejectRow(validation, index, 'Identity', 'Enter a scheme name for this holding. Financial cells are populated but its identity is missing.')
+      }
+      continue
+    }
+    if (schemeStr.length > 500 || oversizedIdentity(row, cols)) {
+      rejectRow(validation, index, 'Identity', 'Holding identity fields must be 500 characters or fewer. Shorten the fields before importing.')
+      continue
+    }
 
     const units = cols.units != null ? parseNumber(row[cols.units]) : null
-    if (units == null || units <= 0) {
-      rejectRow(validation, index, 'Quantity', 'Enter positive numeric units; zero, negative, missing and mixed-text units are unsupported.')
+    if (units == null || units <= 0 || !safeAmount(units)) {
+      rejectRow(validation, index, 'Quantity', 'Enter positive numeric units no greater than 9,007,199,254,740,991; zero, negative, missing and mixed-text units are unsupported.')
       continue
     }
 
     const cost = validCost(row, cols.buyPrice, cols.investedValue)
     if (!cost) {
-      rejectRow(validation, index, 'Cost', 'Enter a non-negative numeric average cost or invested value. Correct any malformed cost cells.')
+      rejectRow(validation, index, 'Cost', 'Enter a non-negative numeric average cost or invested value no greater than 9,007,199,254,740,991. Correct any malformed cost cells.')
       continue
     }
     const { buy, invested } = cost
     const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
     const last = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
+    if ([last, value].some((amount) => amount != null && !safeAmount(amount))) {
+      rejectRow(validation, index, 'Cost', 'NAV and current value must be non-negative and no greater than 9,007,199,254,740,991.')
+      continue
+    }
     const buyPrice = buy ?? invested! / units
-    if (!Number.isFinite(buyPrice) || !Number.isFinite(invested ?? units * buyPrice)) {
-      rejectRow(validation, index, 'Cost', 'Cost or quantity is too large to value safely.')
+    const lastPrice = last ?? (value != null ? value / units : null)
+    if (!safeAmount(buyPrice) || !safeAmount(invested ?? units * buyPrice)
+      || (lastPrice != null && (!safeAmount(lastPrice) || !safeAmount(lastPrice * units)))) {
+      rejectRow(validation, index, 'Cost', 'A derived cost or valuation is too large to value safely.')
       continue
     }
     const amc = cols.amc != null ? String(row[cols.amc] ?? '').trim() : ''
@@ -445,8 +544,12 @@ function parseMfRows(rows: unknown[][], cols: Columns<MfField>, validation: RowV
     const source = cols.source != null ? String(row[cols.source] ?? '').trim() : ''
     const returns = cols.returns != null ? parseNumber(row[cols.returns]) : null
     const xirr = cols.xirr != null ? parseNumber(row[cols.xirr], true) : null
+    if ([returns, xirr].some((amount) => amount != null && !safeAmount(Math.abs(amount)))) {
+      rejectRow(validation, index, 'Cost', 'Reported returns and XIRR must be within the supported numeric range.')
+      continue
+    }
 
-    positions.push({
+    const position = prepareHolding({
       id: crypto.randomUUID(),
       // Scheme name serves as the unique key (kept verbatim, not uppercased).
       ticker: schemeStr,
@@ -454,7 +557,7 @@ function parseMfRows(rows: unknown[][], cols: Columns<MfField>, validation: RowV
       type: 'mutual-fund',
       quantity: units,
       buyPrice,
-      lastPrice: last != null && last >= 0 ? last : value != null && value >= 0 && Number.isFinite(value / units) ? value / units : null,
+      lastPrice,
       invested: invested ?? units * buyPrice,
       amc,
       category,
@@ -463,7 +566,9 @@ function parseMfRows(rows: unknown[][], cols: Columns<MfField>, validation: RowV
       source,
       returns,
       xirr,
-    })
+      ...identityFields(row, cols),
+    }, validation, index)
+    if (position) positions.push(position)
   }
   return positions
 }
@@ -522,6 +627,7 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
   // Kite repeats its category sheets in Combined. Import that view first and once.
   worksheets.sort((a, b) => Number(b.kiteCombined) - Number(a.kiteCombined))
   let importedKiteCombined = false
+  let hasHoldingsHeader = false
   for (const { sheetName, rows, kite, kiteCombined } of worksheets) {
     if (importedKiteCombined && kite && ['equity', 'mutualfunds'].includes(normalizeHeader(sheetName))) continue
     const sheetStart = positions.length
@@ -536,7 +642,7 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
       const validation = { sheet: sheetName, startRow: active.dataStart, result }
       const parsed = header.mode === 'mf'
         ? parseMfRows(data, header.cols, validation)
-        : parseEquityRows(data, header.cols, validation, defaultType)
+        : parseEquityRows(data, header.cols, validation, defaultType, header.nameOnly)
       positions.push(...parsed)
       if (positions.length > MAX_IMPORT_POSITIONS) {
         throw new Error(`Portfolio imports are limited to ${MAX_IMPORT_POSITIONS.toLocaleString()} holdings.`)
@@ -553,6 +659,7 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
         }
       }
       if (!header) continue
+      if (header.mode !== 'activity') hasHoldingsHeader = true
       appendRows(i)
       active = { header, dataStart: i + consumed }
       i += consumed - 1
@@ -565,6 +672,7 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
     const first = result.issues[0]
     throw new Error(`No valid holdings found. ${result.rejectedCount} row(s) rejected. ${first.sheet}, row ${first.row}: ${first.field} - ${first.message}`)
   }
+  if (hasHoldingsHeader) return result
 
   throw new Error(
     'No recognizable holdings header found. Use Ticker or Symbol with Quantity and Buy Price for equities, or Scheme Name with Units and Invested Value for mutual funds.',

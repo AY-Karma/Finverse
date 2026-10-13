@@ -1,4 +1,5 @@
 import type { PortfolioSnapshot } from './types'
+import { workspaceWritesBlocked } from './workspaceStorage'
 
 const KEY = 'finverse:portfolio-snapshots'
 const MAX_SNAPSHOTS = 730
@@ -28,17 +29,27 @@ function tradingDay(at: number): string {
 function compactDailySnapshots(snapshots: PortfolioSnapshot[]): PortfolioSnapshot[] {
   const byDay = new Map<string, PortfolioSnapshot>()
   for (const snapshot of [...snapshots].sort((a, b) => a.at - b.at)) {
-    byDay.set(tradingDay(snapshot.at), snapshot)
+    const day = tradingDay(snapshot.at)
+    const previous = byDay.get(day)
+    byDay.set(day, { ...snapshot, ...(snapshot.dataQuality || previous?.dataQuality ? { dataQuality: snapshot.dataQuality ?? previous?.dataQuality } : {}), ...(snapshot.event || previous?.event ? { event: snapshot.event ?? previous?.event } : {}) })
   }
   return Array.from(byDay.values()).slice(-MAX_SNAPSHOTS)
 }
 
-export function appendPortfolioSnapshot(snapshot: PortfolioSnapshot, existing?: PortfolioSnapshot[]): PortfolioSnapshot[] {
-  const current = compactDailySnapshots(existing ?? loadPortfolioSnapshots())
+export function updatePortfolioSnapshots(snapshot: PortfolioSnapshot, existing: PortfolioSnapshot[]): PortfolioSnapshot[] {
+  const current = compactDailySnapshots(existing)
   const next = compactDailySnapshots([...current, snapshot])
   const last = current[current.length - 1]
   const replacement = next[next.length - 1]
-  if (last && replacement && last.at === replacement.at && Math.abs(last.value - replacement.value) < 0.01) return current
+  if (last && replacement && tradingDay(last.at) === tradingDay(replacement.at) && last.value === replacement.value && last.invested === replacement.invested && last.pnl === replacement.pnl && last.holdingCount === replacement.holdingCount && last.dataQuality === replacement.dataQuality && JSON.stringify(last.event) === JSON.stringify(replacement.event)) return current
+  return next
+}
+
+export function appendPortfolioSnapshot(snapshot: PortfolioSnapshot, existing?: PortfolioSnapshot[]): PortfolioSnapshot[] {
+  const current = existing ?? loadPortfolioSnapshots()
+  const next = updatePortfolioSnapshots(snapshot, current)
+  if (JSON.stringify(next) === JSON.stringify(current)) return current
+  if (workspaceWritesBlocked()) return current
   try {
     localStorage.setItem(KEY, JSON.stringify(next))
   } catch {

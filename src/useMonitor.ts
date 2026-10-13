@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from './useStore'
 import { privateValue } from './privacy'
 import {
   evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, latestQuoteRecords, loadMonitorState, reconcileMonitorRules, saveMonitorState, validReminderDate,
+  MONITOR_STORAGE_KEY,
   type AlertState, type MonitorAlert, type MonitorRecord, type RuleCondition,
 } from './monitor'
 
@@ -11,9 +12,14 @@ function today(now: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+function persistedMonitor(): string | null | undefined {
+  try { return localStorage.getItem(MONITOR_STORAGE_KEY) } catch { return undefined }
+}
+
 export function useMonitor() {
-  const { positions, liveQuotes, settings, refreshNow, marketDataRefreshing, marketDataResult } = useStore()
-  const [loaded] = useState(loadMonitorState)
+  const { positions, liveQuotes, settings, refreshNow, marketDataRefreshing, marketDataResult, workspaceReadOnly } = useStore()
+  const [loaded] = useState(() => ({ ...loadMonitorState(), raw: persistedMonitor() }))
+  const persistedRevision = useRef(loaded.raw)
   const [state, setState] = useState(loaded.state)
   const [status, setStatus] = useState(() => ({ message: settings.allowExternalData ? '' : 'External market data is off. Enable it in Settings to load quote updates.', revision: 0 }))
   const [storageError, setStorageError] = useState(loaded.error)
@@ -24,31 +30,75 @@ export function useMonitor() {
     setStatus((current) => ({ message, revision: current.revision + 1 }))
   }, [])
 
+  const reloadMonitor = useCallback(() => {
+    const restored = loadMonitorState()
+    persistedRevision.current = persistedMonitor()
+    setState(restored.state)
+    setStorageError(restored.error)
+  }, [])
+
+  function canChangeMonitor(): boolean {
+    if (workspaceReadOnly) {
+      setStorageError('This workspace changed in another tab. Reload it before making changes.')
+      return false
+    }
+    if (persistedMonitor() !== persistedRevision.current) {
+      reloadMonitor()
+      setStatusMessage('Monitor changed in another tab. Review it and retry your change.')
+      return false
+    }
+    return true
+  }
+
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000)
     return () => window.clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === MONITOR_STORAGE_KEY) reloadMonitor()
+    }
+    window.addEventListener('finverse:monitor-restored', reloadMonitor)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('finverse:monitor-restored', reloadMonitor)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [reloadMonitor])
+
   const rules = useMemo(() => reconcileMonitorRules(state.rules, positions), [state.rules, positions])
 
   useEffect(() => {
+    if (workspaceReadOnly) return
     if (rules.length === state.rules.length && rules.every((rule, index) => {
       const current = state.rules[index]
-      return current && rule.id === current.id && rule.holdingId === current.holdingId && rule.holding === current.holding
+      return current && rule.id === current.id && rule.holdingId === current.holdingId && rule.holding === current.holding && rule.unresolved === current.unresolved
     })) return
     setState((current) => ({ ...current, rules: reconcileMonitorRules(current.rules, positions) }))
-  }, [rules, state.rules, positions])
+  }, [rules, state.rules, positions, workspaceReadOnly])
 
   useEffect(() => {
+    if (workspaceReadOnly) return
     setState((current) => evaluateMonitorRules(current, positions, liveQuotes, now, settings.allowExternalData))
-  }, [positions, liveQuotes, rules, now, settings.allowExternalData])
+  }, [positions, liveQuotes, rules, now, settings.allowExternalData, workspaceReadOnly])
 
   useEffect(() => {
+    if (workspaceReadOnly) return
+    if (persistedMonitor() !== persistedRevision.current) {
+      reloadMonitor()
+      setStatusMessage('Monitor changed in another tab. Review it and retry your change.')
+      return
+    }
     if (!saveMonitorState(state)) setStorageError('Monitor changes could not be saved. They will only last in this session.')
-    else if (!loaded.error) setStorageError('')
-  }, [state, loaded.error])
+    else {
+      persistedRevision.current = persistedMonitor()
+      setStorageError('')
+    }
+  }, [state, workspaceReadOnly, reloadMonitor, setStatusMessage])
 
   function saveRule(input: { id?: string; holdingId: string; condition: RuleCondition; threshold: number }): boolean {
+    if (!canChangeMonitor()) return false
     const position = positions.find((item) => item.id === input.holdingId)
     const existing = input.id ? state.rules.find((rule) => rule.id === input.id) : undefined
     if (!position || !['price_above', 'price_below', 'daily_move'].includes(input.condition) || !Number.isFinite(input.threshold) || input.threshold <= 0 || (input.id && !existing)) {
@@ -78,6 +128,7 @@ export function useMonitor() {
   }
 
   function addReminder(input: { holdingId: string | null; title: string; date: string }): boolean {
+    if (!canChangeMonitor()) return false
     const position = input.holdingId ? positions.find((item) => item.id === input.holdingId) : undefined
     if ((input.holdingId && !position) || !input.title.trim() || !validReminderDate(input.date) || input.date < today(Date.now())) {
       setStatusMessage('Enter a reminder title, a current holding, and a date from today onwards.')
@@ -102,27 +153,35 @@ export function useMonitor() {
   }
 
   function setAlertState(id: string, alertState: AlertState) {
+    if (!canChangeMonitor()) return
     if (!['open', 'reviewed', 'snoozed'].includes(alertState)) return
     setState((current) => ({ ...current, alerts: current.alerts.map((alert) => alert.id === id ? { ...alert, state: alertState } : alert) }))
     setStatusMessage(alertState === 'open' ? 'Alert reopened.' : alertState === 'reviewed' ? 'Alert marked reviewed.' : 'Alert moved to snoozed. Reopen it when you are ready.')
   }
 
   function toggleRule(id: string) {
+    if (!canChangeMonitor()) return
     setState((current) => ({ ...current, rules: current.rules.map((rule) => rule.id === id ? { ...rule, active: !rule.active } : rule) }))
     setStatusMessage('Watch rule updated.')
   }
 
   function deleteRule(id: string) {
+    if (!canChangeMonitor()) return
     setState((current) => ({ ...current, rules: current.rules.filter((rule) => rule.id !== id) }))
     setStatusMessage('Watch rule removed. Previous observations remain in your history.')
   }
 
   function toggleReminder(id: string) {
+    if (!canChangeMonitor()) return
     setState((current) => ({ ...current, events: current.events.map((event) => event.id === id ? { ...event, reminder: !event.reminder } : event) }))
     setStatusMessage('Reminder updated.')
   }
 
   const refresh = useCallback(async () => {
+    if (workspaceReadOnly) {
+      setStorageError('This workspace changed in another tab. Reload it before making changes.')
+      return
+    }
     setRefreshing(true)
     try {
       const result = await refreshNow()
@@ -137,7 +196,7 @@ export function useMonitor() {
     } catch {
       setStatusMessage('Prices could not be refreshed. Try again shortly.')
     } finally { setRefreshing(false) }
-  }, [refreshNow])
+  }, [refreshNow, workspaceReadOnly])
 
   useEffect(() => {
     if (!settings.allowExternalData) return
@@ -161,13 +220,13 @@ export function useMonitor() {
     alerts: state.alerts.map(redact),
     quoteRecords: quoteRecords.map(redact),
     rules,
-    events: [...state.events].sort((a, b) => a.date.localeCompare(b.date)),
+    events: [...state.events].sort((a, b) => a.date.localeCompare(b.date)).map((event) => event.unresolved ? { ...event, holding: `${event.holding} · Holding unavailable` } : event),
     counts: {
       open: state.alerts.filter((alert) => alert.state === 'open').length,
       reviewed: state.alerts.filter((alert) => alert.state === 'reviewed').length,
       snoozed: state.alerts.filter((alert) => alert.state === 'snoozed').length,
-      activeRules: rules.filter((rule) => rule.active).length,
-      upcoming: state.events.filter((event) => event.reminder && event.date >= currentDate).length,
+      activeRules: rules.filter((rule) => rule.active && !rule.unresolved).length,
+      upcoming: state.events.filter((event) => event.reminder && !event.unresolved && event.date >= currentDate).length,
     },
     statusMessage: storageError || status.message,
     statusRevision: status.revision,
