@@ -41,7 +41,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [backcastDays, setBackcastDays] = useState(INITIAL_BACKCAST_DAYS)
   const [performanceMode, setPerformanceMode] = useState<'backcast' | 'tracked'>('backcast')
   const backcastKey = useMemo(
-    () => snapshot.positions.map((position) => `${position.id}:${position.quantity}:${position.buyPrice}`).join('|'),
+    () => snapshot.positions.map((position) => `${position.id}:${position.instrumentKey}:${position.identityIssue}:${position.quantity}:${position.buyPrice}`).join('|'),
     [snapshot.positions],
   )
 
@@ -334,6 +334,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <section className="panel insight-panel insight-panel--wide insight-panel--performance">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">{performanceMode === 'tracked' ? 'Tracked balances' : 'Performance story'}</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio balances' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
           <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Balance history, not investment returns. Account additions, removals and cash flows can change these values.'}</p>
+          {performanceMode === 'tracked' && chartHistory.some((balance) => balance.dataQuality) && <p className="hint">Earlier balances may use legacy or unconfirmed instrument identities. They are preserved as recorded and have not been reconstructed.</p>}
           {performanceHistory.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--value">
               <span><i aria-hidden="true" />Portfolio value</span>

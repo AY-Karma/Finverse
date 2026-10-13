@@ -1,5 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse } from '../valuation'
+import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse } from '../valuation'
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import type { Currency, LiveQuote, Position } from '../types'
@@ -16,6 +16,9 @@ const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ def
 
 const LEDGER_PAGE_SIZE = 100
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
+function formatCost(value: number, currency: Currency, usdInrRate: number | null | undefined, supported: boolean): string {
+  return supported ? formatCurrency(value, currency, usdInrRate) : 'Not converted'
+}
 
 type Scope = 'all' | 'equity' | 'mutual'
 type SortField = 'symbol' | 'qty' | 'buy' | 'ltp' | 'value' | 'pnl'
@@ -26,6 +29,7 @@ interface LedgerRow {
   symbol: string
   qty: number
   buy: number
+  costSupported: boolean
   ltp: number | null
   isLive: boolean
   value: number
@@ -138,6 +142,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
           symbol: p.type === 'mutual-fund' ? p.name || p.ticker : p.ticker,
           qty: p.quantity,
           buy: p.buyPrice,
+          costSupported: hasSupportedValuationCurrency(p),
           ltp: price,
           isLive: isLiveQuote(p, live),
           value,
@@ -544,7 +549,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
                           {mask(r.symbol)}
                         </td>
                         <td>{mask(fmtUnits(r.qty))}</td>
-                        <td>{mask(formatCurrency(r.buy, currency, fxRate?.usdInr))}</td>
+                        <td>{mask(formatCost(r.buy, currency, fxRate?.usdInr, r.costSupported))}</td>
                         <td>
                           {r.ltp != null && r.buy > 0 && r.ltp !== r.buy ? (
                             <span className={`ltp ltp--${r.ltp > r.buy ? 'up' : 'down'}`}>
@@ -590,7 +595,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
                     <button className="ledger-mobile-row" type="button" onClick={() => setExpandedId(open ? null : row.id)} aria-expanded={open}>
                       <span className="ledger-mobile-primary">
                         <span className="ledger-mobile-name">{mask(row.symbol)}</span>
-                        <span className="ledger-mobile-secondary">Qty {mask(fmtUnits(row.qty))} · Avg {mask(formatCurrency(row.buy, currency, fxRate?.usdInr))}</span>
+                        <span className="ledger-mobile-secondary">Qty {mask(fmtUnits(row.qty))} · Avg {mask(formatCost(row.buy, currency, fxRate?.usdInr, row.costSupported))}</span>
                       </span>
                       <span className="ledger-mobile-primary ledger-mobile-primary--right">
                         <span className="ledger-mobile-value">{mask(row.ltp == null ? 'Unpriced' : formatCurrency(row.value, currency, fxRate?.usdInr))}</span>
@@ -603,7 +608,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
                     {open && (
                       <div className="ledger-mobile-detail">
                         <div><span>Last trade</span><strong>{row.ltp == null ? '—' : mask(formatCurrency(row.ltp, currency, fxRate?.usdInr))}</strong></div>
-                        <div><span>Buy price</span><strong>{mask(formatCurrency(row.buy, currency, fxRate?.usdInr))}</strong></div>
+                        <div><span>Buy price</span><strong>{mask(formatCost(row.buy, currency, fxRate?.usdInr, row.costSupported))}</strong></div>
                         <div><span>Quantity</span><strong>{mask(fmtUnits(row.qty))}</strong></div>
                         {members.length > 1 && <LedgerMembers members={members} live={live} currency={currency} usdInrRate={fxRate?.usdInr} hideValues={hideValues} />}
                       </div>
@@ -792,7 +797,7 @@ function MFLedger({
                   </span>
                 </td>
                 <td>{mask(fmtUnits(p.quantity))}</td>
-                <td>{mask(formatCurrency(p.invested, currency, usdInrRate))}</td>
+                <td>{mask(formatCost(p.invested, currency, usdInrRate, hasSupportedValuationCurrency(p)))}</td>
                 <td>{mask(livePriceOf(p, live) == null ? 'Unpriced' : formatCurrency(value, currency, usdInrRate))}</td>
                 <td className={livePriceOf(p, live) == null ? 'muted' : value >= p.invested ? 'up' : 'down'}>
                   {returns == null ? '—' : mask(formatPercent(returns))}
@@ -846,7 +851,7 @@ function MFLedger({
             {open && (
               <div className="ledger-mobile-detail">
                 <div className="ledger-mobile-detail-wide"><span>Scheme</span><strong>{mask(fund.name || fund.ticker)}</strong></div>
-                <div><span>Invested</span><strong>{mask(formatCurrency(fund.invested, currency, usdInrRate))}</strong></div>
+                <div><span>Invested</span><strong>{mask(formatCost(fund.invested, currency, usdInrRate, hasSupportedValuationCurrency(fund)))}</strong></div>
                 <div><span>XIRR</span><strong>{fund.xirr == null ? '—' : mask(formatPercent(fund.xirr))}</strong></div>
                 {fund.amc && <div className="ledger-mobile-detail-wide"><span>AMC</span><strong>{mask(fund.amc)}</strong></div>}
                 {fund.folio && <div><span>Folio</span><strong>{mask(fund.folio)}</strong></div>}
@@ -904,8 +909,8 @@ function LedgerMembers({
             return (
               <tr key={m.id}>
                 <td data-label="Qty">{mask(fmtUnits(m.quantity))}</td>
-                <td data-label="Buy">{mask(formatCurrency(m.buyPrice, currency, usdInrRate))}</td>
-                <td data-label="Invested">{mask(formatCurrency(m.invested, currency, usdInrRate))}</td>
+                <td data-label="Buy">{mask(formatCost(m.buyPrice, currency, usdInrRate, hasSupportedValuationCurrency(m)))}</td>
+                <td data-label="Invested">{mask(formatCost(m.invested, currency, usdInrRate, hasSupportedValuationCurrency(m)))}</td>
                 <td data-label="Value">{mask(livePriceOf(m, live) == null ? 'Unpriced' : formatCurrency(v, currency, usdInrRate))}</td>
                 <td data-label="P&L" className={pnl != null ? (up ? 'up' : 'down') : 'muted'}>
                   {pnl != null ? mask(`${up ? '+' : ''}${formatCurrency(pnl, currency, usdInrRate)}`) : '—'}

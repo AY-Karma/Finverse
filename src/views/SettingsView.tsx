@@ -10,7 +10,7 @@ import { ActionIcon } from './ActionIcon'
 type SettingsSection = 'preferences' | 'privacy'
 
 export function SettingsView() {
-  const { settings, setSettings } = useStore()
+  const { settings, setSettings, settingsSaved = true } = useStore()
   const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
   const update = (patch: Partial<typeof settings>) => setSettings({ ...settings, ...patch })
 
@@ -104,7 +104,7 @@ export function SettingsView() {
           </div>
           <div className="settings-nav-foot">
             <span className="settings-saved-mark" aria-hidden="true">✓</span>
-            <span><strong>Saved automatically</strong><small>Preferences stay in this browser.</small></span>
+            <span><strong>{settingsSaved ? 'Saved automatically' : 'Preferences not saved'}</strong><small>Preferences stay in this browser.</small></span>
           </div>
         </nav>
 
@@ -115,14 +115,14 @@ export function SettingsView() {
               title="Preferences"
               description="Choose how portfolio information is displayed across Finverse."
             >
-              <span className="settings-status">Auto-saved</span>
+              <span className="settings-status">{settingsSaved ? 'Auto-saved' : 'Save failed'}</span>
             </SettingsSectionHeader>
           )}
           {activeSection === 'preferences' && (
             <div className="settings-group">
               <SettingRow
                 label="Display currency"
-                description="Imported values remain in INR. USD uses a live conversion rate when external data is on."
+                description="INR portfolio totals can be displayed in USD when external data supplies a conversion rate."
               >
                 <select
                   id="currency"

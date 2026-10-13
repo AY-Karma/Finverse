@@ -1,7 +1,7 @@
 import { instrumentLabel } from './instruments'
 import { freshQuote, holdingIdentity, usableQuote } from './monitor'
 import type { Currency, FxRate, LiveQuote, Position } from './types'
-import { combinePositions, effectivePrice, quoteKey } from './valuation'
+import { combinePositions, nativePrice, quoteKey } from './valuation'
 
 export type ActivityFreshness = 'recent' | 'stale' | 'imported' | 'unavailable'
 
@@ -130,8 +130,9 @@ export function buildPortfolioActivity({
       && (position.type === 'mutual-fund' ? candidate.source === 'nav' : candidate.source !== 'nav')
       ? candidate : undefined
     const assetCurrency = position.currency ?? (position.exchange === 'NASDAQ' || position.exchange === 'NYSE' ? 'USD' : 'INR')
-    const factor = conversionFactor(assetCurrency, currency, fxRate)
-    const price = effectivePrice(position, quote ? { [key]: quote } : {})
+    const currencyKnown = !position.reportedCurrency && !(position.currency == null && position.exchange === 'LSE')
+    const factor = currencyKnown ? conversionFactor(assetCurrency, currency, fxRate) : null
+    const price = currencyKnown ? nativePrice(position, quote ? { [key]: quote } : {}) : null
     const timeZone = marketTimeZone(position)
     const recent = quote != null && freshQuote(quote, now)
     const change = recent ? reportedChange(quote) : null

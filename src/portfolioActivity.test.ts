@@ -38,6 +38,14 @@ describe('portfolio activity', () => {
     expect(result.counts).toMatchObject({ movement: 2, impact: 1, fxUnavailable: 1 })
   })
 
+  it('withholds native prices and converted impact when the imported currency is unsupported', () => {
+    const positions = [position('LOCAL'), position('FOREIGN', { exchange: 'LSE', currency: undefined, reportedCurrency: 'GBP', providerSymbol: 'FOREIGN.L', lastPrice: 25 })]
+    const result = build(positions, [quote(), quote({ price: 30 })], { fxRate: { usdInr: 80, at: NOW } })
+    expect(result.holdings.find((row) => row.ticker === 'FOREIGN')).toMatchObject({ price: null, dayContribution: null, weightPct: null })
+    expect(result.holdings.find((row) => row.ticker === 'LOCAL')).toMatchObject({ price: 110, dayContribution: 100, weightPct: null })
+    expect(result.counts.fxUnavailable).toBe(1)
+  })
+
   it('converts INR impact into USD only with a positive finite FX rate', () => {
     const positions = [position('LOCAL')]
     expect(build(positions, [quote()], { currency: 'USD', fxRate: { usdInr: 80, at: NOW } }).holdings[0].dayContribution).toBe(1.25)
@@ -153,12 +161,16 @@ describe('portfolio activity', () => {
     expect(hidden.summary).toMatchObject({ largestImpact: null, quoteCount: 2, navCount: 0, latestObservedAt: NOW - 60_000, impactCount: 2, impactEligibleCount: 2 })
   })
 
-  it('does not reuse an ambiguous quote across conflicting holding identities', () => {
-    const first = position('SAME', { lastPrice: 50 })
-    const second = { ...first, id: 'second', exchange: 'NASDAQ' as const, currency: 'USD' as const, lastPrice: 20 }
-    const result = build([first, second], [quote(), quote()])
+  it('ignores ambiguous legacy quotes while using separate quotes for distinct listing identities', () => {
+    const first = position('SAME', { lastPrice: 50, providerSymbol: 'SAME.NS' })
+    const second = { ...first, id: 'second', exchange: 'NASDAQ' as const, currency: 'USD' as const, providerSymbol: 'SAME', lastPrice: 20 }
+    expect(quoteKey(first)).not.toBe(quoteKey(second))
+    const result = buildPortfolioActivity({ positions: [first, second], quotes: { 'EQ:SAME': quote() }, now: NOW })
     expect(result.counts).toMatchObject({ total: 2, quoted: 0, imported: 2, movement: 0 })
     expect(result.holdings.map((row) => row.price)).toEqual([50, 20])
+    const separate = build([first, second], [quote({ price: 60 }), quote({ price: 30 })])
+    expect(separate.counts).toMatchObject({ total: 2, quoted: 2, imported: 0, movement: 2 })
+    expect(separate.holdings.map((row) => row.price)).toEqual([60, 30])
   })
 
   it('combines compatible holding rows before estimating contribution', () => {

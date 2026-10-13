@@ -105,8 +105,8 @@ export function RulesPanel({ controller }: PanelProps) {
   const [error, setError] = useState('')
   const quotes = visibleQuotes(controller.allowExternalData, liveQuotes)
   const selected = controller.positions.find((position) => position.id === holdingId)
-  const availableRules = controller.rules.filter((rule) => controller.positions.some((position) => position.id === rule.holdingId))
-  const unavailableRules = controller.rules.filter((rule) => !controller.positions.some((position) => position.id === rule.holdingId))
+  const availableRules = controller.rules.filter((rule) => !rule.unresolved && controller.positions.some((position) => position.id === rule.holdingId))
+  const unavailableRules = controller.rules.filter((rule) => rule.unresolved || !controller.positions.some((position) => position.id === rule.holdingId))
   const remainingRules = Math.max(0, MAX_RULES - controller.rules.length)
 
   function defaultThreshold(id: string, nextCondition: RuleCondition) {

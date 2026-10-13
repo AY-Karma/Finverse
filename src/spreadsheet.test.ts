@@ -6,7 +6,7 @@ function parsePositions(file: ArrayBuffer) {
   return parseSpreadsheetWithDiagnostics(file).positions
 }
 
-function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx', sheetNames?: string[]): ArrayBuffer {
+function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' | 'csv' = 'xlsx', sheetNames?: string[]): ArrayBuffer {
   const book = XLSX.utils.book_new()
   sheets.forEach((rows, index) => {
     XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), sheetNames?.[index] ?? `Sheet${index + 1}`)
@@ -15,6 +15,167 @@ function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' = 'xlsx', sh
 }
 
 describe('holdings spreadsheet import', () => {
+  it.each(['csv', 'xlsx', 'biff8'] as const)('accepts header-only equity and fund %s statements with no rejected rows', (format) => {
+    for (const header of [
+      ['Ticker', 'Quantity', 'Buy Price', 'Last Price'],
+      ['Scheme Name', 'Units', 'Invested Value', 'Current Value'],
+    ]) {
+      expect(parseSpreadsheetWithDiagnostics(workbook([[header]], format))).toEqual({ positions: [], issues: [], rejectedCount: 0 })
+    }
+  })
+
+  it.each([
+    [['Ticker', 'Quantity', 'Buy Price'], ['EXAMPLE', 'invalid', 100]],
+    [['Scheme Name', 'Units', 'Invested Value'], ['Example Fund', 0, 100]],
+    [['Ticker', 'Quantity', 'Buy Price'], ['', 1, 100]],
+  ])('does not treat an entirely rejected holdings table as an empty statement', (...rows) => {
+    expect(() => parseSpreadsheetWithDiagnostics(workbook([rows]))).toThrow('No valid holdings found. 1 row(s) rejected.')
+  })
+
+  it.each([
+    [[]],
+    [['Unrecognized report']],
+    [['Symbol', 'Quantity', 'Price', 'Buy/Sell', 'Order ID']],
+  ])('rejects an empty file without a recognizable holdings header', (...rows) => {
+    expect(() => parseSpreadsheetWithDiagnostics(workbook([rows]))).toThrow('No recognizable holdings header found')
+  })
+
+  it('rejects financially populated rows with no symbol or ISIN while skipping blank rows and totals', () => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Symbol', 'Name', 'Quantity', 'Buy Price', 'Last Price', 'Sector'],
+      ['TCS', 'TCS', 1, 100, 120],
+      ['', 'Missing symbol', 2, 100, 120],
+      [null, null, null, 200, null],
+      [' ', null, 0, 0, null],
+      ['', null, '10abc', 100, null],
+      ['', '', 4, 100, 120, 'Total'],
+      [],
+      [' ', '', ' ', ' ', ' '],
+      ['Grand Total', '', 3, 300, 360],
+      ['', 'Total', 3, 300, 360],
+    ]]))
+    expect(result.positions.map((position) => position.ticker)).toEqual(['TCS'])
+    expect(result.rejectedCount).toBe(5)
+    expect(result.issues.map((issue) => [issue.row, issue.field])).toEqual([[3, 'Identity'], [4, 'Identity'], [5, 'Identity'], [6, 'Identity'], [7, 'Identity']])
+    expect(result.issues[0].message).toContain('symbol or ISIN')
+  })
+
+  it('rejects financially populated fund rows without scheme names while skipping blanks and totals', () => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Scheme Name', 'Units', 'Invested Value', 'Current Value'],
+      ['Example Fund', 2, 200, 240],
+      ['', 3, 300, 360],
+      [' ', null, 100, null],
+      [],
+      [' ', ' ', ' ', ' '],
+      ['Grand Total', 5, 500, 600],
+    ]]))
+    expect(result.positions.map((position) => position.name)).toEqual(['Example Fund'])
+    expect(result.rejectedCount).toBe(2)
+    expect(result.issues.map((issue) => [issue.row, issue.field])).toEqual([[3, 'Identity'], [4, 'Identity']])
+    expect(result.issues[0].message).toContain('scheme name')
+  })
+
+  it.each(['xlsx', 'biff8'] as const)('retains an explicit ISIN from a blank Symbol cell for listing review in %s', (format) => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Symbol', 'ISIN', 'Name', 'Quantity', 'Average Price'],
+      ['', 'INE040A01034', 'HDFC Bank', 10, 100],
+    ]], format))
+    expect(result.rejectedCount).toBe(0)
+    expect(result.positions).toHaveLength(1)
+    expect(result.positions[0]).toMatchObject({ ticker: 'INE040A01034', isin: 'INE040A01034', name: 'HDFC Bank', quantity: 10, invested: 1000 })
+    expect(result.positions[0].identityIssue).toContain('ISIN alone')
+    expect(result.positions[0].instrumentKey).toContain('unresolved')
+  })
+
+  it('rejects contradictory imported fund mappings before normalization can remove them', () => {
+    const mappingColumns = ['MF scheme code', 'MF scheme name', 'MF mapping source']
+    const result = parseSpreadsheetWithDiagnostics(workbook([
+      [
+        ['Scheme Name', 'Units', 'Invested Value', ...mappingColumns],
+        ['Example Fund Direct IDCW', 1, 100, 43, 'Example Fund Regular Growth', 'confirmed'],
+        ['Example Fund Direct Growth', 1, 100, 44, 'Example Fund Direct Growth', 'exact'],
+      ],
+      [
+        ['Symbol', 'Name', 'Type', 'Quantity', 'Average Price', ...mappingColumns],
+        ['Example Fund Direct IDCW', 'Example Fund Direct IDCW', 'MF', 1, 100, 43, 'Example Fund Regular Growth', 'confirmed'],
+      ],
+    ]))
+    expect(result.positions).toHaveLength(1)
+    expect(result.positions[0].mfScheme?.code).toBe(44)
+    expect(result.rejectedCount).toBe(2)
+    expect(result.issues.map((issue) => [issue.sheet, issue.row, issue.field])).toEqual([['Sheet1', 2, 'Identity'], ['Sheet2', 2, 'Identity']])
+    expect(result.issues[0].message).toContain('mapping conflicts')
+  })
+
+  it('rejects oversized company and fund text fields with row diagnostics', () => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([
+      [
+        ['Symbol', 'Name', 'Quantity', 'Average Price'],
+        ['TCS', 'A'.repeat(501), 1, 100],
+        ['INFY', 'Infosys', 1, 100],
+      ],
+      [
+        ['Scheme Name', 'AMC', 'Folio No', 'Source', 'Units', 'Invested Value'],
+        ['Example Fund', 'A'.repeat(501), '', '', 1, 100],
+        ['Example Fund', '', 'A'.repeat(501), '', 1, 100],
+        ['Example Fund', '', '', 'A'.repeat(501), 1, 100],
+      ],
+    ]))
+    expect(result.positions.map((position) => position.ticker)).toEqual(['INFY'])
+    expect(result.rejectedCount).toBe(4)
+    expect(result.issues.every((issue) => issue.field === 'Identity' && issue.message.includes('500 characters'))).toBe(true)
+  })
+
+  it('rejects unsafe direct and derived equity financial amounts while retaining safe boundary values', () => {
+    const huge = Number.MAX_SAFE_INTEGER + 1
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Symbol', 'Quantity', 'Average Price', 'Invested Value', 'Last Price', 'Current Value'],
+      ['VALID', 1, Number.MAX_SAFE_INTEGER, null, null, null],
+      ['QUANTITY', huge, 1, null, null, null],
+      ['COST', 1, huge, null, null, null],
+      ['INVESTED', 1, null, huge, null, null],
+      ['PRICE', 1, 100, null, huge, null],
+      ['VALUE', 1, 100, null, null, huge],
+      ['NEGATIVE_PRICE', 1, 100, null, -1, null],
+      ['DERIVED_COST', 2, Number.MAX_SAFE_INTEGER, null, null, null],
+      ['DERIVED_PRICE', 0.0000000001, 100, null, null, 1000000],
+      ['DERIVED_VALUE', 100000000, 1, null, 100000000, null],
+    ]]))
+    expect(result.positions.map((position) => position.ticker)).toEqual(['VALID'])
+    expect(result.positions[0].invested).toBe(Number.MAX_SAFE_INTEGER)
+    expect(result.rejectedCount).toBe(9)
+    expect(result.issues.map((issue) => issue.field)).toEqual(['Quantity', ...Array(8).fill('Cost')])
+  })
+
+  it('rejects unsafe fund financial amounts and keeps signed returns within the supported range', () => {
+    const huge = Number.MAX_SAFE_INTEGER + 1
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Scheme Name', 'Units', 'Invested Value', 'NAV', 'Returns', 'XIRR'],
+      ['Valid fund', 1, 100, 120, -20, '-8%'],
+      ['Units', huge, 100, null, null, null],
+      ['Cost', 1, huge, null, null, null],
+      ['NAV', 1, 100, huge, null, null],
+      ['Returns', 1, 100, null, -huge, null],
+      ['Oversized XIRR fund', 1, 100, null, null, huge],
+    ]]))
+    expect(result.positions).toHaveLength(1)
+    expect(result.positions[0]).toMatchObject({ returns: -20, xirr: -8 })
+    expect(result.rejectedCount).toBe(5)
+    expect(result.issues.map((issue) => issue.field)).toEqual(['Quantity', ...Array(4).fill('Cost')])
+  })
+
+  it('reports oversized identity metadata as a rejected row rather than saving an unrestorable holding', () => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Symbol', 'Quantity', 'Average Price', 'Sector'],
+      ['TCS', 1, 100, 'A'.repeat(501)],
+      ['INFY', 1, 100, 'Technology'],
+    ]]))
+    expect(result.positions).toHaveLength(1)
+    expect(result.positions[0].ticker).toBe('INFY')
+    expect(result).toMatchObject({ rejectedCount: 1, issues: [{ field: 'Identity', row: 2 }] })
+  })
+
   it.each(['xlsx', 'biff8'] as const)('preserves native Excel percentage XIRRs in %s without guessing from magnitude', (bookType) => {
     const book = XLSX.utils.book_new()
     const sheet = XLSX.utils.aoa_to_sheet([])

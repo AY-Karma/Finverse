@@ -1,4 +1,6 @@
 import type { Position } from './types'
+import { reviewFundScheme, type FundSchemeReview } from './fundSchemes'
+import { listingIdentity } from './instruments'
 import {
   fetchHistory,
   fetchLiveQuotes,
@@ -10,6 +12,7 @@ import {
 } from './live'
 
 export interface MarketDataAdapter {
+  reviewFundScheme(name: string, signal?: AbortSignal): Promise<FundSchemeReview>
   refreshQuotes(positions: Position[], previous: Record<string, import('./types').LiveQuote>, signal?: AbortSignal): Promise<LiveQuotesResult>
   history(position: Position, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
   benchmarkHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
@@ -53,13 +56,14 @@ export const BENCHMARKS: BenchmarkDefinition[] = [
 
 /** Current public adapter. A licensed or first-party adapter can replace it at this seam. */
 export const marketData: MarketDataAdapter = {
+  reviewFundScheme,
   refreshQuotes: fetchLiveQuotes,
   history(position, from, to, signal) {
-    if (position.type === 'mutual-fund') return fetchNavHistory(position.name || position.ticker, from, to, signal)
+    if (position.type === 'mutual-fund') return fetchNavHistory(position, from, to, signal)
     return (async () => {
       for (const symbol of resolveYahooSymbolCandidates(position)) {
         signal?.throwIfAborted()
-        const points = await fetchHistory(symbol, from, to, signal)
+        const points = await fetchHistory(symbol, from, to, signal, listingIdentity(position))
         if (points.length > 0) return points
       }
       return []

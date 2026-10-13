@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadSettings, sanitizeFolios, saveFolios, saveSettings } from './store'
+import { loadFolios, loadSettings, sanitizeFolios, saveFolios, saveSettings } from './store'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -37,7 +37,7 @@ describe('settings persistence', () => {
 
   it('saves only supported preferences even when an older caller supplies retired fields', () => {
     const preferences = loadSettings()
-    saveSettings({ ...preferences, apiKey: 'retired-key', provider: 'openai' } as typeof preferences)
+    expect(saveSettings({ ...preferences, apiKey: 'retired-key', provider: 'openai' } as typeof preferences)).toBe(true)
     expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
     expect(sessionStorage.length).toBe(0)
   })
@@ -60,6 +60,7 @@ describe('settings persistence', () => {
       currency: 'INR', allowExternalData: false, density: 'comfortable',
       accent: 'indigo', mode: 'dark', hideValues: false,
     })
+    expect(saveSettings(loadSettings())).toBe(false)
   })
 })
 
@@ -71,16 +72,39 @@ describe('saveFolios', () => {
 
   it('reports a successful save', () => {
     const setItem = vi.fn()
-    vi.stubGlobal('localStorage', { setItem })
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem })
     expect(saveFolios([])).toBe(true)
     expect(setItem).toHaveBeenCalledWith('finverse:folios', '[]')
   })
 })
 
 describe('sanitizeFolios', () => {
+  it('preserves reviewed scheme mappings on save/reload and rekeys legacy fund identities', () => {
+    const mfScheme = { code: 2, name: 'Example Equity Fund Direct IDCW', source: 'confirmed' as const }
+    const folios = [{ id: 'folio', name: 'Portfolio', importedAt: 1, positions: [{ id: 'fund', ticker: 'Fund', name: 'Fund', type: 'mutual-fund' as const, quantity: 1, buyPrice: 100, lastPrice: 120, invested: 100, instrumentKey: 'MF:fund', mfScheme }] }]
+    expect(saveFolios(folios)).toBe(true)
+    expect(loadFolios()[0].positions[0]).toMatchObject({ mfScheme, instrumentKey: 'MF:mfapi:2' })
+    const invalid = sanitizeFolios([{ ...folios[0], positions: [{ ...folios[0].positions[0], mfScheme: { ...mfScheme, code: '2' } }] }])
+    expect(invalid[0].positions[0].mfScheme).toBeUndefined()
+    expect(invalid[0].positions[0].instrumentKey).toBe('MF:fund')
+  })
+
   it('rejects malformed persisted records', () => {
     expect(sanitizeFolios({ positions: [] })).toEqual([])
     expect(sanitizeFolios([null, { id: 'x', name: 'Broken', positions: 'nope' }])).toEqual([])
+  })
+
+  it('keeps active holdings but removes invalid or nested undo revisions', () => {
+    const statement = { id: 'first', fileName: 'first.csv', statementDate: '2026-10-01', completeness: 'complete' }
+    const position = { id: 'row', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 120, invested: 100 }
+    const account = { id: 'account', name: 'Broker', importedAt: 2, positions: [position], statement, previousRevision: { statement, importedAt: 1, positions: [position] }, lastOperation: 'updated', operationAt: 2 }
+    expect(sanitizeFolios([account])[0]).toMatchObject({ previousRevision: { statement }, lastOperation: 'updated', operationAt: 2 })
+    const nested = sanitizeFolios([{ ...account, previousRevision: { ...account.previousRevision, previousRevision: account.previousRevision } }])[0]
+    expect(nested.positions).toHaveLength(1)
+    expect(nested.previousRevision).toBeUndefined()
+    expect(nested.lastOperation).toBeUndefined()
+    const invalidDate = sanitizeFolios([{ ...account, statement: { ...statement, statementDate: '2026-02-30' } }])[0]
+    expect(invalidDate.statement).toBeUndefined()
   })
 
   it('keeps valid positions and removes invalid rows', () => {

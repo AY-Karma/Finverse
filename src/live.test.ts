@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LiveQuote, Position } from './types'
+import { normalizePosition } from './instruments'
+import { quoteKey } from './valuation'
+import { marketData } from './marketData'
 import {
   fetchLiveQuotes,
   fetchHistory,
+  fetchNavHistory,
   fetchUsdInrRate,
   fetchYahooPrice,
   isMarketOpen,
@@ -179,7 +183,7 @@ describe('market data client', () => {
       position('TCS'),
     ]
     const previous: Record<string, LiveQuote> = {
-      'EQ:TCS': { price: 2200, at: 1, source: 'yahoo' },
+      [quoteKey(positions[1])]: { price: 2200, at: 1, source: 'yahoo' },
     }
     const fetcher = vi.fn<typeof fetch>(async () =>
       Response.json({
@@ -206,8 +210,8 @@ describe('market data client', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
     expect(String(fetcher.mock.calls[0]?.[0])).toContain('RELIANCE.NS%2CTCS.NS')
     expect(result).toMatchObject({ updated: 1, failed: 1, skipped: 0 })
-    expect(result.quotes['EQ:TCS']).toEqual(previous['EQ:TCS'])
-    expect(result.quotes['EQ:RELIANCE']).toMatchObject({
+    expect(result.quotes[quoteKey(positions[1])]).toEqual(previous[quoteKey(positions[1])])
+    expect(result.quotes[quoteKey(positions[0])]).toMatchObject({
       price: 1309.8,
       at: Date.parse('2026-08-24T09:45:02.000Z'),
     })
@@ -217,9 +221,9 @@ describe('market data client', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-25T06:00:00Z'))
     try {
-      const fund: Position = { ...position('FUND'), type: 'mutual-fund' }
+      const fund: Position = { ...position('FUND'), type: 'mutual-fund', mfScheme: { code: 1, name: 'Fund Direct Growth', source: 'confirmed' } }
       const previous: Record<string, LiveQuote> = {
-        'MF:fund': { price: 120, at: Date.now(), fetchedAt: Date.now(), source: 'nav' },
+        'MF:mfapi:1': { price: 120, at: Date.now(), fetchedAt: Date.now(), source: 'nav' },
       }
       const fetcher = vi.fn<typeof fetch>()
       vi.stubGlobal('fetch', fetcher)
@@ -237,6 +241,123 @@ describe('market data client', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('does not use name-based NAVs or request history before a scheme is reviewed', async () => {
+    const fund: Position = { ...position('FUND'), type: 'mutual-fund', lastPrice: 120 }
+    const fetcher = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetcher)
+    const result = await fetchLiveQuotes([fund], { 'MF:fund': { price: 999, at: Date.now(), source: 'nav' } })
+    expect(result).toEqual({ quotes: {}, updated: 0, failed: 1, skipped: 0 })
+    await expect(fetchNavHistory(fund, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z'))).resolves.toEqual([])
+    expect(fund.lastPrice).toBe(120)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('does not use a saved scheme whose plan or option contradicts the holding', async () => {
+    const fund: Position = { ...position('Example Fund Direct IDCW'), type: 'mutual-fund', mfScheme: { code: 1, name: 'Example Fund Regular Growth', source: 'confirmed' } }
+    const fetcher = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetcher)
+    const result = await fetchLiveQuotes([fund], { 'MF:mfapi:1': { price: 999, at: Date.now(), source: 'nav' } })
+    expect(result.quotes).toEqual({})
+    await expect(fetchNavHistory(fund, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z'))).resolves.toEqual([])
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('does not label an INR MFAPI NAV as a USD holding price', async () => {
+    const fund: Position = { ...position('Example Fund Direct Growth'), currency: 'USD', type: 'mutual-fund', mfScheme: { code: 1, name: 'Example Fund Direct Growth', source: 'confirmed' } }
+    const fetcher = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetcher)
+    expect((await fetchLiveQuotes([fund], {})).quotes).toEqual({})
+    await expect(fetchNavHistory(fund, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z'))).resolves.toEqual([])
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('uses the saved code for latest NAV and history, ignoring a name cache and changed imported name', async () => {
+    const name = 'Imported fund alias'
+    const stored = new Map<string, string>([['finverse:history:v2:mf:importedfundalias', JSON.stringify({ from: '2026-09-01', to: '2026-09-23', points: [{ date: '2026-09-22', close: 999 }], at: Date.now() })]])
+    vi.stubGlobal('localStorage', {
+      get length() { return stored.size },
+      key: (index: number) => [...stored.keys()][index] ?? null,
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+      removeItem: (key: string) => stored.delete(key),
+    })
+    const fund: Position = { ...position(name), type: 'mutual-fund', instrumentKey: 'MF:imported fund alias', mfScheme: { code: 42, name: 'Reviewed Fund Direct IDCW', source: 'confirmed' } }
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ data: [{ date: '22-09-2026', nav: '77.5' }] }))
+    vi.stubGlobal('fetch', fetcher)
+
+    const latest = await fetchLiveQuotes([fund], {})
+    expect(latest.quotes['MF:mfapi:42']).toMatchObject({ price: 77.5, at: Date.parse('2026-09-22T00:00:00+05:30'), source: 'nav' })
+    const range = [new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z')] as const
+    await expect(fetchNavHistory({ ...fund, name: 'Changed alias' }, ...range)).resolves.toEqual([{ date: '2026-09-22', close: 77.5 }])
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://api.mfapi.in/mf/42/latest',
+      'https://api.mfapi.in/mf/42?startDate=2026-09-01&endDate=2026-09-23',
+    ])
+    expect(stored.has('finverse:history:v2:mfapi:42')).toBe(true)
+    await expect(fetchNavHistory({ ...fund, name: 'Another alias' }, ...range)).resolves.toHaveLength(1)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    await fetchNavHistory({ ...fund, mfScheme: { ...fund.mfScheme!, code: 43 } }, ...range)
+    expect(String(fetcher.mock.calls.at(-1)?.[0])).toContain('/mf/43?')
+  })
+
+  it('coalesces NAV requests for the same saved code across imported aliases', async () => {
+    const mapping = { code: 52, name: 'Reviewed Fund Direct Growth', source: 'exact' as const }
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ data: [{ date: '22-09-2026', nav: '120' }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const funds = ['First alias', 'Second alias'].map((name) => ({ ...position(name), type: 'mutual-fund' as const, mfScheme: mapping }))
+    const results = await Promise.all(funds.map((fund) => fetchLiveQuotes([fund], {})))
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(results.map((result) => result.quotes['MF:mfapi:52'].price)).toEqual([120, 120])
+  })
+
+  it.each([undefined, '31-02-2026'])('does not relabel a NAV with an invalid observation date as freshly observed: %s', async (date) => {
+    const fund: Position = { ...position('FUND'), type: 'mutual-fund', mfScheme: { code: 61, name: 'Fund Direct Growth', source: 'exact' } }
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: [{ date, nav: '120' }] })))
+    expect(await fetchLiveQuotes([fund], {})).toMatchObject({ updated: 0, failed: 1, quotes: {} })
+  })
+
+  it('fetches same-ticker NSE and BSE listings without sharing their quotes', async () => {
+    const holdings = [
+      normalizePosition({ ...position('SAME'), id: 'nse', exchange: 'NSE', providerSymbol: 'SAME.NS', identityVersion: 2 }),
+      normalizePosition({ ...position('SAME'), id: 'bse', exchange: 'BSE', providerSymbol: '500001.BO', identityVersion: 2 }),
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ fetchedAt: '2026-09-23T06:00:00Z', quotes: [
+      { symbol: 'SAME.NS', price: 100, change: 0, changePct: 0, marketTime: '2026-09-23T06:00:00Z', source: 'yahoo' },
+      { symbol: '500001.BO', price: 200, change: 0, changePct: 0, marketTime: '2026-09-23T06:00:00Z', source: 'yahoo' },
+    ] })))
+    const result = await fetchLiveQuotes(holdings, {})
+    expect(result.updated).toBe(2)
+    expect(result.quotes[quoteKey(holdings[0])].price).toBe(100)
+    expect(result.quotes[quoteKey(holdings[1])].price).toBe(200)
+  })
+
+  it('keeps unresolved venues on imported values without requesting guessed symbols', async () => {
+    const holding = normalizePosition({ ...position('SAME'), exchange: 'OTHER', reportedExchange: 'UNSUPPORTED', lastPrice: 120 })
+    const fetcher = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetcher)
+    expect((await fetchLiveQuotes([holding], { [quoteKey(holding)]: { price: 999, at: 1, source: 'yahoo' } })).quotes).toEqual({})
+    await expect(marketData.history(holding, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z'))).resolves.toEqual([])
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('isolates listing history from legacy symbol caches and conflicting ISIN metadata', async () => {
+    const stored = new Map<string, string>([['finverse:history:v2:SAME.NS', JSON.stringify({ from: '2026-09-01', to: '2026-09-23', at: Date.now(), points: [{ date: '2026-09-22', close: 999 }] })]])
+    vi.stubGlobal('localStorage', {
+      get length() { return stored.size }, key: (index: number) => [...stored.keys()][index] ?? null,
+      getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key),
+    })
+    const first = normalizePosition({ ...position('SAME'), isin: 'INE000000001' })
+    const conflicting = normalizePosition({ ...first, id: 'conflict', isin: 'INE000000002' })
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ points: [{ date: '2026-09-22', close: 120 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const range = [new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z')] as const
+    await expect(marketData.history(first, ...range)).resolves.toEqual([{ date: '2026-09-22', close: 120 }])
+    await expect(marketData.history(conflicting, ...range)).resolves.toEqual([{ date: '2026-09-22', close: 120 }])
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(stored.has(`finverse:history:v2:${quoteKey(first)}`)).toBe(true)
+    expect(stored.has(`finverse:history:v2:${quoteKey(conflicting)}`)).toBe(true)
   })
 })
 

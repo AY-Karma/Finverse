@@ -1,4 +1,4 @@
-import type { Currency, LiveQuote, Position } from './types'
+import type { Currency, Folio, LiveQuote, Position } from './types'
 import { instrumentKey, instrumentLabel } from './instruments'
 
 export interface Allocation {
@@ -19,24 +19,65 @@ export interface PortfolioStats {
   allocations: Allocation[]
 }
 
+/** Portfolio amounts are INR-denominated; native non-INR amounts need a separate conversion model. */
+export function hasSupportedValuationCurrency(position: Position): boolean {
+  return !position.reportedCurrency && position.currency !== 'USD'
+    && !(position.currency == null && (position.exchange === 'NASDAQ' || position.exchange === 'NYSE' || position.exchange === 'LSE'))
+}
+
 /** Stable key shared by imports, quote fetching, and every valuation view. */
 export function quoteKey(position: Position): string {
   return instrumentKey(position)
 }
 
-/** A live quote is preferred over the spreadsheet's most recent reported price. */
-export function effectivePrice(position: Position, quotes: Record<string, LiveQuote> = {}): number | null {
-  const live = quotes[quoteKey(position)]?.price
-  if (live != null && Number.isFinite(live) && live >= 0) return live
-  return position.lastPrice != null && Number.isFinite(position.lastPrice) && position.lastPrice >= 0 ? position.lastPrice : null
+function usableImportedPrice(position: Position): boolean {
+  return position.lastPrice != null && Number.isFinite(position.lastPrice) && position.lastPrice >= 0
 }
 
-/** Merge same-instrument rows (same mutual-fund scheme name or equity ticker)
+function statementDate(value: string | null | undefined): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const at = Date.parse(`${value}T00:00:00Z`)
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value ? value : null
+}
+
+/** Add statement dates to read copies without changing stored rows. */
+export function positionsWithStatementDates(folios: Folio[]): Position[] {
+  return folios.flatMap((folio) => folio.positions.map((position) => ({
+    ...position,
+    priceAsOf: statementDate(folio.statement?.statementDate),
+  })))
+}
+
+function importedPriceRow(rows: Position[]): Position | undefined {
+  let selected: Position | undefined
+  for (const row of rows) {
+    if (!usableImportedPrice(row)) continue
+    const date = statementDate(row.priceAsOf)
+    const selectedDate = statementDate(selected?.priceAsOf)
+    if (!selected || date && (!selectedDate || date > selectedDate)) selected = row
+  }
+  return selected
+}
+
+/** Native quote price or imported fallback; portfolio totals require supported currency handling. */
+export function nativePrice(position: Position, quotes: Record<string, LiveQuote> = {}): number | null {
+  const live = position.identityIssue ? undefined : quotes[quoteKey(position)]?.price
+  if (live != null && Number.isFinite(live) && live >= 0) return live
+  return usableImportedPrice(position) ? position.lastPrice : null
+}
+
+/** INR valuation prefers live quotes and excludes native currencies without a conversion model. */
+export function effectivePrice(position: Position, quotes: Record<string, LiveQuote> = {}): number | null {
+  return hasSupportedValuationCurrency(position) ? nativePrice(position, quotes) : null
+}
+
+/** Merge compatible rows of the same listing or mutual-fund scheme
  *  so each holding is shown once. Quantities and invested amounts are summed;
  *  cost basis becomes the weighted average (invested ÷ units); merged XIRR is
  *  unavailable without dated cash flows; metadata keeps the first
  *  non-empty value. Conflicting identity metadata remains separate; descriptive
- *  metadata uses the first non-empty value in import order. */
+ *  metadata uses the first non-empty value in import order. Imported prices use
+ *  the latest dated row with a usable price; ties and undated prices keep import order. */
 const IDENTITY_FIELDS = ['type', 'exchange', 'currency', 'providerSymbol', 'isin'] as const
 
 function groupPositions(positions: Position[]) {
@@ -70,6 +111,38 @@ export function combinedPositionMembers(positions: Position[]): Map<string, Posi
   return members
 }
 
+/** Explain uncertainty in the imported fallback, even when live quotes currently take precedence. */
+export function importedPriceWarnings(folios: Folio[]): string[] {
+  const warnings: string[] = []
+  for (const candidates of groupPositions(positionsWithStatementDates(folios)).values()) for (const { rows } of candidates) {
+    const selected = importedPriceRow(rows)
+    if (!selected) continue
+    const usable = rows.filter(usableImportedPrice)
+    const undatedCount = usable.filter((row) => !row.priceAsOf).length
+    const pricesByDate = new Map<string, Set<number>>()
+    for (const row of usable) {
+      if (!row.priceAsOf) continue
+      const prices = pricesByDate.get(row.priceAsOf) ?? new Set<number>()
+      prices.add(row.lastPrice!)
+      pricesByDate.set(row.priceAsOf, prices)
+    }
+    const conflictingDates = [...pricesByDate].filter(([, prices]) => prices.size > 1).map(([date]) => date).sort()
+    const dates = rows.map((row) => row.priceAsOf).filter((date): date is string => !!date).sort()
+    const latestDate = dates[dates.length - 1]
+    const reasons: string[] = []
+    if (undatedCount) reasons.push(`${undatedCount} usable imported price${undatedCount === 1 ? ' has' : 's have'} no statement date`)
+    if (conflictingDates.length) reasons.push(`imported prices conflict on statement date${conflictingDates.length === 1 ? '' : 's'} ${conflictingDates.join(', ')}`)
+    else if (new Set(usable.map((row) => row.lastPrice)).size > 1) reasons.push('imported prices differ across active accounts')
+    if (latestDate && (!selected.priceAsOf || latestDate > selected.priceAsOf)) reasons.push(`the latest statement dated ${latestDate} has no usable price`)
+    if (!reasons.length) continue
+    const selection = selected.priceAsOf
+      ? `Using ${conflictingDates.includes(selected.priceAsOf) ? 'the first imported usable price' : 'the imported price'} from statement dated ${selected.priceAsOf}, the latest statement date with a usable price.`
+      : 'Using the first imported usable price because no usable price has a known statement date.'
+    warnings.push(`${instrumentLabel(selected)}: ${reasons.join('; ')}. ${selection} Provider observation time is unknown.`)
+  }
+  return warnings
+}
+
 export function combinePositions(positions: Position[]): Position[] {
   const groups = groupPositions(positions)
   const out: Position[] = []
@@ -81,6 +154,7 @@ export function combinePositions(positions: Position[]): Position[] {
     const quantity = rows.reduce((s, p) => s + (Number.isFinite(p.quantity) ? p.quantity : 0), 0)
     const invested = rows.reduce((s, p) => s + (Number.isFinite(p.invested) ? p.invested : 0), 0)
     const first = rows[0]
+    const priceRow = importedPriceRow(rows)
     out.push({
       ...first,
       id: combinedId(rows, candidates.length),
@@ -89,7 +163,8 @@ export function combinePositions(positions: Position[]): Position[] {
       type: first.type,
       quantity,
       buyPrice: quantity > 0 ? invested / quantity : first.buyPrice,
-      lastPrice: rows.find((p) => p.lastPrice != null)?.lastPrice ?? first.lastPrice,
+      lastPrice: priceRow?.lastPrice ?? null,
+      priceAsOf: statementDate(priceRow?.priceAsOf),
       invested,
       amc: (rows.find((p) => (p.amc ?? '').trim() !== '') ?? first).amc,
       category: (rows.find((p) => (p.category ?? '').trim() !== '') ?? first).category,
@@ -98,7 +173,7 @@ export function combinePositions(positions: Position[]): Position[] {
       source: (rows.find((p) => (p.source ?? '').trim() !== '') ?? first).source,
       returns: rows.find((p) => p.returns != null)?.returns ?? first.returns,
       xirr: null,
-      instrumentKey: rows.find((p) => p.instrumentKey)?.instrumentKey,
+      instrumentKey: quoteKey(first),
       exchange: rows.find((p) => p.exchange)?.exchange,
       currency: rows.find((p) => p.currency)?.currency,
       providerSymbol: rows.find((p) => p.providerSymbol)?.providerSymbol,
@@ -111,7 +186,7 @@ export function combinePositions(positions: Position[]): Position[] {
 }
 
 export function isLiveQuote(position: Position, quotes: Record<string, LiveQuote>): boolean {
-  return quoteKey(position) in quotes
+  return !position.identityIssue && hasSupportedValuationCurrency(position) && quoteKey(position) in quotes
 }
 
 export function positionValue(position: Position, quotes: Record<string, LiveQuote> = {}): number {
@@ -133,7 +208,7 @@ export function computePortfolioStats(
   positions: Position[],
   quotes: Record<string, LiveQuote> = {},
 ): PortfolioStats {
-  const invested = positions.reduce((sum, position) => sum + position.invested, 0)
+  const invested = positions.filter(hasSupportedValuationCurrency).reduce((sum, position) => sum + position.invested, 0)
   const priced = positions.filter((position) => effectivePrice(position, quotes) != null)
   const pricedInvested = priced.reduce((sum, position) => sum + position.invested, 0)
   const currentValue = priced.reduce((sum, position) => sum + positionValue(position, quotes), 0)

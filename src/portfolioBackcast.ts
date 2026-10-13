@@ -1,7 +1,7 @@
 import type { HistoryPoint } from './live'
 import type { MarketDataAdapter } from './marketData'
 import type { LiveQuote, Position } from './types'
-import { effectivePrice, positionValue } from './valuation'
+import { effectivePrice, hasSupportedValuationCurrency, positionValue } from './valuation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MAX_HOLDINGS = 40
@@ -70,7 +70,7 @@ export async function buildPortfolioBackcast(
 ): Promise<PortfolioBackcast> {
   signal?.throwIfAborted()
   const eligible = positions
-    .filter((position) => position.quantity > 0)
+    .filter((position) => position.quantity > 0 && hasSupportedValuationCurrency(position))
     .sort((a, b) => positionValue(b, quotes) - positionValue(a, quotes))
     .slice(0, MAX_HOLDINGS)
   if (eligible.length === 0) return { points: [], coveragePct: 0, holdingsIncluded: 0, holdingsTotal: positions.length }

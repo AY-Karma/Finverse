@@ -1,5 +1,7 @@
-import type { Folio, Position, Settings } from './types'
+import type { AccountRevision, AccountStatement, Folio, Position, Settings } from './types'
 import { normalizePosition } from './instruments'
+import { workspaceWritesBlocked } from './workspaceStorage'
+import { isMfSchemeMapping } from './fundSchemes'
 
 const FOLIOS_KEY = 'finverse:folios'
 const LEGACY_POSITIONS_KEY = 'finverse:positions'
@@ -21,6 +23,23 @@ function persistedNumber(value: unknown, fallback: number | null = null): number
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
+function persistedDate(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const parsed = Date.parse(`${value}T12:00:00Z`)
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value ? value : null
+}
+
+function sanitizeStatement(value: unknown): AccountStatement | null {
+  if (!isRecord(value)) return null
+  const id = persistedText(value.id)
+  const fileName = persistedText(value.fileName)
+  const statementDate = value.statementDate === null ? null : persistedDate(value.statementDate)
+  const completeness = value.completeness
+  if (!id || !fileName || (value.statementDate !== null && !statementDate)
+    || (completeness !== 'complete' && completeness !== 'partial' && completeness !== 'unknown')) return null
+  return { id, fileName, statementDate, completeness }
+}
+
 function sanitizePosition(value: unknown): Position | null {
   if (!isRecord(value)) return null
   const type = value.type
@@ -33,18 +52,17 @@ function sanitizePosition(value: unknown): Position | null {
   const optionalNumber = (key: string) => persistedNumber(value[key])
   const optionalText = (key: string) => persistedText(value[key]) || undefined
   const providerSymbol = optionalText('providerSymbol')
+  const priceAsOf = persistedDate(value.priceAsOf)
   const exchange = value.exchange === 'NSE' || value.exchange === 'BSE' || value.exchange === 'NASDAQ' || value.exchange === 'NYSE' || value.exchange === 'LSE' || value.exchange === 'OTHER' ? value.exchange : undefined
-  // Older equity imports had no recognizable Type column and were stored as "other";
-  // a listed instrument on a real venue is a stock. Heals previously saved folios.
-  const effectiveType = type === 'other' && (Boolean(providerSymbol) || (exchange != null && exchange !== 'OTHER')) ? 'stock' : type
   return normalizePosition({
     id: persistedText(value.id),
     ticker: persistedText(value.ticker),
     name: persistedText(value.name),
-    type: effectiveType,
+    type,
     quantity,
     buyPrice,
     lastPrice: optionalNumber('lastPrice'),
+    ...(value.priceAsOf === null ? { priceAsOf: null } : priceAsOf ? { priceAsOf } : {}),
     invested,
     amc: optionalText('amc'),
     category: optionalText('category'),
@@ -53,6 +71,9 @@ function sanitizePosition(value: unknown): Position | null {
     source: optionalText('source'),
     returns: optionalNumber('returns'),
     xirr: optionalNumber('xirr'),
+    mfScheme: type === 'mutual-fund' && isMfSchemeMapping(value.mfScheme)
+      ? { code: value.mfScheme.code, name: value.mfScheme.name.trim(), source: value.mfScheme.source }
+      : undefined,
     instrumentKey: optionalText('instrumentKey'),
     isin: optionalText('isin'),
     exchange,
@@ -60,7 +81,21 @@ function sanitizePosition(value: unknown): Position | null {
     currency: value.currency === 'USD' ? 'USD' : value.currency === 'INR' ? 'INR' : undefined,
     sector: optionalText('sector'),
     industry: optionalText('industry'),
+    identityVersion: value.identityVersion === 2 ? 2 : undefined,
+    exchangeSource: value.exchangeSource === 'explicit' || value.exchangeSource === 'inferred' ? value.exchangeSource : undefined,
+    identityIssue: optionalText('identityIssue'),
+    reportedExchange: optionalText('reportedExchange'),
+    reportedCurrency: optionalText('reportedCurrency'),
   })
+}
+
+function sanitizeRevision(value: unknown): AccountRevision | null {
+  if (!isRecord(value) || value.previousRevision !== undefined || !Array.isArray(value.positions) || value.positions.length > MAX_PERSISTED_POSITIONS_PER_FOLIO) return null
+  const statement = sanitizeStatement(value.statement)
+  const importedAt = persistedNumber(value.importedAt)
+  const positions = value.positions.map(sanitizePosition).filter((position): position is Position => position !== null)
+  if (!statement || importedAt == null || importedAt < 0 || positions.length !== value.positions.length) return null
+  return { statement, importedAt, positions }
 }
 
 function sanitizeFolio(value: unknown): Folio | null {
@@ -71,7 +106,18 @@ function sanitizeFolio(value: unknown): Folio | null {
   const id = persistedText(value.id)
   const name = persistedText(value.name)
   if (!id || !name || importedAt == null) return null
-  return { id, name, importedAt, positions }
+  const folio: Folio = { id, name, importedAt, positions }
+  const statement = sanitizeStatement(value.statement)
+  const previousRevision = sanitizeRevision(value.previousRevision)
+  if (statement) folio.statement = statement
+  if (previousRevision) folio.previousRevision = previousRevision
+  const operationAt = persistedNumber(value.operationAt)
+  if (operationAt != null && operationAt >= 0
+    && (value.lastOperation === 'added' || (value.lastOperation === 'updated' && previousRevision))) {
+    folio.lastOperation = value.lastOperation
+    folio.operationAt = operationAt
+  }
+  return folio
 }
 
 /** Validate the persisted boundary so malformed browser data cannot reach React state. */
@@ -81,6 +127,7 @@ export function sanitizeFolios(value: unknown): Folio[] {
 }
 
 export function saveFolios(folios: Folio[]): boolean {
+  if (workspaceWritesBlocked()) return false
   try {
     localStorage.setItem(FOLIOS_KEY, JSON.stringify(folios.map((folio) => ({ ...folio, positions: folio.positions.map(normalizePosition) }))))
     return true
@@ -111,12 +158,14 @@ export function loadFolios(): Folio[] {
   return []
 }
 
-export function saveSettings(settings: Settings): void {
+export function saveSettings(settings: Settings): boolean {
+  if (workspaceWritesBlocked()) return false
   const { currency, allowExternalData, density, accent, customAccent, mode, hideValues } = settings
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency, allowExternalData, density, accent, customAccent, mode, hideValues }))
+    return true
   } catch {
-    /* storage unavailable or full */
+    return false
   }
 }
 

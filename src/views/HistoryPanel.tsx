@@ -3,7 +3,7 @@ import { resolveYahooSymbol } from '../live'
 import type { HistoryPoint } from '../live'
 import { instrumentLabel } from '../instruments'
 import { marketData } from '../marketData'
-import type { Position } from '../types'
+import type { Currency, Position } from '../types'
 import { useStore } from '../useStore'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { HiddenValuesState } from './HiddenValuesState'
@@ -21,9 +21,9 @@ const RANGES: { label: string; days: number }[] = [
 const LINE_COLOR = '#5e6ad2'
 const COST_MARKER_COLOR = '#f2b53c'
 
-function fmtY(v: number): string {
+function fmtY(v: number, currency: Currency = 'INR'): string {
   return Math.abs(v) >= 1000
-    ? v.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+    ? v.toLocaleString(currency === 'USD' ? 'en-US' : 'en-IN', { maximumFractionDigits: 0 })
     : v.toFixed(2)
 }
 
@@ -31,8 +31,35 @@ function norm(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-/** Bare NSE tickers default to `.NS` so a symbol works for any Yahoo lookup.
- *  Strips NSE series suffixes (-EQ, -BE, -SM, -ST, -T, -BL, -Z, -E, -B, -N, -W) before appending .NS. */
+function historyOptions(positions: Position[]) {
+  const labelCounts = new Map<string, number>()
+  for (const position of positions) {
+    const label = norm(instrumentLabel(position))
+    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1)
+  }
+  const options = positions.map((position) => {
+    const label = instrumentLabel(position)
+    if (labelCounts.get(norm(label)) === 1) return { position, label }
+    const details = position.type === 'mutual-fund'
+      ? [position.mfScheme?.name, position.mfScheme && `Scheme ${position.mfScheme.code}`, position.currency ?? 'INR']
+      : [position.exchange, position.currency, position.providerSymbol, position.isin]
+    return { position, label: [label, ...details.filter(Boolean)].join(' · ') }
+  })
+  const descriptionCounts = new Map<string, number>()
+  for (const option of options) {
+    const label = norm(option.label)
+    descriptionCounts.set(label, (descriptionCounts.get(label) ?? 0) + 1)
+  }
+  const holdingNumbers = new Map<string, number>()
+  return options.map((option) => {
+    const label = norm(option.label)
+    if (descriptionCounts.get(label) === 1) return option
+    const number = (holdingNumbers.get(label) ?? 0) + 1
+    holdingNumbers.set(label, number)
+    return { ...option, label: `${option.label} · Holding ${number}` }
+  })
+}
+
 interface Query {
   kind: 'equity' | 'mf'
   label: string
@@ -57,9 +84,10 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
       scope === 'all' ? all : all.filter((p) => (scope === 'mutual' ? p.type === 'mutual-fund' : p.type !== 'mutual-fund'))
     return [...list].sort((a, b) => instrumentLabel(a).localeCompare(instrumentLabel(b)))
   }, [all, scope])
+  const options = useMemo(() => historyOptions(scopeHistoryable), [scopeHistoryable])
 
   const [text, setText] = useState('')
-  const [committed, setCommitted] = useState<string | null>(null)
+  const [committedId, setCommittedId] = useState<string | null>(null)
   const [rangeDays, setRangeDays] = useState(366)
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [points, setPoints] = useState<HistoryPoint[]>([])
@@ -70,13 +98,13 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
 
   // Until the user commits a pick, default to the first holding in scope so the
   // panel shows a chart immediately, and re-defaults when the scope changes.
-  const effective = committed ?? (scopeHistoryable.length ? instrumentLabel(scopeHistoryable[0]) : '')
-  const holding = useMemo(
-    () => scopeHistoryable.find((p) => norm(instrumentLabel(p)) === norm(effective)),
-    [scopeHistoryable, effective],
-  )
+  const selectedOption = options.find(({ position }) => position.id === committedId) ?? options[0]
+  const holding = selectedOption?.position
+  const holdingLabel = selectedOption?.label ?? ''
 
-  const holdingLabel = holding ? instrumentLabel(holding) : ''
+  useEffect(() => {
+    if (committedId && !options.some(({ position }) => position.id === committedId)) setCommittedId(null)
+  }, [committedId, options])
 
   useEffect(() => {
     setText(holdingLabel)
@@ -87,13 +115,13 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
       return holding.type === 'mutual-fund'
         ? {
             kind: 'mf',
-            label: instrumentLabel(holding),
+            label: holdingLabel,
             position: holding,
           }
-        : { kind: 'equity', label: instrumentLabel(holding), position: holding }
+        : { kind: 'equity', label: holdingLabel, position: holding }
     }
     return null
-  }, [holding?.id, holding?.name, holding?.providerSymbol, holding?.ticker, holding?.type])
+  }, [holdingLabel, holding?.id, holding?.name, holding?.providerSymbol, holding?.ticker, holding?.type, holding?.instrumentKey, holding?.mfScheme?.code, holding?.identityIssue, holding?.exchange, holding?.currency, holding?.isin])
 
   const fetchOutcome = async (q: Query, from: Date, to: Date, signal: AbortSignal): Promise<FetchOutcome> => {
     if (q.position) {
@@ -181,16 +209,19 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
   }, [holding, points])
 
   const isMf = query?.kind === 'mf'
+  const nativeCurrency = holding?.currency ?? 'INR'
+  const currencySymbol = nativeCurrency === 'USD' ? '$' : '₹'
+  const formatPrice = (value: number) => `${currencySymbol}${fmtY(value, nativeCurrency)}`
   const sourceLabel = isMf ? `NAV · ${usedLabel}` : usedLabel ? `daily close · ${usedLabel}` : 'daily close · Yahoo NSE'
   const rangeLabel = RANGES.find((r) => r.days === rangeDays)?.label.toLowerCase() ?? 'range'
 
   const commit = () => {
     const v = text.trim()
     if (!v) return
-    const matched = scopeHistoryable.find((p) => norm(instrumentLabel(p)) === norm(v))
+    const matched = options.find((option) => norm(option.label) === norm(v))
     if (!matched) return
-    setText(instrumentLabel(matched))
-    setCommitted(instrumentLabel(matched))
+    setText(matched.label)
+    setCommittedId(matched.position.id)
     setRetryAttempt((attempt) => attempt + 1)
     inputRef.current?.focus()
   }
@@ -217,12 +248,12 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
               aria-label="Holding from your portfolio"
             />
             <datalist id="history-symbols">
-              {scopeHistoryable.map((p) => (
-                <option key={p.id} value={instrumentLabel(p)} />
+              {options.map(({ position, label }) => (
+                <option key={position.id} value={label} />
               ))}
             </datalist>
             <button className="btn btn--primary btn--small history-track" onClick={commit} disabled={!text.trim()}>
-              {error && norm(text) === norm(effective) ? 'Retry' : 'Track'}
+              {error && norm(text) === norm(holdingLabel) ? 'Retry' : 'Track'}
             </button>
           </div>
           <div className="history-range" role="group" aria-label="Date range">
@@ -256,9 +287,9 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                   <div className="history-summary-main">
                     <span className="history-name sym" title={query.label}>{query.label}</span>
                     {rangeChange && <div className="history-quote">
-                      <span className="history-last"><small>₹</small>{fmtY(rangeChange.last)}</span>
+                      <span className="history-last"><small>{currencySymbol}</small>{fmtY(rangeChange.last, nativeCurrency)}</span>
                       <span className={`history-delta ${rangeChange.pct >= 0 ? 'up' : 'down'}`}>
-                        {rangeChange.change >= 0 ? '+' : '-'}₹{fmtY(Math.abs(rangeChange.change))}
+                        {rangeChange.change >= 0 ? '+' : '-'}{formatPrice(Math.abs(rangeChange.change))}
                         <span>({rangeChange.pct >= 0 ? '+' : ''}{rangeChange.pct.toFixed(2)}%)</span>
                         <small>{rangeLabel}</small>
                       </span>
@@ -274,15 +305,15 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                         key={`${holding?.id ?? query.label}-${rangeDays}`}
                         rows={chartData}
                         lines={[{ key: 'close', label: isMf ? 'NAV' : 'Close', color: LINE_COLOR }]}
-                        valueFormatter={fmtY}
-                        yAxisLabel={isMf ? 'NAV' : 'Price'}
+                        valueFormatter={formatPrice}
+                        yAxisLabel={`${isMf ? 'NAV' : 'Price'} (${nativeCurrency})`}
                         appearance="price"
                         markers={costComparison ? [{
                           at: costComparison.markerAt,
                           value: costComparison.buy,
                           color: COST_MARKER_COLOR,
                           label: 'Avg cost',
-                          description: `Average cost: ${fmtY(costComparison.buy)}. Positioned by the closest historical close for reference, not a purchase date.`,
+                          description: `Average cost: ${formatPrice(costComparison.buy)}. Positioned by the closest historical close for reference, not a purchase date.`,
                         }] : undefined}
                       />
                     ) : (
@@ -305,7 +336,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                       The latest {isMf ? 'NAV' : 'close'} for <strong>{query.label}</strong> is{' '}
                       <span className="history-purchase-change">{Math.abs(costComparison.pct).toFixed(1)}%</span>{' '}
                       {costComparison.pct >= 0 ? 'above' : 'below'} your average cost.{' '}
-                      {fmtY(costComparison.buy)} → <span className="history-current-price">{fmtY(costComparison.last)}</span>.{' '}
+                      {formatPrice(costComparison.buy)} → <span className="history-current-price">{formatPrice(costComparison.last)}</span>.{' '}
                       The Avg cost marker uses the closest historical close for placement, not a purchase date.
                     </span>
                   </div>
