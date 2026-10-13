@@ -19,7 +19,7 @@ import type { ImportRowIssue } from './spreadsheet'
 import { createWorkspaceArchive } from './workspaceArchive'
 import { canConfirmFundScheme, type FundSchemeCandidate } from './fundSchemes'
 import { normalizePosition } from './instruments'
-import { combinedPositionMembers, hasSupportedValuationCurrency, importedPriceWarnings } from './valuation'
+import { combinedPositionMembers, hasSupportedValuationCurrency } from './valuation'
 import { loadMonitorState } from './monitor'
 import { remapMonitorReferences } from './workspaceReferences'
 import { captureWorkspaceRecords, workspaceWritesBlocked, writeWorkspaceRecords } from './workspaceStorage'
@@ -174,7 +174,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
   const rawPositions = snapshot.rawPositions
   const positions = snapshot.positions
-  const priceWarnings = useMemo(() => [...new Set(importedPriceWarnings(folios))], [folios])
   const positionsRef = useRef(positions)
   positionsRef.current = positions
   const folioRefreshKey = useMemo(
@@ -526,7 +525,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     {!!snapshot.unsupportedCurrencyCount && <div className="folio-save-warning" role="status"><span>Partial INR totals. {snapshot.unsupportedCurrencyCount} holding{snapshot.unsupportedCurrencyCount === 1 ? '' : 's'} in unsupported native currencies excluded. Native currency conversion is not supported; original amounts remain in exports.</span></div>}
     {workspaceChanged && <div className="folio-save-warning" role="alert"><span>This workspace changed in another tab. Reload before saving more changes.</span><button type="button" onClick={() => window.location.reload()}>Reload workspace</button></div>}
     {settingsSaveFailed && <div className="folio-save-warning" role="alert"><span>Preferences could not be saved. They will only last in this session. A workspace backup includes the current preferences.</span></div>}
-    {priceWarnings.length > 0 && <details className="workspace-data-notice hint"><summary>Imported-price dates or conflicts need review · {priceWarnings.length}</summary><p>Provider quotes take precedence. Imported fallbacks use the latest dated statement with a usable price, or import order when dates are unknown.</p><ul>{priceWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
     {workspaceError && <div className="folio-save-warning" role="alert"><span>{workspaceError}</span><button type="button" onClick={() => setWorkspaceError('')}>Dismiss</button></div>}
     {folioSaveFailed && <div className="folio-save-warning" role="alert">
       <span>Portfolio changes could not be saved in this browser. Export a backup before closing this tab.</span>

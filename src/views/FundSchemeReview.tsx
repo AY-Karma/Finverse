@@ -12,6 +12,7 @@ function supportsFundNav(fund: Position): boolean {
 export function FundSchemeReview() {
   const { positions, settings, confirmFundScheme } = useStore()
   const funds = positions.filter((position) => position.type === 'mutual-fund')
+  const reviewCount = funds.filter((fund) => !fund.mfScheme).length
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [review, setReview] = useState<SchemeReview | null>(null)
   const [code, setCode] = useState('')
@@ -66,8 +67,8 @@ export function FundSchemeReview() {
 
   if (!funds.length) return null
   const candidate = review?.candidates.find((item) => String(item.schemeCode) === code)
-  return <details className="workspace-recovery fund-review">
-    <summary>Review mutual-fund schemes · {funds.filter((fund) => !fund.mfScheme).length} need confirmation</summary>
+  return <details className={`workspace-recovery fund-review${reviewCount > 0 ? ' review-required' : ''}`}>
+    <summary>Review mutual-fund schemes · {reviewCount} need confirmation</summary>
     <p className="hint">Unconfirmed funds keep their imported values. Confirm the fund, Direct or Regular plan, and Growth or IDCW option before fetching NAV or history.</p>
     {!settings.allowExternalData && <p className="hint">Enable external market data in Settings to search scheme names. No search is sent while it is off.</p>}
     {funds.map((fund) => <div className="folio-row" key={fund.id}>

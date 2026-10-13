@@ -74,3 +74,17 @@ it('closes a provider confirmation when the holding currency changes after the s
     expect(container.textContent).toContain('MFAPI supports INR mutual funds only')
   } finally { await act(async () => root.unmount()) }
 })
+
+it('highlights scheme review only while funds need confirmation', async () => {
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<FundSchemeReview />))
+    expect(container.querySelector('details')!.classList.contains('review-required')).toBe(true)
+    expect(container.querySelector('summary')!.textContent).toContain('1 need confirmation')
+    state.positions = [{ ...state.positions[0], mfScheme: { code: 2, name: 'Example Equity Fund Direct IDCW', source: 'confirmed' } }]
+    await act(async () => root.render(<FundSchemeReview />))
+    expect(container.querySelector('details')!.classList.contains('review-required')).toBe(false)
+    expect(container.querySelector('summary')!.textContent).toContain('0 need confirmation')
+  } finally { await act(async () => root.unmount()) }
+})
