@@ -3943,6 +3943,7 @@ details.workspace-recovery > summary {
   .main { padding: var(--sp-lg); }
   .page-head { align-items: flex-start; flex-direction: column; }
   .page-sub { text-align: left; }
+  .daily-brief { grid-template-columns: minmax(0, 1fr); gap: var(--sp-lg); }
   .overview-sub { justify-items: stretch; }
   .overview-actions { justify-content: space-between; gap: 8px; }
   .settings-shell { grid-template-columns: minmax(0, 1fr); min-height: 0; }

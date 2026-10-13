@@ -234,18 +234,18 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
     .sort((a, b) => b.pct - a.pct)
   const best = rankedPerformers[0] ?? null
   const worst = rankedPerformers[rankedPerformers.length - 1] ?? null
-  const dailyMove = snapshot.dailyChange
   const dataLabels = portfolioDataLabels(snapshot)
+  const dailyMove = dataLabels.sessionValue
   const dailyMoveText = dailyMove == null
     ? '—'
     : `${dailyMove >= 0 ? '+' : ''}${formatCurrency(dailyMove, currency, fxRate?.usdInr)}`
   const dailyMoveDirection = dailyMove == null || dailyMove === 0 ? '' : dailyMove > 0 ? 'up' : 'down'
   const dailyMoveArrow = dailyMove == null || hideValues ? '' : dailyMove > 0 ? '↑' : dailyMove < 0 ? '↓' : '→'
   const sessionSummary = dailyMove == null
-    ? snapshot.dailyChangeCount ? 'Portfolio move unavailable.' : 'Waiting for change amounts.'
+    ? 'Waiting for change amounts.'
     : currency === 'USD' && !fxRate?.usdInr ? 'Session move unavailable in USD.'
-    : dailyMove === 0 ? 'Your portfolio is unchanged in this session.'
-    : `Your portfolio ${dailyMove > 0 ? 'gained' : 'lost'} ${formatCurrency(Math.abs(dailyMove), currency, fxRate?.usdInr)} in this session.`
+    : dailyMove === 0 ? `${dataLabels.isPartialSession ? 'Reporting holdings are' : 'Your portfolio is'} unchanged in this session.`
+    : `${dataLabels.isPartialSession ? 'Reporting holdings' : 'Your portfolio'} ${dailyMove > 0 ? 'gained' : 'lost'} ${formatCurrency(Math.abs(dailyMove), currency, fxRate?.usdInr)} in this session.`
 
   const toggleSort = (field: SortField) => {
     setSort((prev) => {
@@ -358,7 +358,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
             {stats.valuationComplete ? 'Current value' : 'Priced holdings value'}
           </div>
           <div className="score-value">{mask(stats.pricedCount ? formatCurrency(stats.currentValue, currency, fxRate?.usdInr) : 'Unpriced')}</div>
-          {dailyMove != null && (
+          {snapshot.dailyChange != null && (
             <div className="score-foot score-move">
               <span>{dataLabels.sessionLabel}</span>
               <span
@@ -413,7 +413,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
         <div className="daily-brief-copy">
           <span className="page-eyebrow">Session read</span>
           <strong>{hideValues ? 'Session movement hidden.' : sessionSummary}</strong>
-          <span className="hint">Open Insights to understand more.</span>
+          <span className="hint">{dataLabels.isPartialSession ? dataLabels.coverageLabel : 'Open Insights to understand more.'}</span>
         </div>
         <div className="daily-brief-stat">
           <span className="score-label">{dataLabels.sessionLabel}</span>

@@ -41,6 +41,8 @@ export interface InvestmentSnapshot {
   pnlPct: number
   dailyChange: number | null
   dailyChangePct: number | null
+  /** Subtotal from holdings reporting a change on the latest session date. */
+  reportedDailyChange: number | null
   /** Provider date in IST. Aggregate movement requires every holding on this date. */
   dailyChangeDate: string | null
   dailyChangeCount: number
@@ -174,8 +176,9 @@ export const investmentWorkspace: InvestmentWorkspace = {
     const contributions = buildContributions(positions, quotes, stats.currentValue, dailyChangeDate)
     const dailyChangeValues = contributions.map((item) => item.dailyChange).filter((value): value is number => value != null)
     const dailyChangeCount = dailyChangeValues.length
+    const reportedDailyChange = dailyChangeCount > 0 ? dailyChangeValues.reduce((sum, value) => sum + value, 0) : null
     const dailyChange = positions.length > 0 && dailyChangeCount === positions.length
-      ? dailyChangeValues.reduce((sum, value) => sum + value, 0) : null
+      ? reportedDailyChange : null
     const previousValue = dailyChange == null ? null : stats.currentValue - dailyChange
     return {
       folios: input.folios,
@@ -194,6 +197,7 @@ export const investmentWorkspace: InvestmentWorkspace = {
       pnlPct: stats.pnlPct,
       dailyChange,
       dailyChangePct: dailyChange != null && previousValue != null && previousValue > 0 ? (dailyChange / previousValue) * 100 : null,
+      reportedDailyChange,
       dailyChangeDate,
       dailyChangeCount,
       contributions,

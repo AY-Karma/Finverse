@@ -204,12 +204,18 @@ async function fetchNavUncached(code: number, signal?: AbortSignal): Promise<Liv
     const nav = Number(latest?.nav)
     const date = navDate(latest?.date)
     if (!Number.isFinite(nav) || nav <= 0 || !date) return null
+    const history = await fetchNavHistoryUncached(code, adjacentDay(date, -31), date, signal ?? AbortSignal.timeout(12000))
+    const previous = history.filter((point) => point.date < date).at(-1)
+    const change = previous ? nav - previous.close : undefined
+    const changePct = previous && change != null ? change / previous.close * 100 : undefined
     const fetchedAt = Date.now()
     return {
       price: nav,
       at: Date.parse(`${date}T00:00:00+05:30`),
       fetchedAt,
       source: 'nav',
+      ...(change != null ? { change } : {}),
+      ...(changePct != null && Number.isFinite(changePct) ? { changePct } : {}),
     }
   } catch {
     return null
@@ -217,8 +223,8 @@ async function fetchNavUncached(code: number, signal?: AbortSignal): Promise<Liv
 }
 
 // ---------------------------------------------------------------------------
-// Orchestration: refresh all holdings, reusing previous quotes on failure and
-// fetching MF NAVs at most once per IST day.
+// Refresh all holdings, retaining previous quotes on failure.
+// Complete current-day NAVs are reused; older publications may still update.
 // ---------------------------------------------------------------------------
 
 export interface LiveQuotesResult {
@@ -305,6 +311,8 @@ export async function fetchLiveQuotes(
       if (
         existing &&
         existing.source === 'nav' &&
+        Number.isFinite(existing.change) &&
+        istDate(new Date(existing.at)) === today &&
         istDate(new Date(existing.fetchedAt ?? existing.at)) === today
       ) {
         outcomes.push({ key, status: 'skipped' })

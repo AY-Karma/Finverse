@@ -61,10 +61,16 @@ describe('Insights privacy', () => {
     const move = container.querySelector('.insight-kpi')!
     expect(move.textContent).toContain('01 Oct 2026')
     expect(move.textContent).toContain('1 of 2 holdings')
-    expect(move.querySelector('strong')?.textContent).toBe('Unavailable')
+    expect(move.querySelector('strong')?.textContent).toBe('+₹10.00')
+    expect(move.textContent).toContain('Partial')
     expect(move.textContent).not.toContain('10.00%')
     expect(panel('Latest price movers').textContent).toContain('01 Oct 2026')
     expect(panel('Latest price movers').querySelectorAll('.contribution-fill')).toHaveLength(1)
+    state.settings = { ...loadSettings(), allowExternalData: true, hideValues: true }
+    await act(async () => { root.render(<InsightsView onRequestImport={() => {}} />) })
+    expect(move.querySelector('strong')?.textContent).toBe('••••••')
+    expect(move.querySelector('.up, .down')).toBeNull()
+    expect(move.textContent).not.toMatch(/₹|10\.00%/)
   })
 
   it('removes allocation and mover identities, colours, and proportions while masked', async () => {

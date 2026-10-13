@@ -9,14 +9,19 @@ export function portfolioDataLabels(snapshot: InvestmentSnapshot) {
   const total = snapshot.positions.length
   const date = snapshot.dailyChangeDate
     ? DATE_FORMATTER.format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`)) : null
-  const sessionLabel = date ? `Latest session · ${date}` : 'Session move'
+  const sessionValue = snapshot.dailyChange ?? snapshot.reportedDailyChange
+  const isPartialSession = snapshot.dailyChange == null && sessionValue != null
+  const sessionLabel = `${date ? `Latest session · ${date}` : 'Session move'}${isPartialSession ? ' · Partial' : ''}`
+  const pendingFunds = snapshot.contributions.filter((holding) => holding.type === 'mutual-fund' && holding.dailyChange == null).length
   const coverageLabel = snapshot.dailyChangeCount
-    ? `${snapshot.dailyChangeCount} of ${total} holdings report changes${snapshot.dailyChange == null ? ' · Portfolio move unavailable' : ''}`
+    ? isPartialSession
+      ? `${snapshot.dailyChangeCount} of ${total} holdings included${pendingFunds ? ` · ${pendingFunds} fund${pendingFunds === 1 ? '' : 's'} awaiting session updates` : ' · Remaining updates pending'}`
+      : `${snapshot.dailyChangeCount} of ${total} holdings report changes`
     : 'No change amounts reported'
 
   if (snapshot.quotedCount === 0) {
     return {
-      sessionLabel, coverageLabel,
+      sessionLabel, coverageLabel, sessionValue, isPartialSession,
       healthLabel: snapshot.pricedCount ? 'Imported only' : 'No prices',
       healthDetail: `${snapshot.pricedCount} of ${total} holdings have imported prices · Freshness unknown`,
     }
@@ -26,7 +31,7 @@ export function portfolioDataLabels(snapshot: InvestmentSnapshot) {
   const oldest = DATE_FORMATTER.format(new Date(Math.min(...times)))
   const latest = DATE_FORMATTER.format(new Date(Math.max(...times)))
   return {
-    sessionLabel, coverageLabel,
+    sessionLabel, coverageLabel, sessionValue, isPartialSession,
     healthLabel: snapshot.quotedCount < total ? 'Partial quotes' : snapshot.staleQuotes > 0 ? 'Older quotes' : 'Quoted',
     healthDetail: `${snapshot.quotedCount} of ${total} holdings quoted · As of ${oldest === latest ? latest : `${oldest} to ${latest}`}${snapshot.staleQuotes ? ` · ${snapshot.staleQuotes} older than 24h` : ''}`,
   }

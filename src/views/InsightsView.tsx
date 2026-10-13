@@ -202,7 +202,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       <div className="insight-kpis enter d1">
         <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
           <span className="score-label insight-kpi-label">{dataLabels.sessionLabel}<i className="insight-kpi-chevron" aria-hidden="true" /></span>
-          <strong className={hide || snapshot.dailyChange == null ? '' : snapshot.dailyChange >= 0 ? 'up' : 'down'}>{snapshot.dailyChange == null ? 'Unavailable' : mask(`${snapshot.dailyChange >= 0 ? '+' : ''}${formatCurrency(snapshot.dailyChange, currency, snapshot.fxRate?.usdInr)}`)}</strong>
+          <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue, currency, snapshot.fxRate?.usdInr)}`)}</strong>
           <span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span>
         </button>
         <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">

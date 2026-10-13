@@ -20,6 +20,7 @@ describe('quote coverage and session movement', () => {
     expect(snapshot.dailyChange).toBeNull()
     expect(snapshot.dailyChangePct).toBeNull()
     expect(snapshot.dailyChangeCount).toBe(1)
+    expect(snapshot).toHaveProperty('reportedDailyChange', 20)
     expect(snapshot.dailyChangeDate).toBe('2026-10-01')
     expect(snapshot.quotedCount).toBe(1)
   })
@@ -27,6 +28,7 @@ describe('quote coverage and session movement', () => {
   it('calculates a complete same-session change from quantities and previous values', () => {
     const snapshot = read({ [aKey]: quote(), [bKey]: quote({ price: 95, change: -5 }) })
     expect(snapshot.dailyChange).toBe(10)
+    expect(snapshot).toHaveProperty('reportedDailyChange', 10)
     expect(snapshot.dailyChangePct).toBe(2.5)
     expect(snapshot.dailyChangeCount).toBe(2)
     expect(snapshot.dailyChangeDate).toBe('2026-10-01')
@@ -37,6 +39,7 @@ describe('quote coverage and session movement', () => {
     expect(snapshot.dailyChange).toBeNull()
     expect(snapshot.dailyChangePct).toBeNull()
     expect(snapshot.dailyChangeCount).toBe(1)
+    expect(snapshot).toHaveProperty('reportedDailyChange', 20)
     expect(snapshot.contributions.find((item) => item.symbol === 'B')?.dailyPriceChange).toBeNull()
   })
 
@@ -47,6 +50,7 @@ describe('quote coverage and session movement', () => {
     })
     expect(snapshot.dailyChangeDate).toBe('2026-10-02')
     expect(snapshot.dailyChange).toBe(0)
+    expect(snapshot.reportedDailyChange).toBe(0)
     expect(snapshot.dailyChangePct).toBe(0)
   })
 
@@ -55,6 +59,7 @@ describe('quote coverage and session movement', () => {
     expect(snapshot.staleQuotes).toBe(0)
     expect(snapshot.lastUpdatedAt).toBeNull()
     expect(snapshot.quotedCount).toBe(0)
+    expect(snapshot.reportedDailyChange).toBeNull()
     expect(snapshot.quotes).toEqual({})
   })
 

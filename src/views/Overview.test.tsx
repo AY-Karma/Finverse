@@ -164,6 +164,7 @@ describe('overview valuation and visible work', () => {
     const positions: Position[] = ['A', 'B'].map((ticker) => ({
       id: ticker, ticker, name: ticker, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110,
     }))
+    positions[1] = { ...positions[1], type: 'mutual-fund', mfScheme: { code: 123, name: 'B', source: 'confirmed' } }
     const folios = [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }]
     const quotes = { [quoteKey(positions[0])]: { price: 110, change: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' as const } }
     const snapshot = investmentWorkspace.readSnapshot({ folios, quotes, fxRate: null })
@@ -174,11 +175,16 @@ describe('overview valuation and visible work', () => {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       expect(container.querySelector('.current-value-move')).toBeNull()
       const brief = container.querySelector('.daily-brief')!
-      expect(brief.textContent).toContain('Portfolio move unavailable')
-      expect(brief.querySelector('.daily-brief-copy .hint')?.textContent).toBe('Open Insights to understand more.')
+      expect(brief.textContent).toContain('Reporting holdings gained ₹10.00')
+      expect(brief.querySelector('.daily-brief-copy .hint')?.textContent).toContain('1 of 2 holdings included')
+      expect(brief.textContent).toContain('1 fund awaiting session updates')
       expect(brief.textContent).toContain('01 Oct 2026')
-      expect(brief.textContent).not.toMatch(/tailwind|Today|gained/)
-      expect(brief.querySelector('.daily-brief-stat strong')?.textContent).toBe('Unavailable')
+      expect(brief.textContent).not.toMatch(/tailwind|Today|Your portfolio gained/)
+      expect(brief.querySelector('.daily-brief-stat strong')?.textContent).toBe('+₹10.00')
+      state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(brief.querySelector('.daily-brief-stat strong')?.textContent).toBe('••••••')
+      expect(brief.textContent).not.toMatch(/gained|lost|₹/)
     } finally { await act(async () => root.unmount()) }
   })
 })
