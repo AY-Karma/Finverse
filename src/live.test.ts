@@ -413,11 +413,11 @@ describe('market data client', () => {
   it('fetches same-ticker NSE and BSE listings without sharing their quotes', async () => {
     const holdings = [
       normalizePosition({ ...position('SAME'), id: 'nse', exchange: 'NSE', providerSymbol: 'SAME.NS', identityVersion: 2 }),
-      normalizePosition({ ...position('SAME'), id: 'bse', exchange: 'BSE', providerSymbol: '500001.BO', identityVersion: 2 }),
+      normalizePosition({ ...position('SAME'), id: 'bse', exchange: 'BSE', providerSymbol: 'SAME.BO', identityVersion: 2 }),
     ]
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ fetchedAt: '2026-09-23T06:00:00Z', quotes: [
       { symbol: 'SAME.NS', price: 100, change: 0, changePct: 0, marketTime: '2026-09-23T06:00:00Z', source: 'yahoo' },
-      { symbol: '500001.BO', price: 200, change: 0, changePct: 0, marketTime: '2026-09-23T06:00:00Z', source: 'yahoo' },
+      { symbol: 'SAME.BO', price: 200, change: 0, changePct: 0, marketTime: '2026-09-23T06:00:00Z', source: 'yahoo' },
     ] })))
     const result = await fetchLiveQuotes(holdings, {})
     expect(result.updated).toBe(2)
@@ -425,13 +425,17 @@ describe('market data client', () => {
     expect(result.quotes[quoteKey(holdings[1])].price).toBe(200)
   })
 
-  it('keeps unresolved venues on imported values without requesting guessed symbols', async () => {
-    const holding = normalizePosition({ ...position('SAME'), exchange: 'OTHER', reportedExchange: 'UNSUPPORTED', lastPrice: 120 })
+  it.each([
+    { ...position('SAME'), exchange: 'OTHER' as const, reportedExchange: 'UNSUPPORTED', lastPrice: 120 },
+    { ...position('500112'), exchange: 'BSE' as const, providerSymbol: '500112.BO', lastPrice: 120, identityVersion: 2 as const },
+  ])('keeps unresolved mappings on imported values without requesting guessed symbols: $ticker', async (position) => {
+    const holding = normalizePosition(position)
     const fetcher = vi.fn<typeof fetch>()
     vi.stubGlobal('fetch', fetcher)
     expect((await fetchLiveQuotes([holding], { [quoteKey(holding)]: { price: 999, at: 1, source: 'yahoo' } })).quotes).toEqual({})
     await expect(marketData.history(holding, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z'))).resolves.toEqual([])
     expect(fetcher).not.toHaveBeenCalled()
+    expect(investmentWorkspace.readSnapshot({ folios: [{ id: 'account', name: 'Account', importedAt: 1, positions: [holding] }], quotes: {}, fxRate: null })).toMatchObject({ currentValue: 120, quotedCount: 0 })
   })
 
   it('isolates listing history from legacy symbol caches and conflicting ISIN metadata', async () => {

@@ -5,25 +5,26 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { investmentWorkspace } from '../investmentWorkspace'
 import { loadSettings } from '../store'
 import type { Position, PortfolioSnapshot } from '../types'
-import type { PortfolioBackcast } from '../portfolioBackcast'
+import type { PortfolioBackcastHistory } from '../portfolioBackcast'
 import type { useStore } from '../useStore'
+import { quoteKey } from '../valuation'
 import { InsightsView } from './InsightsView'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn() }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
-vi.mock('../portfolioBackcast', () => ({ buildPortfolioBackcast: state.build }))
+vi.mock('../portfolioBackcast', async (original) => ({ ...await original<typeof import('../portfolioBackcast')>(), buildPortfolioBackcast: state.build }))
 vi.mock('../marketData', async (original) => ({ ...await original<typeof import('../marketData')>(), marketData: { benchmarkHistory: state.benchmark } }))
 vi.mock('./InteractiveTrendChart', () => ({ InteractiveTrendChart: ({ lines }: { lines: { key: string }[] }) => <div data-chart={lines.map((line) => line.key).join(',')} /> }))
 
 let root: Root | undefined
 let container: HTMLDivElement
 
-async function renderInsights(backcast: PortfolioBackcast['points'], history: PortfolioSnapshot[] = []) {
+async function renderInsights(backcast: PortfolioBackcastHistory['points'], history: PortfolioSnapshot[] = []) {
   const positions: Position[] = [{ id: 'a', ticker: 'AAA', name: 'AAA', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
   const folios = [{ id: 'test', name: 'Test', importedAt: 0, positions }]
   state.store = { snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null, history }), settings: { ...loadSettings(), allowExternalData: true } } as ReturnType<typeof useStore>
-  state.build.mockResolvedValue({ points: backcast, coveragePct: 100, holdingsIncluded: 1, holdingsTotal: 1 })
+  state.build.mockResolvedValue({ points: backcast, coveredPositions: positions, holdingsIncluded: 1, holdingsTotal: 1 })
   state.benchmark.mockResolvedValue([{ date: '2026-01-01', close: 100 }, { date: '2026-03-01', close: 100 }])
   container = document.createElement('div')
   root = createRoot(container)
@@ -36,12 +37,34 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
+it('updates delayed and refreshed quote analytics in the same mounted view without refetching history', async () => {
+  state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 110 }])
+  await renderInsights([200, 220].map((value, index) => ({ at: Date.parse(`2026-09-${28 + index}T00:00:00+05:30`), value, invested: 100 })))
+  const latestValue = () => container.querySelector('.insight-chart-metric--value strong')?.textContent
+  expect(latestValue()).toBe('₹220.00')
+  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
+  expect(container.textContent).toContain('Showing the shared historical close from 29 Sept 2026 IST')
+  const position = state.store.snapshot.positions[0]
+  state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 240, at: Date.parse('2026-09-30T15:30:00+05:30'), source: 'yahoo' } } }
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(latestValue()).toBe('₹240.00')
+  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+20.0%')
+  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('—')
+  expect(container.textContent).toContain('Provider prices observed on 30 Sept 2026, 15:30 IST')
+  state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 180, at: Date.parse('2026-10-01T15:30:00+05:30'), source: 'yahoo' } } }
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(latestValue()).toBe('₹180.00')
+  expect(container.querySelector('#drawdown-kpi strong')?.textContent).toBe('-18.2%')
+  expect(state.build).toHaveBeenCalledTimes(1)
+  expect(state.benchmark).toHaveBeenCalledTimes(1)
+})
+
 it('starts benchmark history while backcast is pending and cancels both when external data is disabled', async () => {
-  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcast>(() => {}))
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcastHistory>(() => {}))
   await renderInsights([])
   expect(state.benchmark).toHaveBeenCalledTimes(1)
   const benchmarkSignal = state.benchmark.mock.calls[0][3] as AbortSignal
-  const backcastSignal = state.build.mock.calls[0][4] as AbortSignal
+  const backcastSignal = state.build.mock.calls[0][3] as AbortSignal
   expect(benchmarkSignal.aborted).toBe(false)
   expect(backcastSignal.aborted).toBe(false)
   state.store.settings.allowExternalData = false
@@ -126,7 +149,7 @@ it('explains unavailable drawdown without claiming completed requests are loadin
 })
 
 it('clears the drawdown loading state when external data is switched off', async () => {
-  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcast>(() => {}))
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcastHistory>(() => {}))
   await renderInsights([])
   await act(async () => container.querySelector<HTMLButtonElement>('#drawdown-kpi')!.click())
   expect(container.querySelector('#drawdown-detail')?.textContent).toContain('Historical prices are loading')

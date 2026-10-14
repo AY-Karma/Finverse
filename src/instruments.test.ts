@@ -1,7 +1,7 @@
 import './test/storage'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
-import { listingIdentity, migrateFolioIdentities, normalizePosition } from './instruments'
+import { migrateFolioIdentities, normalizePosition } from './instruments'
 import { parseSpreadsheetWithDiagnostics } from './spreadsheet'
 import { exportPortfolioCsv, investmentWorkspace } from './investmentWorkspace'
 import { loadFolios, saveFolios } from './store'
@@ -22,22 +22,32 @@ function parseRows(rows: unknown[][]): Position[] {
 }
 
 describe('listing identity import', () => {
-  it('preserves the audited BSE scrip and Financials sector through parsing, persistence and CSV reimport', () => {
+  it('keeps numeric BSE mappings under review through parsing, persistence and CSV reimport', () => {
     const [holding] = parseRows([
       ['Symbol', 'Quantity', 'Average Price', 'Last Price', 'Exchange', 'Sector', 'Industry', 'Currency', 'Provider Symbol', 'ISIN'],
-      ['500112', 10, 100, 120, 'BSE', 'Financials', 'Banking', 'INR', '500112.BO', 'INE000000001'],
+      ['500112', 10, 100, 120, 'BSE', 'Financials', 'Banking', 'INR', '', 'INE000000001'],
     ])
     expect(holding).toMatchObject({ ticker: '500112', exchange: 'BSE', exchangeSource: 'explicit', currency: 'INR', providerSymbol: '500112.BO', sector: 'Financials', industry: 'Banking', identityVersion: 2 })
-    expect(holding.identityIssue).toBeUndefined()
-    expect(resolveYahooSymbol(holding)).toBe('500112.BO')
+    expect(holding.identityIssue).toContain('numeric BSE')
+    expect(resolveYahooSymbol(holding)).toBeNull()
     const folios = [{ id: 'account', name: 'Account', importedAt: 1, positions: [holding] }]
     expect(saveFolios(folios)).toBe(true)
     expect(loadFolios()[0].positions[0]).toMatchObject(holding)
+    localStorage.setItem('finverse:folios', JSON.stringify([{ ...folios[0], positions: [{ ...holding, identityIssue: undefined }] }]))
+    expect(loadFolios()[0].positions[0].identityIssue).toContain('numeric BSE')
     const csv = exportPortfolioCsv([holding])
     const [reimported] = parseSpreadsheetWithDiagnostics(new TextEncoder().encode(csv).buffer as ArrayBuffer).positions
     expect(reimported).toMatchObject({ exchange: 'BSE', exchangeSource: 'explicit', providerSymbol: '500112.BO', sector: 'Financials', industry: 'Banking', isin: holding.isin, currency: 'INR' })
-    expect(listingIdentity(reimported)).toBe(listingIdentity(holding))
+    expect(reimported.identityIssue).toContain('numeric BSE')
+    expect(resolveYahooSymbol(reimported)).toBeNull()
     expect(investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }).sectors[0]).toMatchObject({ label: 'Financials', value: 1200 })
+    const [mapped] = parseRows([
+      ['Symbol', 'Quantity', 'Average Price', 'Exchange', 'Provider Symbol'],
+      ['500112', 10, 100, 'BSE', 'SBIN.BO'],
+    ])
+    expect(mapped).toMatchObject({ ticker: '500112', exchange: 'BSE', currency: 'INR', providerSymbol: 'SBIN.BO' })
+    expect(mapped.identityIssue).toBeUndefined()
+    expect(resolveYahooSymbol(mapped)).toBe('SBIN.BO')
   })
 
   it('retains unsupported venue and currency text for review without requesting NSE prices', () => {
@@ -67,7 +77,7 @@ describe('listing identity import', () => {
   it('keeps incompatible listings and missing identities separate despite old shared equity keys', () => {
     const holdings = [
       normalizePosition(position({ id: 'nse', exchange: 'NSE', isin: 'INE000000001', instrumentKey: 'EQ:SAME' })),
-      normalizePosition(position({ id: 'bse', exchange: 'BSE', providerSymbol: '500001.BO', isin: 'INE000000001', instrumentKey: 'EQ:SAME' })),
+      normalizePosition(position({ id: 'bse', exchange: 'BSE', providerSymbol: 'SAME.BO', isin: 'INE000000001', instrumentKey: 'EQ:SAME' })),
       normalizePosition(position({ id: 'isin-conflict', exchange: 'NSE', isin: 'INE000000002', instrumentKey: 'EQ:SAME' })),
       normalizePosition(position({ id: 'provider-conflict', exchange: 'NSE', providerSymbol: 'DIFFERENT.NS', instrumentKey: 'EQ:SAME' })),
     ]
