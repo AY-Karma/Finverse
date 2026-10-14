@@ -140,11 +140,12 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   }, [backcastDays, backcastKey, benchmarkReload, selectedBenchmark.symbol, settings.allowExternalData])
 
   const benchmarkSeries = useMemo<BenchmarkPoint[]>(() => {
-    const history = analyticsHistory
-    if (history.length < 2) return []
-    const firstPortfolio = history[0].value
+    if (analyticsHistory.length < 2) return []
     const observedDate = (at: number) => new Date(at + 5.5 * 3600000).toISOString().slice(0, 10)
     const benchmarkCloses = new Map(benchmarkPoints.map((point) => [point.date, point.close]))
+    const sharedStart = analyticsHistory.findIndex((point) => benchmarkCloses.has(observedDate(point.at)))
+    const history = sharedStart > 0 ? analyticsHistory.slice(sharedStart) : analyticsHistory
+    const firstPortfolio = history[0].value
     const firstBenchmark = benchmarkCloses.get(observedDate(history[0].at))
     return downsampleSeries(history, MAX_CHART_POINTS).map((point) => {
       const matching = benchmarkCloses.get(observedDate(point.at))

@@ -147,7 +147,7 @@ export function applyPortfolioQuoteOverlay(
   const from = Math.min(...accepted.map((quote) => quote.at))
   const to = Math.max(...accepted.map((quote) => quote.at))
   const value = accepted.reduce((sum, quote, index) => sum + quote.price * history.coveredPositions[index].quantity, 0)
-  const current = { at: to, value, invested: latest.invested, isCurrent: true }
+  const current = { at: to, value, invested: latest.invested, isCurrent: to > latest.at }
   return {
     ...result,
     points: [...(to === latest.at ? history.points.slice(0, -1) : history.points), current],

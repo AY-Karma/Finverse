@@ -37,6 +37,14 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
+it('rebases both comparison returns on the first shared date when the benchmark has a holiday', async () => {
+  state.benchmark.mockResolvedValueOnce([{ date: '2026-09-08', close: 100 }, { date: '2026-09-09', close: 110 }])
+  await renderInsights([100, 200, 220].map((value, index) => ({ at: Date.parse(`2026-09-0${7 + index}T00:00:00+05:30`), value, invested: 100 })))
+  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
+  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
+  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('+0.0 pts')
+})
+
 it('updates delayed and refreshed quote analytics in the same mounted view without refetching history', async () => {
   state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 110 }])
   await renderInsights([200, 220].map((value, index) => ({ at: Date.parse(`2026-09-${28 + index}T00:00:00+05:30`), value, invested: 100 })))

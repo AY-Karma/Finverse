@@ -99,6 +99,19 @@ describe('backcast coverage and cancellation', () => {
     ]) expect(applyPortfolioQuoteOverlay(history, positions, { [quoteKey(positions[0])]: quote }).points).toBe(history.points)
   })
 
+  it('preserves daily volatility when a NAV quote matches the latest historical close', async () => {
+    const positions = [{ ...holding(0), type: 'mutual-fund' as const, name: 'Audit Fund Direct Growth' }]
+    const history = await buildPortfolioBackcast(positions, { history: vi.fn(async () => [
+      { date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 110 }, { date: '2026-09-30', close: 99 },
+    ]) })
+    const originalRisk = calculatePortfolioRisk(history.points)
+    expect(originalRisk.volatility).not.toBeNull()
+    const result = applyPortfolioQuoteOverlay(history, positions, { [quoteKey(positions[0])]: {
+      price: 99, at: Date.parse('2026-09-30T00:00:00+05:30'), source: 'nav',
+    } })
+    expect(calculatePortfolioRisk(result.points)).toEqual(originalRisk)
+  })
+
   it('uses an intraday quote without treating an unfinished equity bar as a closing peak', async () => {
     vi.useFakeTimers()
     try {
