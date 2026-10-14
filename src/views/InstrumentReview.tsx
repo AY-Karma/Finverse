@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { useStore, type InstrumentCorrection } from '../useStore'
+import { isNumericBseScripCode } from '../instruments'
 import type { Currency, Exchange, Position } from '../types'
 
 const EXCHANGES: Exchange[] = ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER']
 
 function listing(position: Pick<Position, 'ticker' | 'type' | 'exchange' | 'currency' | 'providerSymbol'>): string {
-  return `${position.ticker || 'No symbol'} · ${position.type === 'etf' ? 'ETF' : position.type === 'stock' ? 'Stock' : 'Other'} · ${position.exchange ?? 'Unresolved venue'} · ${position.currency ?? 'Unresolved currency'} · ${position.providerSymbol || 'Provider symbol derived from listing'}`
+  const provider = position.providerSymbol || (position.exchange === 'BSE' && isNumericBseScripCode(position.ticker) ? 'Provider symbol required' : 'Provider symbol derived from listing')
+  return `${position.ticker || 'No symbol'} · ${position.type === 'etf' ? 'ETF' : position.type === 'stock' ? 'Stock' : 'Other'} · ${position.exchange ?? 'Unresolved venue'} · ${position.currency ?? 'Unresolved currency'} · ${provider}`
 }
 
 function defaultCorrection(position: Position): InstrumentCorrection {
@@ -25,6 +27,7 @@ export function InstrumentReview() {
   const [bulkError, setBulkError] = useState('')
   const [message, setMessage] = useState('')
   const selected = holdings.find((position) => position.id === selectedId)
+  const needsProviderSymbol = draft?.exchange === 'BSE' && isNumericBseScripCode(draft.ticker)
 
   function review(position: Position) {
     setSelectedId(position.id)
@@ -106,12 +109,12 @@ export function InstrumentReview() {
           <label className="statement-field">Asset type<select className="select" value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as InstrumentCorrection['type'] })}><option value="stock">Stock</option><option value="etf">ETF</option><option value="other">Other</option></select></label>
           <label className="statement-field">Exchange<select className="select" value={draft.exchange} onChange={(event) => setDraft({ ...draft, exchange: event.target.value as Exchange, providerSymbol: '' })}>{EXCHANGES.map((exchange) => <option key={exchange} value={exchange}>{exchange === 'OTHER' ? 'Other / unresolved' : exchange}</option>)}</select></label>
           <label className="statement-field">Asset currency<select className="select" value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value as Currency })}><option value="INR">INR</option><option value="USD">USD</option></select></label>
-          <label className="statement-field">Provider symbol, optional<input className="input" maxLength={100} value={draft.providerSymbol ?? ''} placeholder="Leave blank to derive from the listing" onChange={(event) => setDraft({ ...draft, providerSymbol: event.target.value })} /></label>
+          <label className="statement-field">{`Provider symbol, ${needsProviderSymbol ? 'required' : 'optional'}`}<input className="input" required={needsProviderSymbol} maxLength={100} value={draft.providerSymbol ?? ''} placeholder={needsProviderSymbol ? 'Enter the matching BSE provider symbol' : 'Leave blank to derive from the listing'} onChange={(event) => setDraft({ ...draft, providerSymbol: event.target.value })} /></label>
           <label className="statement-field">ISIN, optional<input className="input" maxLength={12} value={draft.isin ?? ''} onChange={(event) => setDraft({ ...draft, isin: event.target.value })} /></label>
           <label className="statement-field">Sector, optional<input className="input" maxLength={100} value={draft.sector ?? ''} onChange={(event) => setDraft({ ...draft, sector: event.target.value })} /></label>
         </div>
         <p className="hint" style={{ overflowWrap: 'anywhere' }}>Reviewed listing: {listing(draft)}</p>
-        <p className="hint">Confirm that the symbol, exchange and currency match your statement. Changing the symbol or exchange clears the old provider symbol so it can be derived again.</p>
+        <p className="hint">{needsProviderSymbol ? 'Numeric BSE codes need a confirmed provider symbol ending in .BO. Keep the BSE venue; imported values stay in use until corrected.' : 'Confirm the symbol, exchange and currency with your statement. Changing the symbol or exchange clears the old provider symbol.'}</p>
         <div className="import-actions"><button type="submit" className="btn btn--primary" disabled={saving || !draft.ticker.trim()}>{saving && !approvingAll ? 'Saving correction…' : 'Save listing correction'}</button><button type="button" className="btn btn--ghost" disabled={saving} onClick={() => { setSelectedId(null); setDraft(null); setError('') }}>Cancel listing review</button></div>
         {error && <p className="hint down" role="alert">{error}</p>}
       </form>}

@@ -35,7 +35,7 @@ describe('valuation coverage and merge identity', () => {
   })
 
   it('preserves canonical metadata when merging compatible holdings', () => {
-    const holding = position({ ticker: '500325', exchange: 'BSE', providerSymbol: '500325.BO', currency: 'INR', instrumentKey: 'EQ:500325', isin: 'INE002A01018', sector: 'Energy', industry: 'Refining', lastPrice: 120 })
+    const holding = position({ ticker: '500325', exchange: 'BSE', providerSymbol: 'RELIANCE.BO', currency: 'INR', instrumentKey: 'EQ:500325', isin: 'INE002A01018', sector: 'Energy', industry: 'Refining', lastPrice: 120 })
     expect(combinePositions([holding, { ...holding, id: 'second', quantity: 2, invested: 200 }])[0]).toMatchObject({ ...holding, instrumentKey: quoteKey(holding), id: `merged:${quoteKey(holding)}`, quantity: 3, invested: 300, buyPrice: 100 })
   })
 

@@ -1,4 +1,5 @@
 import type { InvestmentSnapshot } from './investmentWorkspace'
+import { hasSupportedValuationCurrency } from './valuation'
 
 const DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
   day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
@@ -7,16 +8,20 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
 /** Shared dates and coverage wording for the Overview and Insights. */
 export function portfolioDataLabels(snapshot: InvestmentSnapshot) {
   const total = snapshot.positions.length
+  const supportedPositions = snapshot.positions.filter(hasSupportedValuationCurrency)
+  const sessionTotal = supportedPositions.length
+  const sessionHoldings = sessionTotal < total ? 'INR holdings' : 'holdings'
   const date = snapshot.dailyChangeDate
     ? DATE_FORMATTER.format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`)) : null
   const sessionValue = snapshot.dailyChange ?? snapshot.reportedDailyChange
   const isPartialSession = snapshot.dailyChange == null && sessionValue != null
   const sessionLabel = `${date ? `Latest session · ${date}` : 'Session move'}${isPartialSession ? ' · Partial' : ''}`
-  const pendingFunds = snapshot.contributions.filter((holding) => holding.type === 'mutual-fund' && holding.dailyChange == null).length
+  const pendingFunds = supportedPositions.filter((holding) => holding.type === 'mutual-fund').length
+    - snapshot.contributions.filter((holding) => holding.type === 'mutual-fund' && holding.dailyChange != null).length
   const coverageLabel = snapshot.dailyChangeCount
     ? isPartialSession
-      ? `${snapshot.dailyChangeCount} of ${total} holdings included${pendingFunds ? ` · ${pendingFunds} fund${pendingFunds === 1 ? '' : 's'} awaiting session updates` : ' · Remaining updates pending'}`
-      : `${snapshot.dailyChangeCount} of ${total} holdings report changes`
+      ? `${snapshot.dailyChangeCount} of ${sessionTotal} ${sessionHoldings} included${pendingFunds ? ` · ${pendingFunds} fund${pendingFunds === 1 ? '' : 's'} awaiting session updates` : ' · Remaining updates pending'}`
+      : `${snapshot.dailyChangeCount} of ${sessionTotal} ${sessionHoldings} report changes`
     : 'No change amounts reported'
 
   if (snapshot.quotedCount === 0) {

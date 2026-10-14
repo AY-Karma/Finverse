@@ -3,6 +3,7 @@ import type { Folio, LiveQuote, Position } from './types'
 import { exportPortfolioCsv, importIdentitySummary, investmentWorkspace } from './investmentWorkspace'
 import { sanitizeFolios } from './store'
 import { quoteKey } from './valuation'
+import { portfolioDataLabels } from './portfolioDataLabels'
 
 describe('quote coverage and session movement', () => {
   const positions: Position[] = ['A', 'B'].map((ticker) => ({
@@ -98,6 +99,30 @@ describe('quote coverage and session movement', () => {
     expect(snapshot).toMatchObject({ invested: 400, currentValue: 400, unsupportedCurrencyCount: 1, valuationComplete: false, dailyChange: null })
     expect(snapshot.contributions.find((holding) => holding.symbol === 'AAPL')).toMatchObject({ value: 0, priced: false, dailyChange: null, pnl: null })
     expect(usd).toMatchObject({ invested: 200, lastPrice: 240 })
+  })
+
+  it('keeps the INR session move when an excluded USD quote has a newer IST date', () => {
+    const hdfc: Position = { id: 'hdfc', ticker: 'HDFCBANK', name: 'HDFC Bank', type: 'stock', exchange: 'NSE', currency: 'INR', quantity: 1, buyPrice: 200, invested: 200, lastPrice: 200 }
+    const apple: Position = { id: 'apple', ticker: 'AAPL', name: 'Apple', type: 'stock', exchange: 'NASDAQ', currency: 'USD', providerSymbol: 'AAPL', quantity: 1, buyPrice: 200, invested: 200, lastPrice: 200 }
+    const appleQuote = quote({ price: 240, change: 5, at: Date.parse('2026-10-13T16:00:00-04:00') })
+    const snapshot = investmentWorkspace.readSnapshot({
+      folios: [{ id: 'mixed', name: 'Mixed', importedAt: 1, positions: [hdfc, apple] }],
+      quotes: {
+        [quoteKey(hdfc)]: quote({ price: 220, change: 20, at: Date.parse('2026-10-13T15:30:00+05:30') }),
+        [quoteKey(apple)]: appleQuote,
+      }, fxRate: null,
+    })
+    expect(snapshot).toMatchObject({ currentValue: 220, invested: 200, unsupportedCurrencyCount: 1, valuationComplete: false })
+    expect(snapshot.dailyChangeDate).toBe('2026-10-13')
+    expect(snapshot).toMatchObject({ dailyChange: 20, reportedDailyChange: 20, dailyChangePct: 10, dailyChangeCount: 1 })
+    expect(snapshot.quotes[quoteKey(apple)]).toEqual(appleQuote)
+    expect(snapshot.contributions.find((holding) => holding.symbol === 'AAPL')).toMatchObject({ value: 0, dailyChange: null })
+    expect(portfolioDataLabels(snapshot)).toMatchObject({ sessionValue: 20, isPartialSession: false, coverageLabel: '1 of 1 INR holdings report changes' })
+    const unsupportedOnly = investmentWorkspace.readSnapshot({
+      folios: [{ id: 'usd', name: 'USD', importedAt: 1, positions: [apple] }],
+      quotes: { [quoteKey(apple)]: appleQuote }, fxRate: null,
+    })
+    expect(unsupportedOnly).toMatchObject({ dailyChange: null, dailyChangeDate: null, reportedDailyChange: null, dailyChangeCount: 0 })
   })
 })
 

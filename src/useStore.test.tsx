@@ -190,18 +190,21 @@ describe('portfolio saving', () => {
     } finally { await act(async () => root.unmount()) }
   })
   it('persists a reviewed BSE listing without changing its holding amounts', async () => {
-    const holding: Position = { id: 'bse', ticker: '500112', name: 'Example BSE Holding', type: 'stock', quantity: 2, buyPrice: 100, invested: 200, lastPrice: 120, exchange: 'OTHER', currency: 'INR', reportedExchange: 'unknown', identityIssue: 'Review the exchange.' }
+    const holding: Position = { id: 'bse', ticker: '500112', name: 'Example BSE Holding', type: 'stock', quantity: 2, buyPrice: 100, invested: 200, lastPrice: 120, exchange: 'BSE', currency: 'INR', providerSymbol: '500112.BO', identityVersion: 2 }
     localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'account', name: 'Account', importedAt: Date.now(), positions: [holding] }]))
     let store!: ReturnType<typeof useStore>
     const Capture = () => { store = useStore(); return null }
     const root = createRoot(document.createElement('div'))
     try {
       await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
-      await act(async () => store.confirmInstrument('bse', { ticker: '500112', type: 'stock', exchange: 'BSE', currency: 'INR', sector: 'Financials' }))
-      expect(store.positions[0]).toMatchObject({ id: 'bse', exchange: 'BSE', exchangeSource: 'explicit', providerSymbol: '500112.BO', sector: 'Financials', quantity: 2, invested: 200 })
+      expect(store.positions[0].identityIssue).toContain('numeric BSE')
+      await act(async () => { await expect(store.confirmInstrument('bse', { ticker: '500112', type: 'stock', exchange: 'BSE', currency: 'INR' })).rejects.toThrow('numeric BSE') })
+      expect(store.positions[0].providerSymbol).toBe('500112.BO')
+      await act(async () => store.confirmInstrument('bse', { ticker: '500112', type: 'stock', exchange: 'BSE', currency: 'INR', providerSymbol: 'SBIN.BO', sector: 'Financials' }))
+      expect(store.positions[0]).toMatchObject({ id: 'bse', exchange: 'BSE', exchangeSource: 'explicit', currency: 'INR', providerSymbol: 'SBIN.BO', sector: 'Financials', quantity: 2, invested: 200, lastPrice: 120 })
       expect(store.positions[0].identityIssue).toBeUndefined()
       const archive = parseWorkspaceArchive(JSON.stringify(createWorkspaceArchive(store.folios, store.settings, store.portfolioHistory)))
-      expect(archive.archive.folios[0].positions[0].providerSymbol).toBe('500112.BO')
+      expect(archive.archive.folios[0].positions[0].providerSymbol).toBe('SBIN.BO')
     } finally { await act(async () => root.unmount()) }
   })
   it('saves a confirmed scheme and rekeys its watch rule together, keeping both recoverable in a backup', async () => {

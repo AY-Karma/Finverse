@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
-import { buildPortfolioBackcast, type PortfolioBackcast } from '../portfolioBackcast'
+import { applyPortfolioQuoteOverlay, buildPortfolioBackcast, type PortfolioBackcastHistory } from '../portfolioBackcast'
 import { downsampleSeries } from '../timeSeries'
 import { calculatePortfolioRisk } from '../portfolioRisk'
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { assetTypeLabel } from '../instruments'
+import { dateFormatter } from '../formatters'
 import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { PortfolioRequiredState } from './PortfolioRequiredState'
@@ -36,18 +37,18 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
   const [openKpi, setOpenKpi] = useState<'session' | 'drawdown' | 'top-five' | 'data-health' | null>(null)
-  const [backcast, setBackcast] = useState<PortfolioBackcast | null>(null)
+  const [historicalBackcast, setHistoricalBackcast] = useState<{ key: string; history: PortfolioBackcastHistory } | null>(null)
   const [backcastLoading, setBackcastLoading] = useState(false)
   const [backcastDays, setBackcastDays] = useState(INITIAL_BACKCAST_DAYS)
   const [performanceMode, setPerformanceMode] = useState<'backcast' | 'tracked'>('backcast')
   const backcastKey = useMemo(
-    () => snapshot.positions.map((position) => `${position.id}:${position.instrumentKey}:${position.identityIssue}:${position.quantity}:${position.buyPrice}`).join('|'),
+    () => JSON.stringify(snapshot.positions.map((position) => [position.id, position.instrumentKey, position.identityIssue, position.ticker, position.type, position.quantity, position.invested, position.exchange, position.currency, position.reportedCurrency, position.providerSymbol, position.mfScheme?.code])),
     [snapshot.positions],
   )
 
   useEffect(() => {
     if (!settings.allowExternalData || snapshot.positions.length === 0) {
-      setBackcast(null)
+      setHistoricalBackcast(null)
       setBackcastLoading(false)
       setBackcastDays(INITIAL_BACKCAST_DAYS)
       return
@@ -55,14 +56,14 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     let alive = true
     const controller = new AbortController()
     setBackcastLoading(true)
-    void buildPortfolioBackcast(snapshot.positions, snapshot.quotes, marketData, backcastDays, controller.signal).then((result) => {
+    void buildPortfolioBackcast(snapshot.positions, marketData, backcastDays, controller.signal).then((result) => {
       if (alive) {
-        setBackcast(result)
+        setHistoricalBackcast({ key: backcastKey, history: result })
         setBackcastLoading(false)
       }
     }).catch(() => {
       if (alive) {
-        setBackcast(null)
+        setHistoricalBackcast(null)
         setBackcastLoading(false)
       }
     })
@@ -85,6 +86,9 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const exposure = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 16), [snapshot.contributions])
   const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
   const chartHistory = useMemo(() => downsampleSeries(snapshot.history, MAX_CHART_POINTS), [snapshot.history])
+  const backcast = useMemo(() => settings.allowExternalData && historicalBackcast?.key === backcastKey && historicalBackcast.history
+    ? applyPortfolioQuoteOverlay(historicalBackcast.history, snapshot.positions, snapshot.quotes)
+    : null, [backcastKey, historicalBackcast, settings.allowExternalData, snapshot.positions, snapshot.quotes])
   const backcastHistory = backcast?.points ?? []
   const analyticsHistory = backcastHistory
   const backcastChartHistory = useMemo(() => downsampleSeries(backcast?.points ?? [], MAX_CHART_POINTS), [backcast])
@@ -136,20 +140,19 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   }, [backcastDays, backcastKey, benchmarkReload, selectedBenchmark.symbol, settings.allowExternalData])
 
   const benchmarkSeries = useMemo<BenchmarkPoint[]>(() => {
-    const history = analyticsHistory
-    if (history.length < 2) return []
+    if (analyticsHistory.length < 2) return []
+    const observedDate = (at: number) => new Date(at + 5.5 * 3600000).toISOString().slice(0, 10)
+    const benchmarkCloses = new Map(benchmarkPoints.map((point) => [point.date, point.close]))
+    const sharedStart = analyticsHistory.findIndex((point) => benchmarkCloses.has(observedDate(point.at)))
+    const history = sharedStart > 0 ? analyticsHistory.slice(sharedStart) : analyticsHistory
     const firstPortfolio = history[0].value
-    const benchmarkTimes = benchmarkPoints.map((item) => +new Date(item.date))
-    let benchmarkIndex = 0
-    while (benchmarkIndex + 1 < benchmarkTimes.length && benchmarkTimes[benchmarkIndex + 1] <= history[0].at) benchmarkIndex += 1
-    const firstBenchmark = benchmarkPoints[benchmarkIndex]?.close
+    const firstBenchmark = benchmarkCloses.get(observedDate(history[0].at))
     return downsampleSeries(history, MAX_CHART_POINTS).map((point) => {
-      while (benchmarkIndex + 1 < benchmarkTimes.length && benchmarkTimes[benchmarkIndex + 1] <= point.at) benchmarkIndex += 1
-      const matching = benchmarkPoints[benchmarkIndex]
+      const matching = benchmarkCloses.get(observedDate(point.at))
       return {
         ts: point.at,
         portfolio: firstPortfolio > 0 ? ((point.value / firstPortfolio) - 1) * 100 : 0,
-        benchmark: firstBenchmark && matching ? ((matching.close / firstBenchmark) - 1) * 100 : undefined,
+        benchmark: firstBenchmark && matching ? ((matching / firstBenchmark) - 1) * 100 : undefined,
       }
     })
   }, [analyticsHistory, benchmarkPoints])
@@ -160,6 +163,14 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const performanceGapPct = performanceLatest?.invested > 0 && performanceGap != null
     ? performanceGap / performanceLatest.invested * 100
     : null
+  const latestBackcastPoint = backcastHistory[backcastHistory.length - 1]
+  const observationDate = latestBackcastPoint ? dateFormatter({ day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(latestBackcastPoint.at) : null
+  const observationLabel = observationDate ? `${backcast?.currentObservation ? 'Provider observations' : 'Historical close'} · ${observationDate} IST` : 'Latest observation'
+  const observationTime = dateFormatter({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kolkata' })
+  const providerTimes = backcast?.currentObservation ? `${observationTime.format(backcast.currentObservation.from)}${backcast.currentObservation.from === backcast.currentObservation.to ? '' : ` to ${observationTime.format(backcast.currentObservation.to)}`}` : null
+  const observationNote = observationDate ? providerTimes
+    ? `Provider prices observed on ${observationDate}, ${providerTimes} IST.`
+    : `Latest quote comparison unavailable. Showing the shared historical close from ${observationDate} IST.` : null
 
   const risk = useMemo(() => calculatePortfolioRisk(analyticsHistory), [analyticsHistory])
 
@@ -226,7 +237,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
       </div>}
       {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
-        <div><span className="score-label">How this was calculated</span><strong>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of current value covered.</>}</p></div>
+        <div><span className="score-label">How this was calculated</span><strong>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of priced INR value covered. Uses shared observation dates.</>}</p></div>
         {hide ? <HiddenValuesState /> : hasHistory ? <WorstDrawdownChart points={analyticsHistory} risk={risk} formatValue={value} /> : <p>{backcastLoading ? 'Historical prices are loading for this calculation.' : settings.allowExternalData ? 'Historical prices are unavailable. Try again later.' : 'Enable external market data in Settings to calculate historical drawdown.'}</p>}
       </div>}
       {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
@@ -282,7 +293,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
             <div className="insight-chart-metric insight-chart-metric--benchmark">
               <span><i aria-hidden="true" />{selectedBenchmark.label}</span>
               <strong>{benchmarkLatest?.benchmark == null ? '—' : mask(`${benchmarkLatest.benchmark >= 0 ? '+' : ''}${benchmarkLatest.benchmark.toFixed(1)}%`)}</strong>
-              <small>Same starting date</small>
+              <small>Matching observation dates</small>
             </div>
             <div className="insight-chart-metric insight-chart-metric--gap">
               <span>Return gap</span>
@@ -306,7 +317,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
               />
             ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (backcastLoading ? 'Building your comparison' : settings.allowExternalData ? 'Historical comparison unavailable' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
           </div>
-          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${backcast.coveragePct.toFixed(0)}% value coverage` : 'Historical market data is unavailable')}</span>
+          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
         </section>
 
         <section className="panel insight-panel">
@@ -333,12 +344,13 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <section className="panel insight-panel insight-panel--wide insight-panel--performance">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">{performanceMode === 'tracked' ? 'Tracked balances' : 'Performance story'}</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio balances' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
           <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Balance history, not investment returns. Account additions, removals and cash flows can change these values.'}</p>
+          {performanceMode === 'backcast' && observationNote && !hide && <p className="hint" role="status">{observationNote}</p>}
           {performanceMode === 'tracked' && chartHistory.some((balance) => balance.dataQuality) && <p className="hint">Earlier balances may use legacy or unconfirmed instrument identities. They are preserved as recorded and have not been reconstructed.</p>}
           {performanceHistory.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--value">
               <span><i aria-hidden="true" />Portfolio value</span>
               <strong>{performanceLatest ? value(performanceLatest.value) : '—'}</strong>
-              <small>Latest observation</small>
+              <small>{performanceMode === 'backcast' ? hide ? 'Observation hidden' : observationLabel : 'Latest observation'}</small>
             </div>
             <div className="insight-chart-metric insight-chart-metric--invested">
               <span><i aria-hidden="true" />Invested capital</span>

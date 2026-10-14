@@ -41,9 +41,9 @@ export interface InvestmentSnapshot {
   pnlPct: number
   dailyChange: number | null
   dailyChangePct: number | null
-  /** Subtotal from holdings reporting a change on the latest session date. */
+  /** Subtotal from supported INR holdings reporting a change on the latest session date. */
   reportedDailyChange: number | null
-  /** Provider date in IST. Aggregate movement requires every holding on this date. */
+  /** Provider date in IST. Aggregate movement requires every supported holding on this date. */
   dailyChangeDate: string | null
   dailyChangeCount: number
   contributions: Contribution[]
@@ -185,14 +185,16 @@ export const investmentWorkspace: InvestmentWorkspace = {
       return validQuote(quote) ? [[key, quote]] : []
     }))
     const quoteValues = positions.flatMap((position) => quotes[quoteKey(position)] ?? [])
-    const changeTimes = quoteValues.filter((quote) => Number.isFinite(quote.change) || Number.isFinite(quote.changePct)).map((quote) => quote.at)
+    const supportedPositions = positions.filter(hasSupportedValuationCurrency)
+    const supportedQuotes = supportedPositions.flatMap((position) => quotes[quoteKey(position)] ?? [])
+    const changeTimes = supportedQuotes.filter((quote) => Number.isFinite(quote.change) || Number.isFinite(quote.changePct)).map((quote) => quote.at)
     const dailyChangeDate = changeTimes.length ? quoteDate(Math.max(...changeTimes)) : null
     const stats = computePortfolioStats(positions, quotes)
     const contributions = buildContributions(positions, quotes, stats.currentValue, dailyChangeDate)
     const dailyChangeValues = contributions.map((item) => item.dailyChange).filter((value): value is number => value != null)
     const dailyChangeCount = dailyChangeValues.length
     const reportedDailyChange = dailyChangeCount > 0 ? dailyChangeValues.reduce((sum, value) => sum + value, 0) : null
-    const dailyChange = positions.length > 0 && dailyChangeCount === positions.length
+    const dailyChange = supportedPositions.length > 0 && dailyChangeCount === supportedPositions.length
       ? reportedDailyChange : null
     const previousValue = dailyChange == null ? null : stats.currentValue - dailyChange
     return {
@@ -206,7 +208,7 @@ export const investmentWorkspace: InvestmentWorkspace = {
       pricedCount: stats.pricedCount,
       unpricedCount: stats.unpricedCount,
       valuationComplete: stats.valuationComplete,
-      unsupportedCurrencyCount: positions.filter((position) => !hasSupportedValuationCurrency(position)).length,
+      unsupportedCurrencyCount: positions.length - supportedPositions.length,
       currentValue: stats.currentValue,
       pnl: stats.pnl,
       pnlPct: stats.pnlPct,

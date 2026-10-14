@@ -15,6 +15,10 @@ function canonicalSymbol(value: string): string {
   return value.trim().toUpperCase().replace(/\.(NS|NSE|BO|BSE)$/i, '').replace(NSE_SERIES_SUFFIX, '')
 }
 
+export function isNumericBseScripCode(symbol: string): boolean {
+  return /^\d+$/.test(canonicalSymbol(symbol))
+}
+
 function symbolExchange(value: string): Exchange | undefined {
   if (/\.(NS|NSE)$/i.test(value)) return 'NSE'
   if (/\.(BO|BSE)$/i.test(value)) return 'BSE'
@@ -48,6 +52,7 @@ function normalizeListing(position: Position): Position {
   else if (type !== 'stock' && type !== 'etf') issue = 'Confirm the supported holding type before using market data.'
   else if (isin && !ISIN_PATTERN.test(isin)) issue = 'The ISIN is invalid. Correct it before using market data.'
   else if (ISIN_PATTERN.test(ticker) && canonicalSymbol(providerSymbol) === ticker) issue = 'An ISIN alone does not identify a supported listing. Confirm the ticker and venue.'
+  else if (exchange === 'BSE' && isNumericBseScripCode(providerSymbol)) issue = 'The numeric BSE mapping is not verified. Confirm the matching BSE provider symbol; imported values are retained.'
   else if (!position.providerSymbol && (!isMarketSymbol(ticker) || (!/[A-Z]/.test(ticker) && exchangeSource === 'inferred' && !symbolExchange(position.ticker)))) issue = 'The holding needs a ticker and a confirmed exchange. Names and numeric scrip codes are not inferred as NSE listings.'
   else if (!isMarketSymbol(providerSymbol) || providerSymbol.startsWith('^')) issue = 'The provider symbol is invalid or unsupported. Correct the listing before using market data.'
   else if ((symbolExchange(providerSymbol) && symbolExchange(providerSymbol) !== exchange)
