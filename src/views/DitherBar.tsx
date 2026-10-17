@@ -18,7 +18,11 @@ export const DitherBar = memo(function DitherBar({ segments, scale, className = 
 
   useEffect(() => {
     const element = canvas.current
-    if (!element || size.width <= 0 || size.height <= 0) return
+    if (!element) {
+      bitmap.current = null
+      return
+    }
+    if (size.width <= 0 || size.height <= 0) return
     const context = element.getContext('2d')
     if (!context) return
 
@@ -54,7 +58,7 @@ export const DitherBar = memo(function DitherBar({ segments, scale, className = 
   return (
     <span ref={ref} className={`dither-bar ${className}`} role={ariaLabel ? 'img' : undefined}
       aria-label={ariaLabel} aria-hidden={ariaLabel ? undefined : true}>
-      <canvas ref={canvas} aria-hidden="true" />
+      {segments.length > 0 && <canvas ref={canvas} aria-hidden="true" />}
     </span>
   )
 }, (previous, next) => previous.scale === next.scale && previous.className === next.className
