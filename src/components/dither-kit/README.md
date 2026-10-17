@@ -33,5 +33,12 @@ panels reuse `DitherBar` for session impacts, top-five weights, and data-health
 status accents, and `DitherAreaFill` for the red peak-to-trough drawdown band.
 Values remain masked when privacy is enabled.
 
+The shared painter writes into a reusable `ImageData` buffer and uploads once per
+draw. Area and bar components compare their numeric inputs to skip unchanged
+paints. The donut paints only when its slice appearance changes; its entrance
+sweep composites a cached texture and stops scheduling frames when complete.
+Trend paths draw the visible date window plus one observation at either edge;
+the complete daily history remains available for navigation and calculations.
+
 To refresh these sources, compare the same registry files, retain the local
 class-name adaptations and the smaller shared core, and verify the affected previews.

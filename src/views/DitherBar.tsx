@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { backingSize, paintColumn } from '../components/dither-kit/dither-paint'
 import { seedOfColor, type DitherColor } from '../components/dither-kit/palette'
 import { useChartDimensions } from '../components/dither-kit/use-chart-dimensions'
@@ -11,9 +11,10 @@ interface DitherBarProps {
   ariaLabel?: string
 }
 
-export function DitherBar({ segments, scale, className = '', ariaLabel }: DitherBarProps) {
+export const DitherBar = memo(function DitherBar({ segments, scale, className = '', ariaLabel }: DitherBarProps) {
   const { ref, size } = useChartDimensions<HTMLSpanElement>()
   const canvas = useRef<HTMLCanvasElement>(null)
+  const bitmap = useRef<ImageData | null>(null)
 
   useEffect(() => {
     const element = canvas.current
@@ -22,11 +23,19 @@ export function DitherBar({ segments, scale, className = '', ariaLabel }: Dither
     if (!context) return
 
     const { cols, rows } = backingSize(size.width, size.height)
-    element.width = cols
-    element.height = rows
+    if (element.width !== cols) element.width = cols
+    if (element.height !== rows) element.height = rows
+    if (!bitmap.current || bitmap.current.width !== cols || bitmap.current.height !== rows) {
+      bitmap.current = context.createImageData(cols, rows)
+    }
+    const image = bitmap.current
+    image.data.fill(0)
     const values = segments.map((segment) => Number.isFinite(segment.value) ? Math.max(0, segment.value) : 0)
     const total = scale ?? values.reduce((sum, value) => sum + value, 0)
-    if (!Number.isFinite(total) || total <= 0) return
+    if (!Number.isFinite(total) || total <= 0) {
+      context.putImageData(image, 0, 0)
+      return
+    }
 
     let start = 0
     let accumulated = 0
@@ -35,10 +44,11 @@ export function DitherBar({ segments, scale, className = '', ariaLabel }: Dither
       const end = Math.min(cols, Math.round(accumulated / total * cols))
       const seed = seedOfColor(segment.color)
       for (let x = start; x < end; x++) {
-        paintColumn(context, x, 0, rows, seed, { variant: 'gradient', intensity: 0, dim: 1, stacked: true })
+        paintColumn(image, x, 0, rows, seed, { variant: 'gradient', intensity: 0, dim: 1, stacked: true })
       }
       start = end
     })
+    context.putImageData(image, 0, 0)
   }, [segments, scale, size.width, size.height])
 
   return (
@@ -47,4 +57,7 @@ export function DitherBar({ segments, scale, className = '', ariaLabel }: Dither
       <canvas ref={canvas} aria-hidden="true" />
     </span>
   )
-}
+}, (previous, next) => previous.scale === next.scale && previous.className === next.className
+  && previous.ariaLabel === next.ariaLabel && previous.segments.length === next.segments.length
+  && previous.segments.every((segment, index) => segment.value === next.segments[index].value
+    && segment.color === next.segments[index].color))

@@ -214,6 +214,12 @@ export function InteractiveTrendChart({
     () => visibleEndIndex >= visibleStartIndex ? chartRows.slice(visibleStartIndex, visibleEndIndex + 1) : [],
     [chartRows, visibleStartIndex, visibleEndIndex],
   )
+  // Keep paths continuous at the viewport edges without drawing offscreen history.
+  const pathStartIndex = Math.max(0, visibleStartIndex - 1)
+  const pathRows = useMemo(
+    () => chartRows.slice(pathStartIndex, visibleEndIndex + 2),
+    [chartRows, pathStartIndex, visibleEndIndex],
+  )
   const firstAt = chartRows[0]?.at ?? 0
   const visibleFirstAt = visibleRows[0]?.at ?? firstAt
   const visibleLastAt = visibleRows[visibleRows.length - 1]?.at ?? visibleFirstAt
@@ -228,7 +234,8 @@ export function InteractiveTrendChart({
     const yAt = (value: number) => PLOT_TOP + (1 - (value - domain.min) / domainRange) * plotHeight
     const pathFor = (key: string) => {
       let started = false
-      return chartRows.flatMap((row, index) => {
+      return pathRows.flatMap((row, localIndex) => {
+        const index = pathStartIndex + localIndex
         const value = row[key]
         if (typeof value !== 'number' || !Number.isFinite(value)) {
           started = false
@@ -240,27 +247,28 @@ export function InteractiveTrendChart({
       }).join(' ')
     }
     const linePaths = lines.map((line) => pathFor(line.key))
-    const primaryPoints = primaryLine ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
+    const primaryPoints = primaryLine ? pathRows.map((row, index) => ({ row, index: pathStartIndex + index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
     const areaPath = showArea && primaryLine && primaryPoints.length > 1
       ? `${linePaths[0]} L${xAtIndex(primaryPoints[primaryPoints.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(primaryPoints[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`
       : ''
     const pairedPoints = primaryLine && secondaryLine
-      ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
+      ? pathRows.map((row, index) => ({ row, index: pathStartIndex + index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
       : []
     const differencePath = appearance !== 'insight' && primaryLine && secondaryLine && pairedPoints.length > 1
       ? `${pairedPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAtIndex(point.index).toFixed(1)},${yAt(point.row[primaryLine.key] as number).toFixed(1)}`).join(' ')} ${[...pairedPoints].reverse().map((point) => `L${xAtIndex(point.index).toFixed(1)},${yAt(point.row[secondaryLine.key] as number).toFixed(1)}`).join(' ')} Z`
       : ''
     return { xAtIndex, yAt, linePaths, areaPath, differencePath }
-  }, [chartRows, lines, primaryLine, secondaryLine, domain, visiblePointCount, plotLeft, plotWidth, viewStart, plotHeight, showArea, appearance])
+  }, [pathRows, pathStartIndex, lines, primaryLine, secondaryLine, domain, visiblePointCount, plotLeft, plotWidth, viewStart, plotHeight, showArea, appearance])
   const ditherPoints = useMemo(() => ditherColor && showArea && primaryLine
-    ? chartRows.map((row, index) => {
+    ? pathRows.map((row, localIndex) => {
+      const index = pathStartIndex + localIndex
       const value = row[primaryLine.key]
       const baseline = ditherTo ? row[ditherTo] : undefined
       if (typeof value !== 'number' || !Number.isFinite(value)) return null
       if (ditherTo && (typeof baseline !== 'number' || !Number.isFinite(baseline))) return null
       return { x: xAtIndex(index), y: yAt(value), baselineY: baseline == null ? undefined : yAt(baseline) }
     })
-    : [], [ditherColor, ditherTo, showArea, primaryLine, chartRows, xAtIndex, yAt])
+    : [], [ditherColor, ditherTo, showArea, primaryLine, pathRows, pathStartIndex, xAtIndex, yAt])
   const markerPositions = useMemo(
     () => markers.flatMap((marker, markerIndex) => {
       if (!Number.isFinite(marker.at) || !Number.isFinite(marker.value) || chartRows.length === 0) return []

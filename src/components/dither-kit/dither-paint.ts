@@ -3,7 +3,7 @@
 // chart type reads with the exact same pixel texture.
 
 import type { AreaVariant } from "./chart-types"
-import { rgb, type Seed } from "./palette"
+import type { Rgb, Seed } from "./palette"
 
 // 4×4 ordered (Bayer) matrix, normalized to 0–1 thresholds — the exact matrix
 // the legacy chart dithers with.
@@ -52,7 +52,7 @@ export type PaintOpts = {
  * the dither look across area / line / bar.
  */
 export function paintColumn(
-  octx: CanvasRenderingContext2D,
+  image: ImageData,
   x: number,
   top: number,
   floor: number,
@@ -63,8 +63,7 @@ export function paintColumn(
   const f = Math.round(floor)
   const depth = f - t
   if (depth <= 0) {
-    octx.fillStyle = rgb(seed.fill, 1, BORDER_ALPHA * dim)
-    octx.fillRect(x, t, 1, 1)
+    paintPixel(image, x, t, seed.fill, BORDER_ALPHA * dim)
     return
   }
   const bias = (variant === "dotted" ? 0.12 : 0) + (stacked ? 0.2 : 0) - sparse
@@ -84,18 +83,25 @@ export function paintColumn(
     // Density → alpha (see the colour-vs-opacity note above).
     const k = (0.3 + density * 0.7) * (1 + 0.22 * intensity)
     const alpha = clamp01((lit ? k : k * OFF_TIER) * dim)
-    octx.fillStyle = rgb(seed.fill, 1, alpha)
-    octx.fillRect(x, y, 1, 1)
+    paintPixel(image, x, y, seed.fill, alpha)
   }
   // Top border outline — the shape's edge now that the fill fades out here.
   // Kept just under full opacity, with a faint feather row beneath, so it reads
   // as a soft edge rather than a hard line floating over the fade.
-  octx.fillStyle = rgb(seed.fill, 1, BORDER_ALPHA * dim)
-  octx.fillRect(x, t, 1, 1)
+  paintPixel(image, x, t, seed.fill, BORDER_ALPHA * dim)
   if (depth > 1) {
-    octx.fillStyle = rgb(seed.fill, 1, BORDER_ALPHA * 0.5 * dim)
-    octx.fillRect(x, t + 1, 1, 1)
+    paintPixel(image, x, t + 1, seed.fill, BORDER_ALPHA * 0.5 * dim)
   }
+}
+
+/** Compose same-colour dither cells in memory, then upload the image once. */
+export function paintPixel(image: ImageData, x: number, y: number, color: Rgb, alpha: number) {
+  if (x < 0 || y < 0 || x >= image.width || y >= image.height) return
+  const offset = (y * image.width + x) * 4
+  image.data[offset] = color[0]
+  image.data[offset + 1] = color[1]
+  image.data[offset + 2] = color[2]
+  image.data[offset + 3] = (alpha + image.data[offset + 3] / 255 * (1 - alpha)) * 255
 }
 
 /** Linear-resample a per-index fraction array to `cols` columns. */
