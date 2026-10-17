@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import type { calculatePortfolioRisk } from '../portfolioRisk'
+import { DitherAreaFill } from './DitherAreaFill'
 import './WorstDrawdownChart.css'
 
 const DATE_FORMATTER = new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
@@ -43,7 +44,7 @@ export function WorstDrawdownChart({ points, risk, formatValue }: WorstDrawdownC
   const xAt = (at: number) => PLOT_LEFT + (at - peak.at) / (trough.at - peak.at) * (PLOT_RIGHT - PLOT_LEFT)
   const yAt = (value: number) => PLOT_TOP + ((peak.value - value) / peak.value * 100) / drop * (PLOT_BOTTOM - PLOT_TOP)
   const path = interval.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAt(point.at).toFixed(2)},${yAt(point.value).toFixed(2)}`).join(' ')
-  const areaPath = `${path} L${PLOT_RIGHT},${PLOT_TOP} Z`
+  const fillPoints = interval.map((point) => ({ x: xAt(point.at), y: yAt(point.value), baselineY: PLOT_TOP }))
   const percentage = `${risk.worst.toFixed(1)}%`
 
   return <figure className="worst-drawdown-chart">
@@ -61,7 +62,7 @@ export function WorstDrawdownChart({ points, risk, formatValue }: WorstDrawdownC
           <text className="worst-drawdown-axis" x={PLOT_LEFT - 12} y={y + 4} textAnchor="end">{tick.toFixed(1)}%</text>
         </g>
       })}
-      <path className="worst-drawdown-area" d={areaPath} />
+      <DitherAreaFill points={fillPoints} x={PLOT_LEFT} y={PLOT_TOP} width={PLOT_RIGHT - PLOT_LEFT} height={PLOT_BOTTOM - PLOT_TOP} color="red" />
       <path className="worst-drawdown-line" d={path} />
       <circle className="worst-drawdown-point worst-drawdown-point--peak" cx={PLOT_LEFT} cy={yAt(peak.value)} r="5">
         <title>{`Peak: ${peakValue}, ${peakDate}, 0.0% baseline`}</title>

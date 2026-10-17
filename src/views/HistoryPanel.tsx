@@ -7,6 +7,7 @@ import type { Currency, Position } from '../types'
 import { useStore } from '../useStore'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { HiddenValuesState } from './HiddenValuesState'
+import './historyPanel.css'
 
 type ScopeFilter = 'all' | 'equity' | 'mutual'
 
@@ -18,8 +19,8 @@ const RANGES: { label: string; days: number }[] = [
   { label: '2Y', days: 731 },
 ]
 
-const LINE_COLOR = '#5e6ad2'
-const COST_MARKER_COLOR = '#f2b53c'
+const LINE_COLOR = 'var(--holding-chart-line)'
+const COST_LINE_COLOR = 'var(--holding-chart-cost)'
 
 function fmtY(v: number, currency: Currency = 'INR'): string {
   return Math.abs(v) >= 1000
@@ -199,12 +200,10 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     if (!Number.isFinite(buy) || buy <= 0) return null
     const last = points[points.length - 1].close
     const pct = ((last - buy) / buy) * 100
-    const closest = points.reduce((nearest, point) => Math.abs(point.close - buy) < Math.abs(nearest.close - buy) ? point : nearest, points[0])
     return {
       buy,
-      last,
       pct,
-      markerAt: +new Date(`${closest.date}T00:00:00`),
+      change: last - buy,
     }
   }, [holding, points])
 
@@ -308,12 +307,11 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                         valueFormatter={formatPrice}
                         yAxisLabel={`${isMf ? 'NAV' : 'Price'} (${nativeCurrency})`}
                         appearance="price"
-                        markers={costComparison ? [{
-                          at: costComparison.markerAt,
+                        ditherColor="blue"
+                        referenceLines={costComparison ? [{
                           value: costComparison.buy,
-                          color: COST_MARKER_COLOR,
+                          color: COST_LINE_COLOR,
                           label: 'Avg cost',
-                          description: `Average cost: ${formatPrice(costComparison.buy)}. Positioned by the closest historical close for reference, not a purchase date.`,
                         }] : undefined}
                       />
                     ) : (
@@ -328,17 +326,9 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                 </div>
 
                 {costComparison && !loading && (
-                  <div className={`history-purchase history-purchase--${costComparison.pct >= 0 ? 'up' : 'down'}`}>
-                    <span className="history-purchase-badge" aria-hidden="true">
-                      {costComparison.pct >= 0 ? '▲' : '▼'}
-                    </span>
-                    <span>
-                      The latest {isMf ? 'NAV' : 'close'} for <strong>{query.label}</strong> is{' '}
-                      <span className="history-purchase-change">{Math.abs(costComparison.pct).toFixed(1)}%</span>{' '}
-                      {costComparison.pct >= 0 ? 'above' : 'below'} your average cost.{' '}
-                      {formatPrice(costComparison.buy)} → <span className="history-current-price">{formatPrice(costComparison.last)}</span>.{' '}
-                      The Avg cost marker uses the closest historical close for placement, not a purchase date.
-                    </span>
+                  <div className="history-cost-summary">
+                    <span><i aria-hidden="true" />Avg cost <strong>{formatPrice(costComparison.buy)}</strong></span>
+                    <span>Latest {isMf ? 'NAV' : 'close'} vs cost <strong className={costComparison.pct >= 0 ? 'up' : 'down'}>{costComparison.change >= 0 ? '+' : '−'}{formatPrice(Math.abs(costComparison.change))} ({costComparison.pct >= 0 ? '+' : ''}{costComparison.pct.toFixed(1)}%)</strong></span>
                   </div>
                 )}
               </>

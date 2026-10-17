@@ -1,5 +1,6 @@
 import type { InvestmentSnapshot } from '../investmentWorkspace'
 import { assetTypeLabel, instrumentLabel } from '../instruments'
+import { DitherBar } from './DitherBar'
 import './SessionContributors.css'
 
 export function SessionContributors({ snapshot, formatValue }: {
@@ -43,14 +44,12 @@ export function SessionContributors({ snapshot, formatValue }: {
         const position = snapshot.positions.find((holding) => holding.type === item.type && instrumentLabel(holding) === item.symbol)
         const name = position?.name.trim() || item.symbol
         const direction = item.dailyContribution > 0 ? 'up' : 'down'
-        return <li className={`session-contributors-row session-contributors-row--${direction}`} key={item.key}>
+        return <li className="session-contributors-row" key={item.key}>
           <span className="session-contributors-name">
             <span title={name}>{name}</span>
             <small>{name !== item.symbol ? `${item.symbol} · ` : ''}{assetTypeLabel(item.type)}</small>
           </span>
-          <span className="session-contributors-track" aria-hidden="true">
-            <i style={{ width: `${Math.abs(item.dailyContribution) / largest * 100}%` }} />
-          </span>
+          <DitherBar className="session-contributors-track" segments={[{ value: Math.abs(item.dailyContribution), color: direction === 'up' ? 'green' : 'red' }]} scale={largest} />
           <strong className={direction}>{signed(item.dailyContribution)}</strong>
         </li>
       })}

@@ -40,10 +40,7 @@
   font-size: 11px;
 }
 
-.worst-drawdown-area {
-  fill: var(--semantic-danger);
-  opacity: 0.06;
-}
+.worst-drawdown-chart .dither-area-fill { opacity: 0.28; }
 
 .worst-drawdown-line,
 .worst-drawdown-drop {

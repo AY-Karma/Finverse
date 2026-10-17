@@ -10,6 +10,8 @@ import { useStore } from '../useStore'
 import { ReminderAction } from './monitorPanels'
 import { MonitorNewsIcon } from './MonitorNewsIcon'
 import { ActionIcon, type ActionIconName } from './ActionIcon'
+import { DitherBar } from './DitherBar'
+import type { DitherColor } from '../components/dither-kit/palette'
 import './monitorActivityPanel.css'
 
 type ActivityView = 'brief' | 'holdings' | 'activity'
@@ -55,11 +57,11 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
   const fundOnly = model.holdings.every((row) => row.type === 'mutual-fund')
   const latestNav = fundOnly ? navRows[0] : undefined
   const notReported = model.counts.total - model.counts.movement
-  const breadth = [
-    { label: 'Up', count: model.counts.gainers ?? 0, tone: 'up' },
-    { label: 'Down', count: model.counts.decliners ?? 0, tone: 'down' },
-    { label: 'Flat', count: model.counts.flat ?? 0, tone: 'neutral' },
-    { label: 'Not reported', count: notReported, tone: 'unavailable' },
+  const breadth: { value: number; color: DitherColor }[] = [
+    { value: model.counts.gainers ?? 0, color: 'green' },
+    { value: model.counts.decliners ?? 0, color: 'red' },
+    { value: model.counts.flat ?? 0, color: 'grey' },
+    { value: notReported, color: 'grey' },
   ]
   const latestObservation = model.summary.latestObservedAt == null ? null : dateFormatter({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(model.summary.latestObservedAt)
   const reviewActivity = () => { setFilter('open'); toggleView('activity') }
@@ -91,14 +93,14 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
       <div className="pa-summary-card">
         <span className="pa-summary-label">Reported moves</span>
         <strong className="pa-summary-value pa-summary-breadth">{controller.hideValues ? privateValue('', true) : <><span className="pa-move-count" data-trend={model.counts.gainers ? 'up' : 'neutral'}>{model.counts.gainers}<small> up</small></span><small> / </small><span className="pa-move-count" data-trend={model.counts.decliners ? 'down' : 'neutral'}>{model.counts.decliners}<small> down</small></span></>}</strong>
-        <div className="pa-summary-rail" aria-hidden="true">{!controller.hideValues && breadth.filter((part) => part.count > 0).map((part) => <span key={part.label} data-tone={part.tone} style={{ flexGrow: part.count }} />)}</div>
+        <DitherBar className="pa-summary-rail" segments={controller.hideValues ? [] : breadth} />
         {controller.hideValues ? <span className="pa-summary-context">Movement details hidden</span> : <div className="pa-summary-legend"><span>{model.counts.flat} flat</span><span>{notReported} not reported</span></div>}
         <span className="pa-summary-note">{model.counts.movement} of {model.counts.total} holdings report a change</span>
       </div>
       <div className="pa-summary-card">
         <span className="pa-summary-label">Recent observations</span>
         <strong className="pa-summary-value">{model.counts.fresh}<small> / {model.counts.total}</small></strong>
-        <div className="pa-summary-rail pa-summary-coverage" aria-hidden="true"><span style={{ width: `${model.counts.total ? model.counts.fresh / model.counts.total * 100 : 0}%` }} /></div>
+        <DitherBar className="pa-summary-rail" segments={[{ value: model.counts.fresh, color: 'purple' }]} scale={model.counts.total} />
         <span className="pa-summary-context">{model.summary.quoteCount} {model.summary.quoteCount === 1 ? 'quote' : 'quotes'} · {model.summary.navCount} daily {model.summary.navCount === 1 ? 'NAV' : 'NAVs'}</span>
         <span className="pa-summary-note">{latestObservation ? <>Latest · <time dateTime={new Date(model.summary.latestObservedAt!).toISOString()}>{latestObservation} IST</time></> : controller.allowExternalData ? 'No recent provider observations' : 'External market data is off'}</span>
       </div>

@@ -1,0 +1,39 @@
+.history-panel {
+  --holding-chart-line: #8eb8ff;
+  --holding-chart-cost: #efc06c;
+  --holding-chart-positive: #6fe0a0;
+  --holding-chart-negative: #ff827b;
+}
+
+[data-mode='light'] .history-panel {
+  --holding-chart-line: #275dba;
+  --holding-chart-cost: #8b5b0e;
+  --holding-chart-positive: #1c713f;
+  --holding-chart-negative: #ad3030;
+}
+
+.history-panel .dither-area-fill { opacity: 0.28; }
+.history-panel .up { color: var(--holding-chart-positive); }
+.history-panel .down { color: var(--holding-chart-negative); }
+.history-panel .interactive-trend-current rect { fill: var(--surface-3); stroke: var(--holding-chart-line); }
+.history-panel .interactive-trend-current text { fill: var(--ink); }
+.history-panel .interactive-trend-current-line { opacity: 0.35; }
+.history-panel .interactive-trend-tooltip { box-shadow: 0 4px 16px #0002; }
+
+.history-cost-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin-top: 12px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.history-cost-summary > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.history-cost-summary strong { color: var(--ink); font: 600 12px var(--font-mono); }
+.history-cost-summary i { width: 16px; border-top: 2px dashed var(--holding-chart-cost); }
+
+@media (max-width: 640px) {
+  .history-panel .interactive-trend-toolbar { flex-wrap: wrap; gap: 8px; }
+  .history-panel .interactive-trend-period { font-size: 9px; }
+  .history-panel .interactive-trend-tooltip { min-width: 174px; max-width: calc(100% - 24px); }
+}

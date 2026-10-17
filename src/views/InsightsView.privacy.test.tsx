@@ -65,7 +65,7 @@ describe('Insights privacy', () => {
     expect(move.textContent).toContain('Partial')
     expect(move.textContent).not.toContain('10.00%')
     expect(panel('Latest price movers').textContent).toContain('01 Oct 2026')
-    expect(panel('Latest price movers').querySelectorAll('.contribution-fill')).toHaveLength(1)
+    expect(panel('Latest price movers').querySelectorAll('.contribution-track')).toHaveLength(1)
     state.settings = { ...loadSettings(), allowExternalData: true, hideValues: true }
     await act(async () => { root.render(<InsightsView onRequestImport={() => {}} />) })
     expect(move.querySelector('strong')?.textContent).toBe('••••••')
@@ -93,7 +93,7 @@ describe('Insights privacy', () => {
     root = createRoot(container)
     await act(async () => { root.render(<InsightsView onRequestImport={() => {}} />) })
     expect(panel('Allocation treemap').querySelectorAll('.allocation-tile')).toHaveLength(2)
-    expect(panel('Latest price movers').querySelectorAll('.contribution-fill')).toHaveLength(2)
+    expect(panel('Latest price movers').querySelectorAll('.contribution-track')).toHaveLength(2)
     await act(async () => {
       panel('Allocation treemap').querySelectorAll<HTMLButtonElement>('.allocation-tile')[1].click()
     })
@@ -109,14 +109,14 @@ describe('Insights privacy', () => {
     await act(async () => {
       panel('Latest price movers').querySelectorAll<HTMLButtonElement>('.segmented-control button')[1].click()
     })
-    expect(panel('Latest price movers').querySelector('.contribution-fill')).toBeNull()
+    expect(panel('Latest price movers').querySelector('.contribution-track')).toBeNull()
 
     settings.hideValues = false
     await act(async () => { root.render(<InsightsView onRequestImport={() => {}} />) })
     expect(panel('Allocation treemap').querySelectorAll('.allocation-tile')).toHaveLength(2)
     expect(panel('Allocation treemap').textContent).toContain('SECRETUP')
     expect(panel('Allocation treemap').querySelector('.allocation-detail strong')?.textContent).toBe('SECRETDOWN')
-    expect(panel('Latest price movers').querySelectorAll('.contribution-fill')).toHaveLength(2)
+    expect(panel('Latest price movers').querySelectorAll('.contribution-track')).toHaveLength(2)
     expect(panel('Latest price movers').textContent).toContain('SECRETDOWN')
     expect(panel('Latest price movers').querySelector('.is-active')?.textContent).toContain('%')
   })
