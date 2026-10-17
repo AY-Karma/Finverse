@@ -1,45 +1,10 @@
 import { useMemo, useState, type CSSProperties } from 'react'
 import type { Currency } from '../types'
 import { formatCurrency, type Allocation, type PortfolioPulse } from '../valuation'
-
-const PALETTE = [
-  '#7c89e8',
-  '#5fae9b',
-  '#d0a35c',
-  '#c97b84',
-  '#6aa9c9',
-  '#a685c9',
-  '#96b862',
-  '#8a93a6',
-]
+import { allocationColor, DitherDonut } from './overview/DitherCharts'
+import { DitherBar } from './DitherBar'
 
 const SEGMENT_CAP = 7
-
-const CX = 100
-const CY = 100
-const R_OUTER = 96
-const R_INNER = 61
-
-function polar(r: number, deg: number): { x: number; y: number } {
-  // 0deg sits at 12 o'clock, matching allocation order clockwise.
-  const rad = ((deg - 90) * Math.PI) / 180
-  return { x: CX + r * Math.cos(rad), y: CY + r * Math.sin(rad) }
-}
-
-function slicePath(startDeg: number, endDeg: number): string {
-  const large = endDeg - startDeg > 180 ? 1 : 0
-  const a = polar(R_OUTER, startDeg)
-  const b = polar(R_OUTER, endDeg)
-  const c = polar(R_INNER, endDeg)
-  const d = polar(R_INNER, startDeg)
-  return [
-    `M ${a.x.toFixed(2)} ${a.y.toFixed(2)}`,
-    `A ${R_OUTER} ${R_OUTER} 0 ${large} 1 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`,
-    `L ${c.x.toFixed(2)} ${c.y.toFixed(2)}`,
-    `A ${R_INNER} ${R_INNER} 0 ${large} 0 ${d.x.toFixed(2)} ${d.y.toFixed(2)}`,
-    'Z',
-  ].join(' ')
-}
 
 /** Allocation chart with a compact portfolio summary and optional detail. */
 export function AllocationCard({
@@ -60,24 +25,20 @@ export function AllocationCard({
 
   const valued = useMemo(() => allocations.filter((a) => a.value > 0), [allocations])
   const total = valued.reduce((sum, item) => sum + item.value, 0)
-  const top = valued.slice(0, SEGMENT_CAP)
-  const restValue = total > 0 ? total - top.reduce((sum, item) => sum + item.value, 0) : 0
-  const slices = restValue > 0
-    ? [...top, { symbol: `Other · ${valued.length - top.length} more`, value: restValue }]
-    : top
-  let angle = 0
-  const stops = slices.map((item, index) => {
-    const start = angle
-    angle += total > 0 ? (item.value / total) * 360 : 0
-    return { start, end: angle, color: PALETTE[index % PALETTE.length], item }
-  })
+  const slices = useMemo(() => {
+    const top = valued.slice(0, SEGMENT_CAP)
+    const restValue = valued.slice(SEGMENT_CAP).reduce((sum, item) => sum + item.value, 0)
+    return restValue > 0
+      ? [...top, { symbol: `Other · ${valued.length - top.length} more`, value: restValue }]
+      : top
+  }, [valued])
 
   if (valued.length === 0 || total <= 0) {
     return <div className="alloc-empty muted">No valued holdings yet — refresh prices or check the ledger.</div>
   }
 
-  const activeStop = active != null ? stops[active] : undefined
-  const activeWeight = activeStop && total > 0 ? (activeStop.item.value / total) * 100 : 0
+  const activeSlice = active != null ? slices[active] : undefined
+  const activeWeight = activeSlice && total > 0 ? (activeSlice.value / total) * 100 : 0
 
   const p = pulse
   const priced = p.up + p.down + p.flat
@@ -98,52 +59,14 @@ export function AllocationCard({
     <div className="alloc-split">
       <section className="alloc-half alloc-top">
         <div className="alloc-donut">
-          <svg viewBox="0 0 200 200" role="img" aria-label={hideValues ? 'Portfolio allocation hidden' : `Allocation across ${valued.length} holdings; hover a slice or the legend for details`}>
-            {/* Visual layer: pointer-events off so the pop-out can never chase
-                the cursor out of its own bounds. */}
-            <g style={{ pointerEvents: 'none' }}>
-              {stops.map((stop, index) => {
-                const isActive = active === index
-                const isDim = active != null && !isActive
-                const mid = (stop.start + stop.end) / 2
-                const pop = isActive ? 6 : 0
-                const dx = Math.sin((mid * Math.PI) / 180) * pop
-                const dy = -Math.cos((mid * Math.PI) / 180) * pop
-                // A hairline of arc stays so one full-circle slice still renders.
-                const start = stop.start + 0.08
-                const end = Math.max(stop.start + 0.16, stop.end - 0.08)
-                return (
-                  <path
-                    key={stop.item.symbol}
-                    d={slicePath(start, end)}
-                    fill={stop.color}
-                    className={`alloc-slice${isActive ? ' is-active' : ''}${isDim ? ' is-dim' : ''}`}
-                    style={{ transform: `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px)` }}
-                  />
-                )
-              })}
-            </g>
-            {/* Static hit wedges own the pointer; boundaries meet exactly so
-                sweeping across seams cannot leave the chart. */}
-            <g style={{ pointerEvents: 'all' }}>
-              {stops.map((stop, index) => (
-                <path
-                  key={stop.item.symbol}
-                  d={slicePath(stop.start, Math.max(stop.start + 0.16, stop.end))}
-                  fill="transparent"
-                  onMouseEnter={hoverSlice(index)}
-                  onMouseLeave={clearSlice}
-                />
-              ))}
-            </g>
-          </svg>
+          <DitherDonut slices={slices} active={active} onActiveChange={setActive} hidden={hideValues} />
           <div className="alloc-ring-center">
             <div className="alloc-ring-core" aria-hidden="true">
-              {activeStop ? (
+              {activeSlice ? (
                 <>
-                  <span className="ring-sym" title={mask(activeStop.item.symbol)}>{mask(activeStop.item.symbol)}</span>
+                  <span className="ring-sym" title={mask(activeSlice.symbol)}>{mask(activeSlice.symbol)}</span>
                   <strong>{mask(`${activeWeight.toFixed(1)}%`)}</strong>
-                  <small>{mask(formatCurrency(activeStop.item.value, currency, usdInrRate))}</small>
+                  <small>{mask(formatCurrency(activeSlice.value, currency, usdInrRate))}</small>
                 </>
               ) : (
                 <>
@@ -155,15 +78,18 @@ export function AllocationCard({
           </div>
         </div>
         <ul className="alloc-legend">
-          {slices.slice(0, 6).map((slice, index) => (
+          {slices.map((slice, index) => (
             <li
               key={slice.symbol}
               className={active === index ? 'is-active' : active != null ? 'is-dim' : undefined}
-              style={{ '--row-accent': stops[index]?.color } as CSSProperties}
+              style={{ '--row-accent': allocationColor(index) } as CSSProperties}
+              tabIndex={0}
+              onFocus={hoverSlice(index)}
+              onBlur={clearSlice}
               onMouseEnter={hoverSlice(index)}
               onMouseLeave={clearSlice}
             >
-              <i className="legend-swatch" style={{ background: stops[index]?.color ?? 'transparent' }} />
+              <i className="legend-swatch" style={{ background: allocationColor(index) }} />
               <span title={mask(slice.symbol)}>{mask(slice.symbol)}</span>
               <strong>{mask(`${((slice.value / total) * 100).toFixed(1)}%`)}</strong>
             </li>
@@ -183,30 +109,21 @@ export function AllocationCard({
               <span>Breadth</span>
               <strong className="alloc-figure">{priced > 0 ? <>{mask(`${winShare}%`)} in profit</> : 'No priced holdings'}</strong>
             </div>
-            <div className="alloc-bar" aria-hidden="true">
-              <i className="alloc-fill-up" style={{ width: `${upShare}%` }} />
-              <i className="alloc-fill-flat" style={{ width: `${flatShare}%` }} />
-              <i className="alloc-fill-down" style={{ width: `${downShare}%` }} />
-            </div>
+            <DitherBar segments={[{ value: upShare, color: 'green' }, { value: flatShare, color: 'grey' }, { value: downShare, color: 'red' }]} />
           </div>
           <div className="alloc-summary-row">
             <div className="alloc-summary-head">
               <span>Asset mix</span>
               <strong className="alloc-figure">{splitTotal > 0 ? <>{mask(`${eqShare.toFixed(0)}%`)} equity <span className="alloc-summary-separator">/</span> {mask(`${(100 - eqShare).toFixed(0)}%`)} funds</> : 'No valued assets'}</strong>
             </div>
-            <div className="alloc-bar" aria-hidden="true">
-              <i className="alloc-fill-equity" style={{ width: `${eqShare}%` }} />
-              <i className="alloc-fill-funds" style={{ width: `${splitTotal > 0 ? 100 - eqShare : 0}%` }} />
-            </div>
+            <DitherBar segments={[{ value: p.equityValue, color: 'blue' }, { value: p.mutualValue, color: 'purple' }]} />
           </div>
           <div className="alloc-summary-row">
             <div className="alloc-summary-head">
               <span>10%+ positions</span>
               <strong className="alloc-figure">{p.bands.heavy > 0 ? <>{p.bands.heavy} hold {mask(`${p.bandWeight.heavy.toFixed(0)}%`)}</> : 'None'}</strong>
             </div>
-            <div className="alloc-bar" aria-hidden="true">
-              <BandSegments weights={[p.bandWeight.heavy, p.bandWeight.mid, p.bandWeight.light]} />
-            </div>
+            <DitherBar segments={[{ value: p.bandWeight.heavy, color: 'blue' }, { value: p.bandWeight.mid, color: 'purple' }, { value: p.bandWeight.light, color: 'grey' }]} />
           </div>
         </div>
 
@@ -292,18 +209,5 @@ export function AllocationCard({
         </details>
       </section>
     </div>
-  )
-}
-
-function BandSegments({ weights }: { weights: [number, number, number] }) {
-  const sum = weights[0] + weights[1] + weights[2]
-  if (sum <= 0) return null
-  const tones = ['band-heavy', 'band-mid', 'band-light']
-  return (
-    <>
-      {weights.map((weight, index) => (
-        <i key={index} className={tones[index]} style={{ width: `${(weight / sum) * 100}%` }} />
-      ))}
-    </>
   )
 }

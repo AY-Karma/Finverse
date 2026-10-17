@@ -69,20 +69,11 @@
 }
 
 .session-contributors-track {
-  height: 4px;
+  height: 12px;
   overflow: hidden;
-  border-radius: var(--r-pill);
+  border-radius: 2px;
   background: var(--surface-3);
 }
-
-.session-contributors-track i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-}
-
-.session-contributors-row--up .session-contributors-track i { background: var(--semantic-success); }
-.session-contributors-row--down .session-contributors-track i { background: var(--semantic-danger); }
 
 .session-contributors-remainder {
   display: flex;

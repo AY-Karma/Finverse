@@ -1,4 +1,18 @@
 import './DataHealthGuide.css'
+import { DitherBar } from './DitherBar'
+import type { DitherColor } from '../components/dither-kit/palette'
+
+const STATUS_COLORS: Record<string, DitherColor> = {
+  Quoted: 'green',
+  'Older quotes': 'orange',
+  'Partial quotes': 'blue',
+  'Imported only': 'grey',
+  'No prices': 'red',
+}
+
+export function dataHealthColor(label: string): DitherColor {
+  return STATUS_COLORS[label] ?? 'grey'
+}
 
 type DataHealthGuideProps = {
   healthLabel: string
@@ -54,6 +68,7 @@ export function DataHealthGuide({ healthLabel, allowExternalData }: DataHealthGu
           return (
             <li key={status.label} aria-current={current ? 'true' : undefined}>
               <div className="data-health-guide-label">
+                <DitherBar className="data-health-guide-texture" segments={[{ value: 1, color: dataHealthColor(status.label) }]} />
                 <strong>{status.label}</strong>
                 {current && <span className="data-health-guide-current">Current status</span>}
               </div>

@@ -3,7 +3,6 @@ import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
 import { applyPortfolioQuoteOverlay, buildPortfolioBackcast, type PortfolioBackcastHistory } from '../portfolioBackcast'
-import { downsampleSeries } from '../timeSeries'
 import { calculatePortfolioRisk } from '../portfolioRisk'
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
@@ -15,11 +14,12 @@ import { PortfolioRequiredState } from './PortfolioRequiredState'
 import { HiddenValuesState } from './HiddenValuesState'
 import { SessionContributors } from './SessionContributors'
 import { WorstDrawdownChart } from './WorstDrawdownChart'
-import { DataHealthGuide } from './DataHealthGuide'
+import { DataHealthGuide, dataHealthColor } from './DataHealthGuide'
+import { DitherBar } from './DitherBar'
+import { rgb, seedOfColor, type DitherColor } from '../components/dither-kit/palette'
+import './insights.css'
 
-// Same muted family as the overview allocation card so charts read as one system.
-const EXPO_PALETTE = ['#7c89e8', '#5fae9b', '#d0a35c', '#c97b84', '#6aa9c9', '#a685c9', '#96b862', '#8a93a6']
-const MAX_CHART_POINTS = 180
+const EXPO_PALETTE: DitherColor[] = ['purple', 'green', 'blue', 'orange', 'pink', 'red', 'grey']
 const INITIAL_BACKCAST_DAYS = 366
 const BACKCAST_PAGE_DAYS = 366
 const MAX_BACKCAST_DAYS = 3 * 366
@@ -85,15 +85,13 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   })), contributionDisplay), [contributionDisplay, snapshot.contributions])
   const exposure = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 16), [snapshot.contributions])
   const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
-  const chartHistory = useMemo(() => downsampleSeries(snapshot.history, MAX_CHART_POINTS), [snapshot.history])
   const backcast = useMemo(() => settings.allowExternalData && historicalBackcast?.key === backcastKey && historicalBackcast.history
     ? applyPortfolioQuoteOverlay(historicalBackcast.history, snapshot.positions, snapshot.quotes)
     : null, [backcastKey, historicalBackcast, settings.allowExternalData, snapshot.positions, snapshot.quotes])
   const backcastHistory = backcast?.points ?? []
   const analyticsHistory = backcastHistory
-  const backcastChartHistory = useMemo(() => downsampleSeries(backcast?.points ?? [], MAX_CHART_POINTS), [backcast])
-  const trackedAvailable = chartHistory.length >= 2
-  const performanceHistory = performanceMode === 'tracked' ? chartHistory : backcastChartHistory
+  const trackedAvailable = snapshot.history.length >= 2
+  const performanceHistory = performanceMode === 'tracked' ? snapshot.history : backcastHistory
 
   useEffect(() => {
     const symbol = selectedBenchmark.symbol
@@ -147,7 +145,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     const history = sharedStart > 0 ? analyticsHistory.slice(sharedStart) : analyticsHistory
     const firstPortfolio = history[0].value
     const firstBenchmark = benchmarkCloses.get(observedDate(history[0].at))
-    return downsampleSeries(history, MAX_CHART_POINTS).map((point) => {
+    return history.map((point) => {
       const matching = benchmarkCloses.get(observedDate(point.at))
       return {
         ts: point.at,
@@ -195,6 +193,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
   const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
+  const topFiveMaxWeight = Math.max(...topFive.map((holding) => holding.weight), 1)
   const dataLabels = portfolioDataLabels(snapshot)
 
   return (
@@ -211,22 +210,22 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
       <div className="insight-kpis enter d1">
         <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
-          <span className="score-label insight-kpi-label">{dataLabels.sessionLabel}<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+          <span className="score-label insight-kpi-label"><span>{dataLabels.sessionLabel}</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: !hide && dataLabels.sessionValue != null && dataLabels.sessionValue < 0 ? 'red' : 'blue' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue, currency, snapshot.fxRate?.usdInr)}`)}</strong>
           <span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span>
         </button>
         <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">
-          <span className="score-label insight-kpi-label">Worst drawdown<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+          <span className="score-label insight-kpi-label"><span>Worst drawdown</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: 'red' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong className={!hide && risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong>
           <span className="hint">See the peak-to-trough chart</span>
         </button>
         <button type="button" id="top-five-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail">
-          <span className="score-label insight-kpi-label">Top five weight<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+          <span className="score-label insight-kpi-label"><span>Top five weight</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: 'purple' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong>
           <span className="hint">See the five-position split</span>
         </button>
-        <button type="button" id="data-health-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'data-health' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'data-health' ? null : 'data-health')} aria-expanded={openKpi === 'data-health'} aria-controls="data-health-detail">
-          <span className="score-label insight-kpi-label">Data health<i className="insight-kpi-chevron" aria-hidden="true" /></span>
+        <button type="button" id="data-health-kpi" data-health-color={dataHealthColor(dataLabels.healthLabel)} className={`insight-kpi insight-kpi--interactive${openKpi === 'data-health' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'data-health' ? null : 'data-health')} aria-expanded={openKpi === 'data-health'} aria-controls="data-health-detail">
+          <span className="score-label insight-kpi-label"><span>Data health</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: dataHealthColor(dataLabels.healthLabel) }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong>{dataLabels.healthLabel}</strong>
           <span className="hint">{dataLabels.healthDetail}</span>
         </button>
@@ -237,12 +236,12 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
       </div>}
       {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
-        <div><span className="score-label">How this was calculated</span><strong>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of priced INR value covered. Uses shared observation dates.</>}</p></div>
+        <div><span className="score-label">How this was calculated</span><strong className={!hide && risk.worst < 0 ? 'down' : undefined}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of priced INR value covered. Uses shared observation dates.</>}</p></div>
         {hide ? <HiddenValuesState /> : hasHistory ? <WorstDrawdownChart points={analyticsHistory} risk={risk} formatValue={value} /> : <p>{backcastLoading ? 'Historical prices are loading for this calculation.' : settings.allowExternalData ? 'Historical prices are unavailable. Try again later.' : 'Enable external market data in Settings to calculate historical drawdown.'}</p>}
       </div>}
       {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
         <div><span className="score-label">Largest five holdings</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}% of priced portfolio`) : 'Unpriced'}</strong></div>
-        {hide ? <HiddenValuesState /> : topFive.length === 0 ? <p>No priced holdings are available for this split.</p> : <div className="kpi-split-list">{topFive.map((item) => <div key={`${item.type}:${item.symbol}`}><span>{item.symbol}</span><span className="kpi-split-bar"><i style={{ width: `${item.weight / Math.max(...topFive.map((holding) => holding.weight), 1) * 100}%` }} /></span><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div>}
+        {hide ? <HiddenValuesState /> : topFive.length === 0 ? <p>No priced holdings are available for this split.</p> : <div className="kpi-split-list">{topFive.map((item, index) => <div key={`${item.type}:${item.symbol}`}><span>{item.symbol}</span><DitherBar className="kpi-split-bar" segments={[{ value: item.weight, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} scale={topFiveMaxWeight} /><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div>}
       </div>}
       {openKpi === 'data-health' && <div className="insight-kpi-detail insight-kpi-detail--health enter" id="data-health-detail" role="region" aria-labelledby="data-health-kpi">
         <DataHealthGuide healthLabel={dataLabels.healthLabel} allowExternalData={settings.allowExternalData} />
@@ -304,6 +303,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <div className="insight-chart insight-chart--benchmark">
             {benchmarkSeries.length >= 2 ? (
               <InteractiveTrendChart
+                key={benchmarkId}
                 rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))}
                 lines={[{ key: 'portfolio', label: 'Portfolio', color: 'var(--chart-portfolio)' }, { key: 'benchmark', label: selectedBenchmark.label, color: 'var(--chart-benchmark)' }]}
                 valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)}
@@ -311,7 +311,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
                 differenceLabel="Return gap"
                 yAxisLabel="Return (%)"
                 includeZero
-                showArea={false}
+                ditherColor="blue"
+                ditherTo="benchmark"
                 appearance="insight"
                 onReachStart={backcast ? requestMoreBackcast : undefined}
               />
@@ -345,7 +346,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">{performanceMode === 'tracked' ? 'Tracked balances' : 'Performance story'}</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio balances' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
           <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Balance history, not investment returns. Account additions, removals and cash flows can change these values.'}</p>
           {performanceMode === 'backcast' && observationNote && !hide && <p className="hint" role="status">{observationNote}</p>}
-          {performanceMode === 'tracked' && chartHistory.some((balance) => balance.dataQuality) && <p className="hint">Earlier balances may use legacy or unconfirmed instrument identities. They are preserved as recorded and have not been reconstructed.</p>}
+          {performanceMode === 'tracked' && snapshot.history.some((balance) => balance.dataQuality) && <p className="hint">Earlier balances may use legacy or unconfirmed instrument identities. They are preserved as recorded and have not been reconstructed.</p>}
           {performanceHistory.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--value">
               <span><i aria-hidden="true" />Portfolio value</span>
@@ -366,6 +367,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <div className="insight-chart insight-chart--performance">
             {performanceHistory.length >= 2 ? (
               <InteractiveTrendChart
+                key={performanceMode}
                 rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))}
                 lines={[{ key: 'value', label: 'Portfolio value', color: 'var(--chart-value)' }, { key: 'invested', label: 'Invested capital', color: 'var(--chart-invested)', dashed: true }]}
                 valueFormatter={value}
@@ -373,6 +375,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
                 differenceFormatter={value}
                 differenceLabel="Value − invested"
                 yAxisLabel="Value"
+                ditherColor="green"
                 appearance="insight"
                 onReachStart={performanceMode === 'backcast' && backcast ? requestMoreBackcast : undefined}
               />
@@ -384,9 +387,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   )
 }
 
-/** Exposure mix: one proportional ribbon plus interactive sector tiles. Both
- *  surfaces share a single hover state, so pointing at a tile lights its ribbon
- *  segment and vice versa — no separate legend repeating the same rows. */
 function ExposureMix({ items, hideValues, formatValue }: { items: SectorAllocation[]; hideValues: boolean; formatValue: (value: number) => string }) {
   const [active, setActive] = useState<number | null>(null)
   const mask = (text: string) => (hideValues ? '••••••' : text)
@@ -399,13 +399,13 @@ function ExposureMix({ items, hideValues, formatValue }: { items: SectorAllocati
     <div className="expo-mix" aria-label="Exposure mix by sector and type">
       <div className="expo-ribbon" aria-hidden="true">
         {items.map((sector, index) => (
-          <i
+          <div
             key={sector.label}
             className={`expo-seg${active === index ? ' is-active' : active != null ? ' is-dim' : ''}`}
-            style={{ flexGrow: Math.max(sector.value, 1), background: EXPO_PALETTE[index % EXPO_PALETTE.length] }}
+            style={{ flexGrow: Math.max(sector.value, 1) }}
             onMouseEnter={() => setActive(index)}
             onMouseLeave={() => setActive(null)}
-          />
+          ><DitherBar segments={[{ value: 1, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} /></div>
         ))}
       </div>
       <div className="expo-grid">
@@ -416,7 +416,7 @@ function ExposureMix({ items, hideValues, formatValue }: { items: SectorAllocati
             <button
               key={sector.label}
               type="button"
-              className={`expo-tile${active === index ? ' is-active' : active != null ? ' is-dim' : ''}`}
+              className={`expo-tile${active === index ? ' is-active' : ''}`}
               onMouseEnter={() => setActive(index)}
               onMouseLeave={() => setActive(null)}
               onFocus={() => setActive(index)}
@@ -425,13 +425,13 @@ function ExposureMix({ items, hideValues, formatValue }: { items: SectorAllocati
               aria-label={`${sector.label}: ${hideValues ? 'weight hidden' : `${sector.weight.toFixed(1)}%`}, ${hideValues ? 'value hidden' : formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
             >
               <span className="expo-tile-head">
-                <i className="legend-swatch" style={{ background: color }} />
+                <i className="legend-swatch" style={{ background: rgb(seedOfColor(color).fill) }} />
                 <span className="expo-name" title={sector.label}>{sector.label}</span>
                 <span className="expo-type">{type}</span>
               </span>
               <strong className="expo-weight">{mask(`${sector.weight.toFixed(1)}%`)}</strong>
               <span className="expo-meta">{mask(formatValue(sector.value))} · {sector.count} {sector.count === 1 ? 'position' : 'positions'}</span>
-              <span className="expo-tile-track"><i style={{ width: `${(sector.value / max) * 100}%`, background: color }} /></span>
+              <DitherBar className="expo-tile-track" segments={[{ value: sector.value, color }]} scale={max} />
             </button>
           )
         })}
@@ -457,12 +457,14 @@ function AllocationMap({
       {items.map((item) => {
         const span = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12)))
         const isActive = item.symbol === active?.symbol
-        return <button key={item.symbol} type="button" className={`allocation-tile allocation-tile--${item.pnl != null && item.pnl < 0 ? 'down' : 'up'}${isActive ? ' allocation-tile--active' : ''}`} style={{ gridColumn: `span ${span}` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio`}>
+        const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
+        return <button key={item.symbol} type="button" className={`allocation-tile${isActive ? ' allocation-tile--active' : ''}`} style={{ gridColumn: `span ${span}` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio`}>
+          <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
           <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
         </button>
       })}
     </div>
-    {active && <div className="allocation-detail" aria-live="polite"><div><span className="score-label">Selected holding</span><strong>{active.symbol}</strong></div><div><span className="score-label">Portfolio weight</span><strong>{active.weight.toFixed(1)}%</strong></div><div><span className="score-label">Current value</span><strong>{formatValue(active.value)}</strong></div><div><span className="score-label">P&L</span><strong className={active.pnl != null && active.pnl < 0 ? 'down' : 'up'}>{active.pnl == null ? '—' : formatValue(active.pnl)}</strong></div></div>}
+    {active && <div className="allocation-detail" aria-live="polite"><div><span className="score-label">Selected holding</span><strong>{active.symbol}</strong></div><div><span className="score-label">Portfolio weight</span><strong>{active.weight.toFixed(1)}%</strong></div><div><span className="score-label">Current value</span><strong>{formatValue(active.value)}</strong></div><div><span className="score-label">P&L</span><strong className={active.pnl == null ? undefined : active.pnl < 0 ? 'down' : 'up'}>{active.pnl == null ? '—' : formatValue(active.pnl)}</strong></div></div>}
   </div>
 }
 
@@ -483,11 +485,15 @@ function ContributionBars({
 }) {
   return <div className="contribution-chart"><div className="contribution-title">{title}</div><div className="contribution-bars">{data.length === 0 && <span className="hint">No reported {positive ? 'gains' : 'declines'}.</span>}{data.map((item) => {
     const displayValue = display === 'percent' ? formatPercent(item.metric) : formatValue(item.metric)
-    return <div className="contribution-row" key={item.label}><div><span title={item.label}>{item.label}</span><strong className={positive ? 'up' : 'down'}>{displayValue}</strong></div><div className="contribution-track" aria-label={`${item.label}: ${displayValue}`}><span className={positive ? 'contribution-fill contribution-fill--up' : 'contribution-fill contribution-fill--down'} style={{ width: `${item.width}%` }} /></div></div>
+    return <div className="contribution-row" key={item.label} tabIndex={0} role="img" aria-label={`${item.label}: ${displayValue}`}>
+      <div><span title={item.label}>{item.label}</span><strong className={positive ? 'up' : 'down'}>{displayValue}</strong></div>
+      <DitherBar className="contribution-track" segments={[{ value: item.width, color: positive ? 'green' : 'red' }]} scale={100} />
+    </div>
   })}</div></div>
 }
 
 type RiskStatus = 'lower' | 'watch' | 'high'
+const RISK_COLORS: Record<RiskStatus | 'hidden', DitherColor> = { lower: 'green', watch: 'orange', high: 'red', hidden: 'grey' }
 
 function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus {
   if (value >= highAt) return 'high'
@@ -550,7 +556,6 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
     },
   ].map((row) => ({
     ...row,
-    width: row.value == null ? 0 : Math.min(100, (row.value / row.scaleMax) * 100),
     status: row.value == null ? null : riskStatus(row.value, row.watchAt, row.highAt),
   }))
 
@@ -599,7 +604,7 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
                 <span className="risk-track-zone risk-track-zone--lower" style={{ width: `${row.watchAt / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--watch" style={{ width: `${(row.highAt - row.watchAt) / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--high" style={{ width: `${(row.scaleMax - row.highAt) / row.scaleMax * 100}%` }} />
-                <span className={`risk-fill risk-fill--${displayedStatus}`} style={{ width: hideValues ? 0 : `${row.width}%` }} />
+                <DitherBar segments={[{ value: hideValues ? 0 : row.value ?? 0, color: RISK_COLORS[displayedStatus] }]} scale={row.scaleMax} />
               </div>
 
             </article>

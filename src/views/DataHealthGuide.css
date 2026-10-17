@@ -68,6 +68,7 @@
   align-items: flex-start;
   gap: 7px;
 }
+.data-health-guide-texture { width: 44px; height: 10px; flex: none; }
 
 .data-health-guide-label > strong {
   color: var(--ink);

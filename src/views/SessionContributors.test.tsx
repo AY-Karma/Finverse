@@ -54,7 +54,7 @@ it('ranks quantity-weighted contributions by absolute impact and reconciles the 
   expect(rows.map((row) => row.querySelector('.session-contributors-name > span')?.textContent))
     .toEqual(['MANY', 'FALL', 'PRICE', 'FOUR', 'FIVE'])
   expect(rows.map((row) => row.querySelector('strong')?.textContent)).toEqual(['+₹200.00', '−₹150.00', '+₹40.00', '−₹30.00', '+₹20.00'])
-  expect(rows[1].className).toContain('row--down')
+  expect(rows[1].querySelector('strong')?.className).toContain('down')
   expect(container.querySelector('.session-contributors-remainder')?.textContent).toBe('Other reporting holdings 2 holdings+₹10.00')
   expect(container.querySelector('.session-contributors-total')?.textContent).toBe('All holdings combined+₹90.00')
   expect(snapshot.contributions.map((item) => item.symbol)).toEqual(originalOrder)

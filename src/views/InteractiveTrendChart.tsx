@@ -1,6 +1,8 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { clampViewportStart, createChartViewport, shiftViewportStart } from '../chartViewport'
 import { ActionIcon } from './ActionIcon'
+import { DitherAreaFill } from './DitherAreaFill'
+import type { DitherColor } from '../components/dither-kit/palette'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const FALLBACK_WIDTH = 1000
@@ -31,7 +33,14 @@ interface TrendMarker {
   comparable?: boolean
 }
 
+interface TrendReference {
+  value: number
+  label: string
+  color: string
+}
+
 const NO_MARKERS: TrendMarker[] = []
+const NO_REFERENCES: TrendReference[] = []
 
 interface InteractiveTrendChartProps {
   rows: TrendRow[]
@@ -44,7 +53,10 @@ interface InteractiveTrendChartProps {
   includeZero?: boolean
   onReachStart?: () => void
   markers?: TrendMarker[]
+  referenceLines?: TrendReference[]
   showArea?: boolean
+  ditherColor?: DitherColor
+  ditherTo?: string
   appearance?: 'default' | 'minimal' | 'price' | 'insight'
 }
 
@@ -123,7 +135,10 @@ export function InteractiveTrendChart({
   includeZero = false,
   onReachStart,
   markers = NO_MARKERS,
+  referenceLines = NO_REFERENCES,
   showArea = true,
+  ditherColor,
+  ditherTo,
   appearance = 'default',
 }: InteractiveTrendChartProps) {
   const chartId = useId().replace(/:/g, '')
@@ -160,14 +175,26 @@ export function InteractiveTrendChart({
 
   const { width: chartWidth, height: chartHeight } = chartSize
   const chartRows = useMemo(() => normalizeRows(rows), [rows])
+  const previousRowsRef = useRef(chartRows)
+  useLayoutEffect(() => {
+    const previous = previousRowsRef.current
+    previousRowsRef.current = chartRows
+    if (!previous.length || previous[0].at === chartRows[0]?.at) return
+    const prependedCount = chartRows.findIndex((row) => row.at === previous[0].at)
+    if (prependedCount <= 0) return
+    if (panRef.current) panRef.current.startViewStart += prependedCount
+    setViewStart((current) => current == null ? null : current + prependedCount)
+    setHoveredIndex(null)
+  }, [chartRows])
+  const references = useMemo(() => referenceLines.filter((line) => Number.isFinite(line.value)), [referenceLines])
 
   const values = useMemo(
     () => chartRows.flatMap((row) => lines.map((line) => row[line.key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))),
     [chartRows, lines],
   )
   const domain = useMemo(
-    () => yDomain([...values, ...markers.filter((marker) => Number.isFinite(marker.at) && Number.isFinite(marker.value)).map((marker) => marker.value)], includeZero),
-    [values, markers, includeZero],
+    () => yDomain([...values, ...markers.filter((marker) => Number.isFinite(marker.at) && Number.isFinite(marker.value)).map((marker) => marker.value), ...references.map((line) => line.value)], includeZero),
+    [values, markers, references, includeZero],
   )
   const labels = useMemo(() => domain.ticks.map(axisFormatter), [domain, axisFormatter])
   const isPriceChart = appearance === 'price'
@@ -177,7 +204,7 @@ export function InteractiveTrendChart({
   const plotRight = isRightScaleChart ? Math.max(PLOT_RIGHT, axisWidth + 8) : PLOT_RIGHT
   const plotWidth = chartWidth - plotLeft - plotRight
   const plotHeight = chartHeight - PLOT_TOP - PLOT_BOTTOM
-  const preferredViewport = isPriceChart ? { start: 0, count: chartRows.length } : createChartViewport(chartRows.length)
+  const preferredViewport = createChartViewport(chartRows.length)
   const visiblePointCount = preferredViewport.count
   const maxViewportStart = Math.max(0, chartRows.length - visiblePointCount)
   const viewStart = clampViewportStart(viewStartState ?? preferredViewport.start, chartRows.length, visiblePointCount)
@@ -186,6 +213,12 @@ export function InteractiveTrendChart({
   const visibleRows = useMemo(
     () => visibleEndIndex >= visibleStartIndex ? chartRows.slice(visibleStartIndex, visibleEndIndex + 1) : [],
     [chartRows, visibleStartIndex, visibleEndIndex],
+  )
+  // Keep paths continuous at the viewport edges without drawing offscreen history.
+  const pathStartIndex = Math.max(0, visibleStartIndex - 1)
+  const pathRows = useMemo(
+    () => chartRows.slice(pathStartIndex, visibleEndIndex + 2),
+    [chartRows, pathStartIndex, visibleEndIndex],
   )
   const firstAt = chartRows[0]?.at ?? 0
   const visibleFirstAt = visibleRows[0]?.at ?? firstAt
@@ -201,7 +234,8 @@ export function InteractiveTrendChart({
     const yAt = (value: number) => PLOT_TOP + (1 - (value - domain.min) / domainRange) * plotHeight
     const pathFor = (key: string) => {
       let started = false
-      return chartRows.flatMap((row, index) => {
+      return pathRows.flatMap((row, localIndex) => {
+        const index = pathStartIndex + localIndex
         const value = row[key]
         if (typeof value !== 'number' || !Number.isFinite(value)) {
           started = false
@@ -213,18 +247,28 @@ export function InteractiveTrendChart({
       }).join(' ')
     }
     const linePaths = lines.map((line) => pathFor(line.key))
-    const primaryPoints = primaryLine ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
+    const primaryPoints = primaryLine ? pathRows.map((row, index) => ({ row, index: pathStartIndex + index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
     const areaPath = showArea && primaryLine && primaryPoints.length > 1
       ? `${linePaths[0]} L${xAtIndex(primaryPoints[primaryPoints.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(primaryPoints[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`
       : ''
     const pairedPoints = primaryLine && secondaryLine
-      ? chartRows.map((row, index) => ({ row, index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
+      ? pathRows.map((row, index) => ({ row, index: pathStartIndex + index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
       : []
     const differencePath = appearance !== 'insight' && primaryLine && secondaryLine && pairedPoints.length > 1
       ? `${pairedPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAtIndex(point.index).toFixed(1)},${yAt(point.row[primaryLine.key] as number).toFixed(1)}`).join(' ')} ${[...pairedPoints].reverse().map((point) => `L${xAtIndex(point.index).toFixed(1)},${yAt(point.row[secondaryLine.key] as number).toFixed(1)}`).join(' ')} Z`
       : ''
     return { xAtIndex, yAt, linePaths, areaPath, differencePath }
-  }, [chartRows, lines, primaryLine, secondaryLine, domain, visiblePointCount, plotLeft, plotWidth, viewStart, plotHeight, showArea, appearance])
+  }, [pathRows, pathStartIndex, lines, primaryLine, secondaryLine, domain, visiblePointCount, plotLeft, plotWidth, viewStart, plotHeight, showArea, appearance])
+  const ditherPoints = useMemo(() => ditherColor && showArea && primaryLine
+    ? pathRows.map((row, localIndex) => {
+      const index = pathStartIndex + localIndex
+      const value = row[primaryLine.key]
+      const baseline = ditherTo ? row[ditherTo] : undefined
+      if (typeof value !== 'number' || !Number.isFinite(value)) return null
+      if (ditherTo && (typeof baseline !== 'number' || !Number.isFinite(baseline))) return null
+      return { x: xAtIndex(index), y: yAt(value), baselineY: baseline == null ? undefined : yAt(baseline) }
+    })
+    : [], [ditherColor, ditherTo, showArea, primaryLine, pathRows, pathStartIndex, xAtIndex, yAt])
   const markerPositions = useMemo(
     () => markers.flatMap((marker, markerIndex) => {
       if (!Number.isFinite(marker.at) || !Number.isFinite(marker.value) || chartRows.length === 0) return []
@@ -291,17 +335,22 @@ export function InteractiveTrendChart({
     setHoveredIndex(indexAtClientX(event.clientX, event.currentTarget.getBoundingClientRect()))
   }
 
-  const onWheel = (event: WheelEvent<SVGSVGElement>) => {
-    if (!hasHistoryToPan || pointSpacing <= 0) return
-    const rawDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0
-    if (!Number.isFinite(rawDelta) || Math.abs(rawDelta) < 0.01) return
-    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? chartWidth : 1
-    event.preventDefault()
-    setHoveredIndex(null)
-    const nextStart = shiftViewportStart(viewStart, rawDelta * scale / pointSpacing, chartRows.length, visiblePointCount)
-    setViewStart(nextStart)
-    if (nextStart <= 0.01) onReachStart?.()
-  }
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg || !hasHistoryToPan || pointSpacing <= 0) return
+    const onWheel = (event: WheelEvent) => {
+      const rawDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0
+      if (!Number.isFinite(rawDelta) || Math.abs(rawDelta) < 0.01) return
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? chartWidth : 1
+      event.preventDefault()
+      setHoveredIndex(null)
+      const nextStart = shiftViewportStart(viewStart, rawDelta * scale / pointSpacing, chartRows.length, visiblePointCount)
+      setViewStart(nextStart)
+      if (nextStart <= 0.01) onReachStart?.()
+    }
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', onWheel)
+  }, [hasHistoryToPan, pointSpacing, chartWidth, viewStart, chartRows.length, visiblePointCount, onReachStart])
 
   const onPointerDown = (event: PointerEvent<SVGSVGElement>) => {
     if (!hasHistoryToPan || (event.pointerType === 'mouse' && event.button !== 0)) return
@@ -324,6 +373,10 @@ export function InteractiveTrendChart({
     setIsPanning(true)
     const nextStart = shiftViewportStart(pan.startViewStart, -deltaX / pointSpacing, chartRows.length, visiblePointCount)
     setViewStart(nextStart)
+    if (nextStart === 0 || nextStart === maxViewportStart) {
+      pan.startX = event.clientX
+      pan.startViewStart = nextStart
+    }
     if (nextStart <= 0.01) onReachStart?.()
   }
 
@@ -336,6 +389,20 @@ export function InteractiveTrendChart({
   }
 
   const onKeyDown = (event: KeyboardEvent<SVGSVGElement>) => {
+    if (isPriceChart && chartRows.length > 0) {
+      const current = hoveredIndex ?? chartRows.length - 1
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? chartRows.length - 1
+        : event.key === 'ArrowLeft' ? current - 1 : event.key === 'ArrowRight' ? current + 1 : null
+      if (event.key === 'Escape') setHoveredIndex(null)
+      if (next != null) {
+        event.preventDefault()
+        const index = clamp(next, 0, chartRows.length - 1)
+        setHoveredIndex(index)
+        if (index < viewStart) setViewStart(index)
+        else if (index > viewStart + visiblePointCount - 1) setViewStart(index - visiblePointCount + 1)
+      }
+      return
+    }
     if (!hasHistoryToPan) return
     const step = Math.max(1, visiblePointCount / 10)
     if (event.key === 'Home') {
@@ -413,11 +480,11 @@ export function InteractiveTrendChart({
       viewBox={`0 0 ${chartWidth} ${chartHeight}`}
       preserveAspectRatio="none"
       role="img"
-      tabIndex={hasHistoryToPan ? 0 : undefined}
-      aria-label={`${yAxisLabel} trend. ${hasHistoryToPan ? 'Drag or swipe horizontally to move through history.' : 'Move across the chart to inspect values.'}`}
+      tabIndex={hasHistoryToPan || isPriceChart ? 0 : undefined}
+      aria-label={`${yAxisLabel} trend. ${hasHistoryToPan ? 'Drag or swipe horizontally to move through history. ' : ''}${isPriceChart ? 'Move across the chart or use the left and right arrow keys to inspect values. Home and End jump to the first and last values.' : hasHistoryToPan ? 'Use arrow keys, Home, and End to navigate.' : 'Move across the chart to inspect values.'}`}
       onMouseMove={onMove}
       onMouseLeave={() => { if (!panRef.current) setHoveredIndex(null) }}
-      onWheel={onWheel}
+      onBlur={() => { if (isPriceChart) setHoveredIndex(null) }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={finishPointerPan}
@@ -440,7 +507,13 @@ export function InteractiveTrendChart({
         return x >= plotLeft - 1 && x <= chartWidth - plotRight + 1
       }).map((index) => <g key={`${chartRows[index]?.at}-${index}`}><line x1={xAtIndex(index)} y1={chartHeight - PLOT_BOTTOM} x2={xAtIndex(index)} y2={chartHeight - PLOT_BOTTOM + 5} className="interactive-trend-axis" /><text x={xAtIndex(index)} y={chartHeight - 18} textAnchor="middle" className="interactive-trend-axis-text">{dateLabel(chartRows[index]?.at ?? firstAt, visibleTimeSpan)}</text></g>)}
       <g clipPath={`url(#trend-plot-${chartId})`}>
-        {areaPath && <path d={areaPath} fill={`url(#trend-area-${chartId})`} className="interactive-trend-area" />}
+        {areaPath && (ditherColor
+          ? <DitherAreaFill points={ditherPoints} x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} color={ditherColor} />
+          : <path d={areaPath} fill={`url(#trend-area-${chartId})`} className="interactive-trend-area" />)}
+        {references.map((line) => <g key={line.label} className="interactive-trend-reference">
+          <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} className="interactive-trend-reference-underlay" />
+          <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} stroke={line.color} className="interactive-trend-reference-line" />
+        </g>)}
         {isPriceChart && atLatest && latestPriceY != null && <line x1={plotLeft} y1={latestPriceY} x2={chartWidth - plotRight} y2={latestPriceY} className="interactive-trend-current-line" stroke={primaryLine.color} />}
         {differencePath && <path d={differencePath} className={latestDifference != null && latestDifference < 0 ? 'interactive-trend-gap interactive-trend-gap--loss' : 'interactive-trend-gap interactive-trend-gap--gain'} />}
         {comparisonAreaPath && comparisonMarker && comparison?.targetIndex != null && comparisonTone && <g className={`interactive-trend-comparison-range interactive-trend-comparison-range--${comparisonTone}`}>
@@ -448,6 +521,7 @@ export function InteractiveTrendChart({
           <line x1={xAtIndex(comparisonMarker.index)} y1={PLOT_TOP} x2={xAtIndex(comparisonMarker.index)} y2={PLOT_TOP + plotHeight} />
           <line x1={xAtIndex(comparison.targetIndex)} y1={PLOT_TOP} x2={xAtIndex(comparison.targetIndex)} y2={PLOT_TOP + plotHeight} />
         </g>}
+        {ditherColor && lines.map((line, index) => <path key={line.key} d={linePaths[index]} className={line.dashed ? 'interactive-trend-line interactive-trend-line--dashed' : 'interactive-trend-line'} style={{ stroke: 'var(--surface-1)', strokeWidth: 5, opacity: 1 }} aria-hidden="true" />)}
         {lines.map((line, index) => <path key={line.key} d={linePaths[index]} className={line.dashed ? 'interactive-trend-line interactive-trend-line--dashed' : 'interactive-trend-line'} stroke={line.color} />)}
         {chartRows.length === 1 && lines.map((line) => {
           const pointValue = chartRows[0][line.key]
@@ -459,6 +533,17 @@ export function InteractiveTrendChart({
         })}</g>}
         {comparisonTarget && comparison?.targetIndex != null && typeof comparisonTargetValue === 'number' && comparisonTone && <g className={`interactive-trend-comparison-target interactive-trend-comparison-target--${comparisonTone}`}><circle cx={xAtIndex(comparison.targetIndex)} cy={yAt(comparisonTargetValue)} r="8" /><circle cx={xAtIndex(comparison.targetIndex)} cy={yAt(comparisonTargetValue)} r="3.5" /></g>}
       </g>
+      {references.map((line) => {
+        const label = `${line.label} ${valueFormatter(line.value)}`
+        const width = Math.min(plotWidth - 8, Math.max(100, label.length * 6.4 + 22))
+        const y = clamp(yAt(line.value) - 30, PLOT_TOP + 2, PLOT_TOP + plotHeight - 26)
+        return <g key={line.label} className="interactive-trend-reference-label" pointerEvents="none">
+          <title>{`${line.label}: ${valueFormatter(line.value)}`}</title>
+          <rect x={plotLeft + 4} y={y} width={width} height="24" rx="5" />
+          <circle cx={plotLeft + 15} cy={y + 12} r="3" fill={line.color} />
+          <text x={plotLeft + 24} y={y + 16}>{label}</text>
+        </g>
+      })}
       {appearance === 'insight' && atLatest && lines.map((line) => {
         const value = latest?.[line.key]
         return typeof value === 'number' && Number.isFinite(value) ? <g key={line.key} className="interactive-trend-endpoint" aria-hidden="true">
@@ -504,6 +589,6 @@ export function InteractiveTrendChart({
         </g>
       })}
     </svg>
-    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />{differenceLabel}<b>{differenceFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
+    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{references.map((line) => <span key={line.label}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(line.value)}</b></span>)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />{differenceLabel}<b>{differenceFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
   </div>
 }

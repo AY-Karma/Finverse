@@ -21,7 +21,7 @@ describe('interactive trend chart', () => {
     expect(markup).not.toContain('Select buy point')
   })
 
-  it('shows the full selected range and keeps an early purchase marker visible', () => {
+  it('shows the latest price window with navigation and hides markers outside that window', () => {
     const start = new Date('2025-01-01T00:00:00').getTime()
     const rows = Array.from({ length: 250 }, (_, index) => ({
       at: start + index * 86_400_000,
@@ -37,10 +37,10 @@ describe('interactive trend chart', () => {
       markers={[{ at: rows[0].at, value: rows[0].close, color: '#f2b53c', label: 'Bought 01 Jan', comparable: true }]}
     />)
 
-    expect(markup).toContain('Compare from Bought 01 Jan')
-    expect(markup).toContain('01 Jan 2025')
+    expect(markup).not.toContain('Compare from Bought 01 Jan')
+    expect(markup).not.toContain('01 Jan 2025')
     expect(markup).toContain('interactive-trend-current')
-    expect(markup).not.toContain('Drag to explore')
+    expect(markup).toContain('Drag to explore')
   })
 
   it('keeps insight series distinct without coloring the whole gap by the latest result', () => {

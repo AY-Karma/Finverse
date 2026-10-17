@@ -22,8 +22,8 @@ vi.mock('../useStore', () => ({
   }),
 }))
 vi.mock('./InteractiveTrendChart', () => ({
-  InteractiveTrendChart: ({ markers, valueFormatter, yAxisLabel }: { markers?: unknown[]; valueFormatter: (value: number) => string; yAxisLabel: string }) => (
-    <div data-testid="history-chart" data-markers={JSON.stringify(markers ?? [])} data-formatted-value={valueFormatter(100)} data-axis-label={yAxisLabel} />
+  InteractiveTrendChart: ({ referenceLines, valueFormatter, yAxisLabel }: { referenceLines?: unknown[]; valueFormatter: (value: number) => string; yAxisLabel: string }) => (
+    <div data-testid="history-chart" data-references={JSON.stringify(referenceLines ?? [])} data-formatted-value={valueFormatter(100)} data-axis-label={yAxisLabel} />
   ),
 }))
 
@@ -141,25 +141,24 @@ describe('Holding Price History', () => {
     const chart = container.querySelector('[data-testid="history-chart"]')!
     expect(chart.getAttribute('data-formatted-value')).toBe('$100.00')
     expect(chart.getAttribute('data-axis-label')).toBe('Price (USD)')
-    expect(JSON.parse(chart.getAttribute('data-markers')!)[0].description).toContain('Average cost: $100.00')
-    expect(container.querySelector('.history-purchase')?.textContent).toContain('$100.00 → $120.00')
+    expect(JSON.parse(chart.getAttribute('data-references')!)[0]).toMatchObject({ value: 100, label: 'Avg cost' })
+    expect(container.querySelector('.history-cost-summary')?.textContent).toContain('Avg cost $100.00')
+    expect(container.querySelector('.history-cost-summary')?.textContent).toContain('+$20.00 (+20.0%)')
     expect(container.textContent).not.toContain('₹')
   })
 
-  it('marks the actual average cost and explains that the nearest chart date is not a purchase date', async () => {
+  it('shows the actual average cost as a reference without implying a purchase date', async () => {
     history.mockResolvedValue([
       { date: '2026-09-21', close: 90 },
       { date: '2026-09-22', close: 103 },
       { date: '2026-09-23', close: 120 },
     ])
     await renderPanel()
-    const markers = JSON.parse(container.querySelector('[data-testid="history-chart"]')!.getAttribute('data-markers')!)
-    expect(markers).toHaveLength(1)
-    expect(markers[0]).toMatchObject({ at: +new Date('2026-09-22T00:00:00'), value: 100, label: 'Avg cost' })
-    expect(markers[0].description).toContain('not a purchase date')
-    expect(markers[0].comparable).not.toBe(true)
-    expect(container.textContent).toContain('20.0% above your average cost')
-    expect(container.textContent).toContain('closest historical close for placement, not a purchase date')
+    const references = JSON.parse(container.querySelector('[data-testid="history-chart"]')!.getAttribute('data-references')!)
+    expect(references).toHaveLength(1)
+    expect(references[0]).toMatchObject({ value: 100, label: 'Avg cost' })
+    expect(references[0]).not.toHaveProperty('at')
+    expect(container.textContent).toContain('Latest close vs cost +₹20.00 (+20.0%)')
     expect(container.textContent).not.toMatch(/since you|Bought|started this investment/)
   })
 
@@ -169,20 +168,20 @@ describe('Holding Price History', () => {
       { date: '2026-09-22', close: 102 },
     ])
     await renderPanel()
-    expect(container.querySelector('.history-purchase')).not.toBeNull()
+    expect(container.querySelector('.history-cost-summary')).not.toBeNull()
     expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
 
     settings.hideValues = true
     await act(async () => { root.render(<HistoryPanel scope="all" />) })
     expect(container.textContent).toContain('Values are hidden')
     expect(container.textContent).not.toContain('FMCGIETF')
-    expect(container.querySelector('.history-tools, .history-quote, .history-purchase, [data-testid="history-chart"]')).toBeNull()
+    expect(container.querySelector('.history-tools, .history-quote, .history-cost-summary, [data-testid="history-chart"]')).toBeNull()
     expect(container.innerHTML).not.toContain('FMCGIETF')
 
     settings.hideValues = false
     await act(async () => { root.render(<HistoryPanel scope="all" />) })
     expect(container.querySelector<HTMLInputElement>('.history-input')?.value).toBe('FMCGIETF')
-    expect(container.querySelector('.history-purchase')).not.toBeNull()
+    expect(container.querySelector('.history-cost-summary')).not.toBeNull()
     expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
   })
 
