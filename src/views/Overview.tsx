@@ -2,6 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse } from '../valuation'
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
+import { needsInstrumentReview } from '../instruments'
 import type { Currency, LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
 import {
@@ -37,7 +38,7 @@ interface LedgerRow {
   pnl: number | null
 }
 
-export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => void; onRequestImport: () => void }) {
+export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anchor?: string) => void; onRequestImport: () => void }) {
   const { positions, rawPositions, settings, setSettings, fxRate, refreshNow, snapshot, marketDataRefreshing, marketDataResult } = useStore()
   const currency = settings.currency || 'INR'
   const [scope, setScope] = useState<Scope>('all')
@@ -104,6 +105,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
 
   const equityCount = positions.filter((p) => p.type !== 'mutual-fund').length
   const mfCount = positions.filter((p) => p.type === 'mutual-fund').length
+  const pendingListings = positions.filter(needsInstrumentReview).length
 
   const scopePositions = useMemo(
     () =>
@@ -292,10 +294,16 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View) => 
 
   return (
     <div className={hideValues ? 'peek' : undefined} style={{ display: 'contents' }}>
-      <div className="page-head enter d0">
-        <div>
+      <div className="page-head overview-head enter d0">
+        <div className="overview-heading">
           <div className="page-eyebrow">Portfolio</div>
-          <h1 className="page-title">Overview</h1>
+          <div className="overview-title-row">
+            <h1 className="page-title">Overview</h1>
+            {pendingListings > 0 && <div className="overview-review">
+              <button className="btn overview-review-action" type="button" onClick={() => onGoTo('settings', 'instrument-review')}>Review listings</button>
+              <p className="overview-review-note" role="status">Approve listings to confirm prices &amp; calibration.</p>
+            </div>}
+          </div>
         </div>
         <div className="page-sub overview-sub">
           <div className="overview-actions">

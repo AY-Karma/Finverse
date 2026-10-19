@@ -36,10 +36,10 @@ export default function App({ initialView }: { initialView: View }) {
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
   const { positions, settings } = useStore()
 
-  const navigate = useCallback((nextView: View) => {
+  const navigate = useCallback((nextView: View, anchor?: string) => {
     if (window.location.pathname === '/app/research') researchUrl.current = window.location.pathname + window.location.search
-    const nextPath = nextView === 'research' ? researchUrl.current : pathForView(nextView)
-    if (window.location.pathname + window.location.search !== nextPath) window.history.pushState({}, '', nextPath)
+    const nextPath = (nextView === 'research' ? researchUrl.current : pathForView(nextView)) + (anchor ? `#${anchor}` : '')
+    if (window.location.pathname + window.location.search + window.location.hash !== nextPath) window.history.pushState({}, '', nextPath)
     if (nextView === 'research') setResearchVisited(true)
     if (nextView === 'holdings') setMonitorQuery('')
     setResearchReturn(false)

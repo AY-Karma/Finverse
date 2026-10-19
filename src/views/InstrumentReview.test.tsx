@@ -87,14 +87,14 @@ it('approves all pending listings with their current defaults, excluding reviewe
   })
   try {
     await act(async () => root.render(<InstrumentReview />))
-    expect(container.querySelector('details')?.classList.contains('review-required')).toBe(true)
+    expect(container.querySelector('#instrument-review')?.classList.contains('review-required')).toBe(true)
     await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Approve all default listings')!.click())
     expect(state.confirmInstrument.mock.calls).toEqual([
       ['holding', { ticker: '500112', type: 'stock', exchange: 'NSE', currency: 'INR', providerSymbol: '500112.NS', isin: '', sector: '' }],
       ['default', { ticker: 'DEFAULT', type: 'stock', exchange: 'OTHER', currency: 'INR', providerSymbol: '', isin: '', sector: '' }],
     ])
     expect(container.querySelector('[role="status"]')?.textContent).toContain('2 default listings approved')
-    expect(container.querySelector('details')?.classList.contains('review-required')).toBe(false)
+    expect(container.querySelector('#instrument-review')?.classList.contains('review-required')).toBe(false)
     expect(container.textContent).toContain('0 inferred or unresolved')
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Approve all default listings')).toBe(false)
   } finally { await act(async () => root.unmount()) }
@@ -121,7 +121,7 @@ it('keeps failed listing edits and approves other defaults after a validation fa
     expect(sector.value).toBe('Unsaved sector')
     expect(state.confirmInstrument.mock.calls[0][1].sector).toBe('')
     expect(container.querySelector('form strong')?.textContent).toBe('State Bank')
-    expect(container.querySelector('details')?.classList.contains('review-required')).toBe(true)
+    expect(container.querySelector('#instrument-review')?.classList.contains('review-required')).toBe(true)
   } finally { await act(async () => root.unmount()) }
 })
 
@@ -141,6 +141,6 @@ it('requires manual currency review before bulk approval can clear unresolved cu
     expect(container.querySelector('[role="status"]')).toBeNull()
     expect(state.positions[0].currency).toBeUndefined()
     expect(state.positions[1].reportedCurrency).toBe('GBP')
-    expect(container.querySelector('details')?.classList.contains('review-required')).toBe(true)
+    expect(container.querySelector('#instrument-review')?.classList.contains('review-required')).toBe(true)
   } finally { await act(async () => root.unmount()) }
 })

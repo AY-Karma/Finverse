@@ -85,6 +85,10 @@ export function listingIdentity(position: Position): string {
 /** Recomputed, versioned listing identity shared by valuation, quotes and research. */
 export function instrumentKey(position: Position): string { return listingIdentity(position) }
 
+export function needsInstrumentReview(position: Position): boolean {
+  return position.type !== 'mutual-fund' && (!!position.identityIssue || position.exchangeSource !== 'explicit')
+}
+
 export function normalizePosition(position: Position): Position {
   if (position.type !== 'mutual-fund') {
     const normalized = normalizeListing(position)

@@ -19,6 +19,42 @@ vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => null }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
+  it('shows pending imported listings, links to their review, and clears the notice after approval', async () => {
+    const onGoTo = vi.fn()
+    const positions: Position[] = [
+      { id: 'inferred', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchangeSource: 'inferred' },
+      { id: 'unresolved', ticker: 'SBIN', name: 'State Bank', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchangeSource: 'explicit', identityIssue: 'Confirm the venue' },
+      { id: 'reviewed', ticker: 'RELIANCE', name: 'Reliance', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchangeSource: 'explicit' },
+      { id: 'fund', ticker: 'Fund', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
+    ]
+    const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
+    state.store = { positions: [], rawPositions: [], snapshot: investmentWorkspace.readSnapshot({ folios: [], quotes: {}, fxRate: null }), settings: { ...loadSettings(), allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const render = () => act(async () => root.render(<Overview onGoTo={onGoTo} onRequestImport={vi.fn()} />))
+    try {
+      await render()
+      expect(container.querySelector('.overview-review')).toBeNull()
+      state.store = { ...state.store, positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }) }
+      await render()
+      const notice = container.querySelector('.page-head .overview-review')!
+      const reviewButton = notice.querySelector('button')!
+      expect(reviewButton.textContent).toBe('Review listings')
+      expect(reviewButton.nextElementSibling?.textContent).toBe('Approve listings to confirm prices & calibration.')
+      expect(notice.textContent).not.toContain('awaiting approval')
+      expect(container.querySelector('.overview-title-row > .page-title')?.textContent).toBe('Overview')
+      expect(container.querySelector('#instrument-review')).toBeNull()
+      await act(async () => notice.querySelector('button')!.click())
+      expect(onGoTo).toHaveBeenCalledWith('settings', 'instrument-review')
+      state.store = { ...state.store, settings: { ...state.store.settings, allowExternalData: false } }
+      await render()
+      expect(notice.querySelector('[role="status"]')?.textContent).toBe('Approve listings to confirm prices & calibration.')
+      state.store = { ...state.store, positions: positions.map((position) => ({ ...position, exchangeSource: 'explicit', identityIssue: undefined })) }
+      await render()
+      expect(container.querySelector('.overview-review')).toBeNull()
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('keeps imported fund XIRRs in the ledger without averaging a portfolio XIRR', async () => {
     const positions: Position[] = [12, 24].map((xirr, index) => ({ id: String(index), ticker: `Fund ${index}`, name: `Fund ${index}`, type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, xirr }))
     const folios = [{ id: 'funds', name: 'Funds', importedAt: Date.now(), positions }]

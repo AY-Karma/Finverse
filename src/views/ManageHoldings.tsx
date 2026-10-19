@@ -6,9 +6,9 @@ import { RemoveFolioButton } from './RemoveFolioButton'
 import { UndoImportButton } from './UndoImportButton'
 import { WorkspaceRestore } from './WorkspaceRestore'
 import { FundSchemeReview } from './FundSchemeReview'
-import { InstrumentReview } from './InstrumentReview'
+import { needsInstrumentReview } from '../instruments'
 
-export function ManageHoldings() {
+export function ManageHoldings({ reviewOpen, onReviewListings }: { reviewOpen: boolean; onReviewListings: () => void }) {
   const { folios, positions, exportPortfolio, undoLastImport, undoImportFolioId, removeFolio } = useStore()
   const [importOpen, setImportOpen] = useState(false)
   const hasPositions = positions.length > 0
@@ -25,7 +25,13 @@ export function ManageHoldings() {
     </div>
     <WorkspaceRestore />
     <FundSchemeReview />
-    <InstrumentReview />
+    {positions.some((position) => position.type !== 'mutual-fund') && <div className="workspace-recovery">
+      <button id="listing-review-trigger" type="button" className="btn btn--ghost listing-review-trigger" aria-expanded={reviewOpen} aria-controls="instrument-review" onClick={onReviewListings}>
+        <ActionIcon name="review" />
+        <span>Review instrument listings · {positions.filter(needsInstrumentReview).length} inferred or unresolved</span>
+        <span aria-hidden="true">→</span>
+      </button>
+    </div>}
     {importOpen && <div className="holdings-import"><ImportView compact /></div>}
     {folios.length > 0 && <div className="folio-list">{folios.map((folio) => <div className="folio-row" key={folio.id}>
       <div className="folio-marker" />

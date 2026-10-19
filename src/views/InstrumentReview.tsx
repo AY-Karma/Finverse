@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useStore, type InstrumentCorrection } from '../useStore'
-import { isNumericBseScripCode } from '../instruments'
+import { isNumericBseScripCode, needsInstrumentReview } from '../instruments'
 import type { Currency, Exchange, Position } from '../types'
+import { ActionIcon } from './ActionIcon'
 
 const EXCHANGES: Exchange[] = ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER']
 
@@ -14,11 +15,12 @@ function defaultCorrection(position: Position): InstrumentCorrection {
   return { ticker: position.ticker, type: position.type, exchange: position.exchange ?? 'OTHER', currency: position.currency ?? 'INR', providerSymbol: position.providerSymbol ?? '', isin: position.isin ?? '', sector: position.sector ?? '' }
 }
 
-export function InstrumentReview() {
+export function InstrumentReview({ onClose }: { onClose?: () => void }) {
   const { positions, confirmInstrument } = useStore()
   const holdings = positions.filter((position) => position.type !== 'mutual-fund')
-  const pending = holdings.filter((position) => position.identityIssue || position.exchangeSource !== 'explicit')
+  const pending = holdings.filter(needsInstrumentReview)
   const reviewCount = pending.length
+  const reviewRef = useRef<HTMLElement>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<InstrumentCorrection | null>(null)
   const [saving, setSaving] = useState(false)
@@ -28,6 +30,13 @@ export function InstrumentReview() {
   const [message, setMessage] = useState('')
   const selected = holdings.find((position) => position.id === selectedId)
   const needsProviderSymbol = draft?.exchange === 'BSE' && isNumericBseScripCode(draft.ticker)
+
+  useEffect(() => {
+    const section = reviewRef.current
+    if (!section || !onClose) return
+    section.focus({ preventScroll: true })
+    section.scrollIntoView({ block: 'nearest' })
+  }, [])
 
   function review(position: Position) {
     setSelectedId(position.id)
@@ -81,43 +90,48 @@ export function InstrumentReview() {
   }
 
   if (!holdings.length) return null
-  return <details className={`workspace-recovery instrument-review fund-review${reviewCount > 0 ? ' review-required' : ''}`}>
-    <summary>Review instrument listings · {reviewCount} inferred or unresolved</summary>
-    <p className="hint">Use the original broker statement to confirm each listing. Unresolved instruments retain imported values until corrected. This review sends no external requests.</p>
-    {reviewCount > 0 && <div className="import-actions">
-      <button type="button" className="btn btn--primary btn--small" disabled={saving} onClick={() => void approveAll()}>{approvingAll ? 'Approving default listings…' : 'Approve all default listings'}</button>
-      <span className="hint">Use the current values shown below. Listings with invalid details will still need review.</span>
-    </div>}
-    {bulkError && <p className="hint down" role="alert">{bulkError}</p>}
-    {message && <p className="hint" role="status">{message}</p>}
-    {holdings.map((position) => <div key={position.id} className="instrument-review-item">
-      <div className="folio-row">
-        <div className="folio-copy" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-          <span className="sym">{position.name || position.ticker}</span>
-          <span className="hint">{listing(position)}</span>
-          <span className="hint">{position.exchangeSource === 'explicit' ? 'Explicit exchange' : 'Inferred exchange, confirm with your statement'}</span>
-          {position.identityIssue && <span className="hint down">{position.identityIssue}</span>}
-          {(position.reportedExchange || position.reportedCurrency) && <span className="hint">Statement metadata: {position.reportedExchange ? `exchange ${position.reportedExchange}` : ''}{position.reportedExchange && position.reportedCurrency ? ', ' : ''}{position.reportedCurrency ? `currency ${position.reportedCurrency}` : ''}</span>}
+  return <section id="instrument-review" ref={reviewRef} tabIndex={-1} aria-label="Review instrument listings" className={`panel instrument-review fund-review${reviewCount > 0 ? ' review-required' : ''}`}>
+    <div className="instrument-review-head">
+      <div><h2>Review listings</h2><span className="hint">{reviewCount} inferred or unresolved</span></div>
+      {onClose && <button className="icon-btn" type="button" aria-label="Close listing review" onClick={onClose}><ActionIcon name="close" /></button>}
+    </div>
+    <div className="instrument-review-scroll" role="region" aria-label="Instrument listings" tabIndex={0}>
+      <p className="hint">Use the original broker statement to confirm each listing. Unresolved instruments retain imported values until corrected. This review sends no external requests.</p>
+      {reviewCount > 0 && <div className="import-actions">
+        <button type="button" className="btn btn--primary btn--small" disabled={saving} onClick={() => void approveAll()}>{approvingAll ? 'Approving default listings…' : 'Approve all default listings'}</button>
+        <span className="hint">Use the current values shown below. Listings with invalid details will still need review.</span>
+      </div>}
+      {bulkError && <p className="hint down" role="alert">{bulkError}</p>}
+      {message && <p className="hint" role="status">{message}</p>}
+      {holdings.map((position) => <div key={position.id} className="instrument-review-item">
+        <div className="folio-row">
+          <div className="folio-copy" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+            <span className="sym">{position.name || position.ticker}</span>
+            <span className="hint">{listing(position)}</span>
+            <span className="hint">{position.exchangeSource === 'explicit' ? 'Explicit exchange' : 'Inferred exchange, confirm with your statement'}</span>
+            {position.identityIssue && <span className="hint down">{position.identityIssue}</span>}
+            {(position.reportedExchange || position.reportedCurrency) && <span className="hint">Statement metadata: {position.reportedExchange ? `exchange ${position.reportedExchange}` : ''}{position.reportedExchange && position.reportedCurrency ? ', ' : ''}{position.reportedCurrency ? `currency ${position.reportedCurrency}` : ''}</span>}
+          </div>
+          <button type="button" className="btn btn--secondary btn--small" disabled={saving} aria-expanded={selectedId === position.id} onClick={() => review(position)}>Review listing</button>
         </div>
-        <button type="button" className="btn btn--secondary btn--small" disabled={saving} aria-expanded={selectedId === position.id} onClick={() => review(position)}>Review listing</button>
-      </div>
-      {selected?.id === position.id && draft && <form className="import-preview" aria-label="Review instrument listing" onSubmit={(event) => void save(event)}>
-        <strong style={{ overflowWrap: 'anywhere' }}>{selected.name || selected.ticker}</strong>
-        <p className="hint" style={{ overflowWrap: 'anywhere' }}>Current listing: {listing(selected)}</p>
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))' }}>
-          <label className="statement-field">Symbol<input className="input" required maxLength={100} value={draft.ticker} onChange={(event) => setDraft({ ...draft, ticker: event.target.value, providerSymbol: '' })} /></label>
-          <label className="statement-field">Asset type<select className="select" value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as InstrumentCorrection['type'] })}><option value="stock">Stock</option><option value="etf">ETF</option><option value="other">Other</option></select></label>
-          <label className="statement-field">Exchange<select className="select" value={draft.exchange} onChange={(event) => setDraft({ ...draft, exchange: event.target.value as Exchange, providerSymbol: '' })}>{EXCHANGES.map((exchange) => <option key={exchange} value={exchange}>{exchange === 'OTHER' ? 'Other / unresolved' : exchange}</option>)}</select></label>
-          <label className="statement-field">Asset currency<select className="select" value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value as Currency })}><option value="INR">INR</option><option value="USD">USD</option></select></label>
-          <label className="statement-field">{`Provider symbol, ${needsProviderSymbol ? 'required' : 'optional'}`}<input className="input" required={needsProviderSymbol} maxLength={100} value={draft.providerSymbol ?? ''} placeholder={needsProviderSymbol ? 'Enter the matching BSE provider symbol' : 'Leave blank to derive from the listing'} onChange={(event) => setDraft({ ...draft, providerSymbol: event.target.value })} /></label>
-          <label className="statement-field">ISIN, optional<input className="input" maxLength={12} value={draft.isin ?? ''} onChange={(event) => setDraft({ ...draft, isin: event.target.value })} /></label>
-          <label className="statement-field">Sector, optional<input className="input" maxLength={100} value={draft.sector ?? ''} onChange={(event) => setDraft({ ...draft, sector: event.target.value })} /></label>
-        </div>
-        <p className="hint" style={{ overflowWrap: 'anywhere' }}>Reviewed listing: {listing(draft)}</p>
-        <p className="hint">{needsProviderSymbol ? 'Numeric BSE codes need a confirmed provider symbol ending in .BO. Keep the BSE venue; imported values stay in use until corrected.' : 'Confirm the symbol, exchange and currency with your statement. Changing the symbol or exchange clears the old provider symbol.'}</p>
-        <div className="import-actions"><button type="submit" className="btn btn--primary" disabled={saving || !draft.ticker.trim()}>{saving && !approvingAll ? 'Saving correction…' : 'Save listing correction'}</button><button type="button" className="btn btn--ghost" disabled={saving} onClick={() => { setSelectedId(null); setDraft(null); setError('') }}>Cancel listing review</button></div>
-        {error && <p className="hint down" role="alert">{error}</p>}
-      </form>}
-    </div>)}
-  </details>
+        {selected?.id === position.id && draft && <form className="import-preview" aria-label="Review instrument listing" onSubmit={(event) => void save(event)}>
+          <strong style={{ overflowWrap: 'anywhere' }}>{selected.name || selected.ticker}</strong>
+          <p className="hint" style={{ overflowWrap: 'anywhere' }}>Current listing: {listing(selected)}</p>
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))' }}>
+            <label className="statement-field">Symbol<input className="input" required maxLength={100} value={draft.ticker} onChange={(event) => setDraft({ ...draft, ticker: event.target.value, providerSymbol: '' })} /></label>
+            <label className="statement-field">Asset type<select className="select" value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as InstrumentCorrection['type'] })}><option value="stock">Stock</option><option value="etf">ETF</option><option value="other">Other</option></select></label>
+            <label className="statement-field">Exchange<select className="select" value={draft.exchange} onChange={(event) => setDraft({ ...draft, exchange: event.target.value as Exchange, providerSymbol: '' })}>{EXCHANGES.map((exchange) => <option key={exchange} value={exchange}>{exchange === 'OTHER' ? 'Other / unresolved' : exchange}</option>)}</select></label>
+            <label className="statement-field">Asset currency<select className="select" value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value as Currency })}><option value="INR">INR</option><option value="USD">USD</option></select></label>
+            <label className="statement-field">{`Provider symbol, ${needsProviderSymbol ? 'required' : 'optional'}`}<input className="input" required={needsProviderSymbol} maxLength={100} value={draft.providerSymbol ?? ''} placeholder={needsProviderSymbol ? 'Enter the matching BSE provider symbol' : 'Leave blank to derive from the listing'} onChange={(event) => setDraft({ ...draft, providerSymbol: event.target.value })} /></label>
+            <label className="statement-field">ISIN, optional<input className="input" maxLength={12} value={draft.isin ?? ''} onChange={(event) => setDraft({ ...draft, isin: event.target.value })} /></label>
+            <label className="statement-field">Sector, optional<input className="input" maxLength={100} value={draft.sector ?? ''} onChange={(event) => setDraft({ ...draft, sector: event.target.value })} /></label>
+          </div>
+          <p className="hint" style={{ overflowWrap: 'anywhere' }}>Reviewed listing: {listing(draft)}</p>
+          <p className="hint">{needsProviderSymbol ? 'Numeric BSE codes need a confirmed provider symbol ending in .BO. Keep the BSE venue; imported values stay in use until corrected.' : 'Confirm the symbol, exchange and currency with your statement. Changing the symbol or exchange clears the old provider symbol.'}</p>
+          <div className="import-actions"><button type="submit" className="btn btn--primary" disabled={saving || !draft.ticker.trim()}>{saving && !approvingAll ? 'Saving correction…' : 'Save listing correction'}</button><button type="button" className="btn btn--ghost" disabled={saving} onClick={() => { setSelectedId(null); setDraft(null); setError('') }}>Cancel listing review</button></div>
+          {error && <p className="hint down" role="alert">{error}</p>}
+        </form>}
+      </div>)}
+    </div>
+  </section>
 }

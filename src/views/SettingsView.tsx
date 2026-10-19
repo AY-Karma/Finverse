@@ -5,14 +5,23 @@ import { ACCENTS, ACCENT_KEYS, normalizeHex } from '../theme'
 import type { Accent, Density, Mode } from '../types'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
+import { InstrumentReview } from './InstrumentReview'
 import { ActionIcon } from './ActionIcon'
 
 type SettingsSection = 'preferences' | 'privacy'
 
 export function SettingsView() {
-  const { settings, setSettings, settingsSaved = true } = useStore()
+  const { positions, settings, setSettings, settingsSaved = true } = useStore()
   const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
+  const [reviewOpen, setReviewOpen] = useState(() => window.location.hash === '#instrument-review')
+  const showListingReview = reviewOpen && positions.some((position) => position.type !== 'mutual-fund')
   const update = (patch: Partial<typeof settings>) => setSettings({ ...settings, ...patch })
+
+  const closeListingReview = () => {
+    setReviewOpen(false)
+    if (window.location.hash === '#instrument-review') window.history.replaceState({}, '', window.location.pathname + window.location.search)
+    document.getElementById('listing-review-trigger')?.focus()
+  }
 
   // Floating custom-accent card: pinned next to the rainbow chip in the empty
   // right zone of the settings page. Rendered through a portal because the
@@ -108,8 +117,8 @@ export function SettingsView() {
           </div>
         </nav>
 
-        <div className="settings-detail">
-          {activeSection === 'preferences' && (
+        <div className={`settings-detail${activeSection === 'preferences' && showListingReview ? ' settings-detail--review' : ''}`}>
+          {activeSection === 'preferences' && <div className="settings-preferences">
             <SettingsSectionHeader
               eyebrow="Workspace"
               title="Preferences"
@@ -117,8 +126,6 @@ export function SettingsView() {
             >
               <span className="settings-status">{settingsSaved ? 'Auto-saved' : 'Save failed'}</span>
             </SettingsSectionHeader>
-          )}
-          {activeSection === 'preferences' && (
             <div className="settings-group">
               <SettingRow
                 label="Display currency"
@@ -213,9 +220,10 @@ export function SettingsView() {
                 onChange={(hideValues) => update({ hideValues })}
               />
             </div>
-          )}
+            <ManageHoldings reviewOpen={showListingReview} onReviewListings={showListingReview ? closeListingReview : () => setReviewOpen(true)} />
+          </div>}
 
-          {activeSection === 'preferences' && <ManageHoldings />}
+          {activeSection === 'preferences' && showListingReview && <InstrumentReview onClose={closeListingReview} />}
 
           {activeSection === 'privacy' && (
             <SettingsSectionHeader

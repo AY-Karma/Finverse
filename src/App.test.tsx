@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
 vi.mock('./useStore', () => ({ useStore: () => state }))
 vi.mock('./theme', () => ({ applyTheme: vi.fn() }))
 vi.mock('./views/ResearchHistory', () => ({ ResearchHistory: () => null }))
-vi.mock('./views/Overview', () => ({ Overview: () => <h1>Overview workspace</h1> }))
+vi.mock('./views/Overview', () => ({ Overview: ({ onGoTo }: { onGoTo: (view: View, anchor?: string) => void }) => <><h1>Overview workspace</h1><button onClick={() => onGoTo('settings', 'instrument-review')}>Review listings</button></> }))
 vi.mock('./views/MonitorView', () => ({
   MonitorView: ({ initialQuery }: { initialQuery: string }) => <section aria-label="Monitor workspace"><output>{initialQuery}</output></section>,
 }))
@@ -84,6 +84,18 @@ async function browserBack() {
 }
 
 describe('Research workspace navigation', () => {
+  it('opens listing review in Settings and clears its anchor when returning to Overview', async () => {
+    await render('overview', '/app')
+    await click('Review listings')
+    expect(window.location.pathname + window.location.hash).toBe('/app/settings#instrument-review')
+    expect(container.textContent).toContain('Settings workspace')
+    await navigate('Overview')
+    expect(window.location.pathname + window.location.hash).toBe('/app')
+    await browserBack()
+    expect(window.location.pathname + window.location.hash).toBe('/app/settings#instrument-review')
+    expect(container.textContent).toContain('Settings workspace')
+  })
+
   it('returns to the workspace overview when browser navigation reaches the root', async () => {
     await render('settings', '/app/settings')
     await act(async () => {
