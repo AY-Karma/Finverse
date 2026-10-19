@@ -10,7 +10,7 @@ import { ActionIcon } from './ActionIcon'
 
 type SettingsSection = 'preferences' | 'privacy'
 
-export function SettingsView() {
+export function SettingsView({ onRequestImport }: { onRequestImport: () => void }) {
   const { positions, settings, setSettings, settingsSaved = true } = useStore()
   const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
   const [reviewOpen, setReviewOpen] = useState(() => window.location.hash === '#instrument-review')
@@ -220,7 +220,7 @@ export function SettingsView() {
                 onChange={(hideValues) => update({ hideValues })}
               />
             </div>
-            <ManageHoldings reviewOpen={showListingReview} onReviewListings={showListingReview ? closeListingReview : () => setReviewOpen(true)} />
+            <ManageHoldings onRequestImport={onRequestImport} reviewOpen={showListingReview} onReviewListings={showListingReview ? closeListingReview : () => setReviewOpen(true)} />
           </div>}
 
           {activeSection === 'preferences' && showListingReview && <InstrumentReview onClose={closeListingReview} />}

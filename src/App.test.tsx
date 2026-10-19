@@ -18,8 +18,10 @@ vi.mock('./views/MonitorView', () => ({
   MonitorView: ({ initialQuery }: { initialQuery: string }) => <section aria-label="Monitor workspace"><output>{initialQuery}</output></section>,
 }))
 vi.mock('./views/InsightsView', () => ({ InsightsView: () => <h1>Insights workspace</h1> }))
-vi.mock('./views/SettingsView', () => ({ SettingsView: () => <h1>Settings workspace</h1> }))
-vi.mock('./views/PortfolioImportDialog', () => ({ PortfolioImportDialog: () => null, preloadPortfolioImport: vi.fn() }))
+vi.mock('./views/SettingsView', () => ({ SettingsView: ({ onRequestImport }: { onRequestImport: () => void }) => <><h1>Settings workspace</h1><button onClick={onRequestImport}>Import holdings</button></> }))
+vi.mock('./views/PortfolioImportDialog', () => ({
+  PortfolioImportDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) => open ? <div role="dialog" aria-label="Portfolio import"><button onClick={onClose}>Close import</button></div> : null,
+}))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 const holding: Position = {
@@ -83,7 +85,20 @@ async function browserBack() {
   })
 }
 
-describe('Research workspace navigation', () => {
+describe('workspace navigation', () => {
+  it('opens and closes portfolio import from Settings without changing the active route', async () => {
+    await render('settings', '/app/settings#instrument-review')
+    await click('Import holdings')
+    expect(container.querySelector('[role="dialog"][aria-label="Portfolio import"]')).not.toBeNull()
+    expect(container.textContent).toContain('Settings workspace')
+    expect(window.location.pathname + window.location.hash).toBe('/app/settings#instrument-review')
+    expect(container.querySelector('.nav-item[aria-current="page"] .nav-item-label')?.textContent).toBe('Settings')
+    await click('Close import')
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(window.location.pathname + window.location.hash).toBe('/app/settings#instrument-review')
+    expect(container.textContent).toContain('Settings workspace')
+  })
+
   it('opens listing review in Settings and clears its anchor when returning to Overview', async () => {
     await render('overview', '/app')
     await click('Review listings')

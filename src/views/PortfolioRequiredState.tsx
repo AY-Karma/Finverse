@@ -1,5 +1,4 @@
 import { ActionIcon } from './ActionIcon'
-import { preloadPortfolioImport } from './PortfolioImportDialog'
 
 interface PortfolioRequiredStateProps {
   area: string
@@ -15,7 +14,7 @@ export function PortfolioRequiredState({ area, description, onImport }: Portfoli
         <h1 className="page-title">Import your portfolio to start.</h1>
         <p className="page-sub">{description}</p>
       </div>
-      <button className="btn btn--primary" type="button" onClick={onImport} onFocus={preloadPortfolioImport} onPointerEnter={preloadPortfolioImport}>
+      <button className="btn btn--primary" type="button" onClick={onImport}>
         <ActionIcon name="import" />Bring in your portfolio
       </button>
     </div>

@@ -10,6 +10,7 @@ export type DitherColor =
   | "purple"
   | "pink"
   | "orange"
+  | "yellow"
   | "red"
   | "grey"
 
@@ -30,6 +31,7 @@ export const PALETTE: Record<DitherColor, Seed> = {
     line: [255, 195, 130],
     star: [255, 220, 175],
   },
+  yellow: { fill: [235, 190, 45], line: [255, 225, 125], star: [255, 240, 185] },
   red: { fill: [240, 70, 70], line: [255, 150, 140], star: [255, 195, 185] },
   // No-data: a muted grey so empty metrics read as "nothing here".
   grey: { fill: [92, 92, 100], line: [140, 140, 150], star: [165, 165, 175] },

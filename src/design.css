@@ -3009,20 +3009,12 @@ details.workspace-recovery > summary {
 .import-source-mark {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--primary) 18%, var(--surface-3));
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
+  width: 44px;
+  height: 44px;
 }
-.import-source-mark--zerodha { color: #ff674d; }
-.import-source-mark--groww { color: #44c5a1; }
-.import-source-mark--indmoney { color: #8f98ff; }
-.import-source-mark--angel-one { color: #f1a44d; }
-.import-source-mark--local { color: var(--primary-hover); font-size: 10px; }
+.import-source-mark img { width: 100%; height: 100%; object-fit: contain; border-radius: 10px; }
+.import-source-mark--zerodha img,
+.import-source-mark--local img { border-radius: 0; }
 .import-source-card strong {
   font-size: 16px;
   line-height: 1.2;
@@ -3607,7 +3599,6 @@ details.workspace-recovery > summary {
 .data-destination { background: transparent; }
 
 /* ============ Holdings / research / monitor workspaces ============ */
-.holdings-import { display: grid; gap: var(--sp-md); }
 .holdings-empty, .research-empty { display: grid; justify-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
 .holdings-name { display: block; max-width: 300px; margin-top: 2px; overflow: hidden; color: var(--ink-subtle); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .folio-copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
@@ -3719,6 +3710,8 @@ details.workspace-recovery > summary {
 .holdings-manage .folio-row { align-items: flex-start; min-width: 0; gap: var(--sp-md); }
 .holdings-manage .folio-marker { margin-top: 8px; }
 .holdings-manage .folio-copy { gap: 4px; }
+.folio-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.folio-title > .sym { min-width: 0; }
 .holdings-manage .folio-copy .sym { overflow-wrap: anywhere; line-height: 1.35; }
 .holdings-manage .btn-remove { width: 32px; height: 32px; }
 .folio-row:has(.folio-remove-confirm) { flex-wrap: wrap; }
@@ -3999,7 +3992,7 @@ details.workspace-recovery > summary {
   .history-chart { height: 320px; }
 }
 @media (max-width: 560px) {
-  .manage-actions { gap: 6px; }
+  .manage-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .manage-actions .btn { height: 40px; padding: 4px 6px; font-size: 11px; line-height: 1.2; white-space: normal; }
   .score--current, .score--performers { grid-column: 1 / -1; }
   .score { padding: 22px; }

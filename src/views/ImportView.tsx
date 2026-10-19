@@ -10,6 +10,7 @@ import type { Position } from '../types'
 import { UndoImportButton } from './UndoImportButton'
 import { RemoveFolioButton } from './RemoveFolioButton'
 import { ActionIcon } from './ActionIcon'
+import folderIcon from '../assets/imports/folder.svg'
 
 interface ImportViewProps {
   compact?: boolean
@@ -200,7 +201,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
               target="_blank"
               rel="noopener noreferrer"
             >
-              <span className={`import-source-mark import-source-mark--${source.id}`} aria-hidden="true">{source.mark}</span>
+              <span className={`import-source-mark import-source-mark--${source.id}`} aria-hidden="true"><img src={source.icon} alt="" width={44} height={44} /></span>
               <strong>{source.name}</strong>
               <small>{source.description}</small>
               <span className="import-source-action"><ActionIcon name="external" />Open official site</span>
@@ -216,7 +217,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
             onDrop={(event) => { event.preventDefault(); setDragOver(false); void handleFiles(event.dataTransfer.files) }}
             onClick={() => inputRef.current?.click()}
           >
-            <span className="import-source-mark import-source-mark--local" aria-hidden="true">XLS</span>
+            <span className="import-source-mark import-source-mark--local" aria-hidden="true"><img src={folderIcon} alt="" width={44} height={44} /></span>
             <strong>{parsing ? 'Reading files…' : 'Local files'}</strong>
             <small id={instructionsId}>Drop or choose one or more .xlsx, .xls, or .csv files</small>
             <span className="import-source-action">Up to {MAX_IMPORT_FILES} files · 10 MB each</span>

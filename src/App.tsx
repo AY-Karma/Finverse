@@ -5,7 +5,7 @@ import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
 import { Overview } from './views/Overview'
-import { PortfolioImportDialog, preloadPortfolioImport } from './views/PortfolioImportDialog'
+import { PortfolioImportDialog } from './views/PortfolioImportDialog'
 import { ActionIcon } from './views/ActionIcon'
 
 const loadMonitorView = () => import('./views/MonitorView')
@@ -52,10 +52,13 @@ export default function App({ initialView }: { initialView: View }) {
     setResearchReturn(true)
   }
 
-  const requestPortfolioImport = () => {
-    preloadPortfolioImport()
-    navigate('overview')
+  const openPortfolioImport = () => {
     setImportOpen(true)
+  }
+
+  const requestPortfolioImport = () => {
+    navigate('overview')
+    openPortfolioImport()
   }
 
   useEffect(() => {
@@ -125,7 +128,7 @@ export default function App({ initialView }: { initialView: View }) {
           <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
             {view === 'holdings' && <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
             {view === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
-            {view === 'settings' && <SettingsView />}
+            {view === 'settings' && <SettingsView onRequestImport={openPortfolioImport} />}
           </Suspense>
         )}
       </main>

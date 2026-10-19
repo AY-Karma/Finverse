@@ -25,8 +25,19 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
 
 describe('workspace settings', () => {
+  it('requests the shared portfolio import without changing Settings navigation', async () => {
+    const onRequestImport = vi.fn()
+    await act(async () => root.render(<SettingsView onRequestImport={onRequestImport} />))
+    const trigger = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')].find((button) => button.textContent === 'Import holdings')!
+    await act(async () => trigger.click())
+    expect(onRequestImport).toHaveBeenCalledOnce()
+    expect(window.location.pathname).toBe('/app/settings')
+    expect(container.querySelector('.settings-nav-item[aria-current="page"] strong')?.textContent).toBe('Preferences')
+    expect(container.querySelector('.holdings-import')).toBeNull()
+  })
+
   it('keeps display preferences and holdings management together', async () => {
-    await act(async () => root.render(<SettingsView />))
+    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     expect([...container.querySelectorAll('.settings-nav-copy strong')].map((item) => item.textContent)).toEqual(['Preferences', 'Data & privacy'])
     expect(container.querySelector('.settings-preferences > .settings-group')?.nextElementSibling?.getAttribute('aria-label')).toBe('Manage holdings')
     const currency = container.querySelector<HTMLSelectElement>('#currency')!
@@ -43,7 +54,7 @@ describe('workspace settings', () => {
     const scroll = vi.fn()
     HTMLElement.prototype.scrollIntoView = scroll
     try {
-      await act(async () => root.render(<SettingsView />))
+      await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
       const trigger = container.querySelector<HTMLButtonElement>('#listing-review-trigger')!
       expect(container.querySelector('#instrument-review')).toBeNull()
       await act(async () => trigger.click())
@@ -61,13 +72,13 @@ describe('workspace settings', () => {
       await act(async () => root.unmount())
       root = createRoot(container)
       window.history.replaceState({}, '', '/app/settings#instrument-review')
-      await act(async () => root.render(<SettingsView />))
+      await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
       expect(container.querySelector('.settings-detail--review > #instrument-review')).not.toBeNull()
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close listing review"]')!.click())
       expect(window.location.hash).toBe('')
       await act(async () => container.querySelector<HTMLButtonElement>('#listing-review-trigger')!.click())
       state.positions = []
-      await act(async () => root.render(<SettingsView />))
+      await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
       expect(container.querySelector('.settings-detail--review')).toBeNull()
       expect(container.querySelector('#instrument-review')).toBeNull()
     } finally { HTMLElement.prototype.scrollIntoView = originalScroll }
@@ -75,7 +86,7 @@ describe('workspace settings', () => {
 
   it('describes browser storage and keeps market access opt-in', async () => {
     state.settings = { ...state.settings, allowExternalData: false }
-    await act(async () => root.render(<SettingsView />))
+    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     const privacy = [...container.querySelectorAll<HTMLButtonElement>('.settings-nav-item')].find((button) => button.textContent?.includes('Data & privacy'))!
     await act(async () => privacy.click())
     expect(container.querySelector('[aria-label="Manage holdings"]')).toBeNull()

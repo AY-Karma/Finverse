@@ -28,13 +28,36 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('shows each import age beside its filename and allows updates at every age', async () => {
+    const now = Date.parse('2026-10-19T12:00:00Z')
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    state.folios = [3, 14, 28].map((days, index) => ({
+      ...folio, id: `account-${index}`, name: `holdings-${days}.xlsx`, importedAt: now - days * 86_400_000,
+    }))
+    const onRequestImport = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const rows = [...container.querySelectorAll('.folio-list > .folio-row')]
+      expect(rows.map((row) => row.querySelector('.folio-title > .sym')?.nextElementSibling?.getAttribute('data-status'))).toEqual(['healthy', 'aging', 'old'])
+      const importButton = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')].find((button) => button.textContent === 'Import holdings')!
+      expect(importButton.disabled).toBe(false)
+      await act(async () => importButton.click())
+      expect(onRequestImport).toHaveBeenCalledOnce()
+    } finally {
+      await act(async () => root.unmount())
+      clock.mockRestore()
+    }
+  })
+
   it.each([['settings', ManageHoldings], ['import page', ImportView]])('requires confirmation and supports cancel on the %s', async (_, View) => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
     const findButton = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent === label)!
     try {
-      await act(async () => root.render(View === ManageHoldings ? <ManageHoldings reviewOpen={false} onReviewListings={vi.fn()} /> : <ImportView />))
+      await act(async () => root.render(View === ManageHoldings ? <ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} /> : <ImportView />))
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove holdings.xlsx"]')!.click())
       expect(state.removeFolio).not.toHaveBeenCalled()
       expect(container.querySelector('[aria-label="Confirm deletion of holdings.xlsx"]')).not.toBeNull()
@@ -53,14 +76,13 @@ describe('holdings management', () => {
     } finally { await act(async () => root.unmount()); container.remove() }
   })
 
-  it('keeps import review, exports and confirmed undo available in settings', async () => {
-    const preview = { id: 'preview', fileName: 'new.csv', positions: [position], duplicateCount: 0, unmatchedCount: 0, rejectedCount: 0, issues: [], createdAt: 1234 }
-    state.previewFile.mockResolvedValue(preview)
+  it('opens the shared import flow and keeps exports and confirmed undo available in settings', async () => {
+    const onRequestImport = vi.fn()
     const container = document.createElement('div')
     const root = createRoot(container)
     const findButton = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent === label)!
     try {
-      await act(async () => root.render(<ManageHoldings reviewOpen={false} onReviewListings={vi.fn()} />))
+      await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
       expect(container.querySelector('.manage-actions')?.children).toHaveLength(4)
       await act(async () => findButton('Export CSV').click())
       await act(async () => findButton('Backup JSON').click())
@@ -70,17 +92,11 @@ describe('holdings management', () => {
       await act(async () => findButton('Confirm undo').click())
       expect(state.undoLastImport).toHaveBeenCalledOnce()
       await act(async () => findButton('Import holdings').click())
-      expect(findButton('Close import').getAttribute('aria-expanded')).toBe('true')
-      const input = container.querySelector<HTMLInputElement>('.holdings-import input[type="file"]')!
-      const file = new File(['Ticker'], 'new.csv')
-      Object.defineProperty(input, 'files', { value: [file] })
-      await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
-      expect(state.previewFile).toHaveBeenCalledExactlyOnceWith(file)
+      expect(onRequestImport).toHaveBeenCalledOnce()
+      expect(findButton('Import holdings').getAttribute('aria-haspopup')).toBe('dialog')
+      expect(container.querySelector('.holdings-import')).toBeNull()
+      expect(state.previewFile).not.toHaveBeenCalled()
       expect(state.commitImport).not.toHaveBeenCalled()
-      await act(async () => findButton('Add to portfolio').click())
-      expect(state.commitImport).toHaveBeenCalledExactlyOnceWith(preview, expect.objectContaining({ operation: 'add', statementDate: null, complete: false }))
-      await act(async () => findButton('Close import').click())
-      expect(container.querySelector('.holdings-import input[type="file"]')).toBeNull()
     } finally { await act(async () => root.unmount()) }
   })
 
@@ -91,7 +107,7 @@ describe('holdings management', () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     try {
-      await act(async () => root.render(<ManageHoldings reviewOpen={false} onReviewListings={vi.fn()} />))
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
       const buttons = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')]
       expect(buttons.map((button) => button.disabled)).toEqual([false, true, false, true])
     } finally { await act(async () => root.unmount()) }
@@ -103,7 +119,7 @@ describe('holdings management', () => {
     const root = createRoot(container)
     const undo = () => container.querySelector<HTMLButtonElement>('.undo-import')!
     try {
-      await act(async () => root.render(<ManageHoldings reviewOpen={false} onReviewListings={vi.fn()} />))
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
       expect(undo().title).toContain('after reload')
       expect(undo().title).not.toContain('this session')
       await act(async () => undo().click())

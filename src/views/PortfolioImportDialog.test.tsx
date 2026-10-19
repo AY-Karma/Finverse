@@ -1,34 +1,28 @@
 // @vitest-environment jsdom
-import { act, useEffect, useState } from 'react'
+import { act, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PortfolioImportDialog } from './PortfolioImportDialog'
 
-const imports = vi.hoisted(() => {
-  let finishLoading!: () => void
-  const ready = new Promise<void>((resolve) => { finishLoading = resolve })
-  return { loaded: vi.fn(), mounted: vi.fn(), unmounted: vi.fn(), ready, finishLoading }
-})
-vi.mock('./ImportView', async () => {
-  imports.loaded()
-  await imports.ready
-  return {
-    ImportView: ({ initialStep, onImported }: { initialStep: string; onImported: () => void }) => {
-      const [step, setStep] = useState(initialStep)
-      useEffect(() => {
-        imports.mounted()
-        return () => { imports.unmounted() }
-      }, [])
-      return <section aria-label="Import screen"><output>{step}</output><button type="button" onClick={() => setStep('files')}>Local files</button><button type="button" onClick={onImported}>Complete import</button></section>
-    },
-  }
-})
+const state = vi.hoisted(() => ({
+  folios: [], positions: [], liveQuotes: {}, fxRate: null,
+  settings: { currency: 'INR', allowExternalData: false, hideValues: false },
+  previewFile: vi.fn(), commitImport: vi.fn(), commitImports: vi.fn(),
+}))
+vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 let container: HTMLDivElement
 let root: ReturnType<typeof createRoot>
 
 beforeEach(() => {
+  vi.clearAllMocks()
+  state.previewFile.mockResolvedValue({
+    id: 'preview', fileName: 'holdings.csv', duplicateCount: 0, unmatchedCount: 0,
+    rejectedCount: 0, issues: [], createdAt: Date.now(),
+    positions: [{ id: 'tcs', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 10, buyPrice: 100, lastPrice: 120, invested: 1000 }],
+  })
+  state.commitImport.mockResolvedValue(true)
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -50,71 +44,65 @@ afterEach(async () => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'close')
 })
 
+async function upload() {
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+  Object.defineProperty(input, 'files', { configurable: true, value: [new File(['Ticker'], 'holdings.csv')] })
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
+}
+
+const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!
+
 describe('portfolio import dialog', () => {
-  it('defers the import screen, keeps focus during loading, and preserves an unfinished import when reopened', async () => {
+  it('has every source ready before first open and preserves an unfinished review when reopened', async () => {
     function Workspace() {
       const [open, setOpen] = useState(false)
       return <><button type="button" onClick={() => setOpen(true)}>Import portfolio</button><PortfolioImportDialog open={open} onClose={() => setOpen(false)} /></>
     }
     await act(async () => root.render(<Workspace />))
-    const trigger = container.querySelector<HTMLButtonElement>('button')!
+    const trigger = button('Import portfolio')
     const dialog = container.querySelector('dialog')!
     const close = container.querySelector<HTMLButtonElement>('[aria-label="Close portfolio import"]')!
-    expect(imports.loaded).not.toHaveBeenCalled()
-    expect(container.querySelector('[aria-label="Import screen"]')).toBeNull()
     expect(dialog.open).toBe(false)
+    expect([...container.querySelectorAll('.import-source-card strong')].map((item) => item.textContent)).toEqual(['Zerodha', 'Groww', 'INDmoney', 'Angel One', 'Local files'])
+    expect(container.querySelectorAll('.import-source-mark img')).toHaveLength(5)
+    expect(container.textContent).not.toContain('Loading import')
+    expect(state.previewFile).not.toHaveBeenCalled()
 
     trigger.focus()
     await act(async () => trigger.click())
     expect(dialog.open).toBe(true)
     expect(document.activeElement).toBe(close)
-    expect(container.querySelector('[role="status"]')?.textContent).toBe('Loading import...')
-    imports.finishLoading()
-    await act(async () => vi.dynamicImportSettled())
-    expect(imports.loaded).toHaveBeenCalledOnce()
-    expect(imports.mounted).toHaveBeenCalledOnce()
-    expect(dialog.open).toBe(true)
-    expect(document.activeElement).toBe(close)
-    expect(container.querySelector('output')?.textContent).toBe('sources')
-    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Local files')!.click())
-    expect(container.querySelector('output')?.textContent).toBe('files')
+    await upload()
+    expect(container.querySelector('.import-preview')).not.toBeNull()
+    expect(state.commitImport).not.toHaveBeenCalled()
 
     await act(async () => dialog.dispatchEvent(new Event('cancel', { cancelable: true })))
     expect(dialog.open).toBe(false)
     expect(document.activeElement).toBe(trigger)
-    expect(imports.unmounted).not.toHaveBeenCalled()
-    expect(container.querySelector('output')?.textContent).toBe('files')
-
     await act(async () => trigger.click())
     expect(container.querySelector('dialog')).toBe(dialog)
-    expect(imports.loaded).toHaveBeenCalledOnce()
-    expect(imports.mounted).toHaveBeenCalledOnce()
-    expect(container.querySelector('output')?.textContent).toBe('files')
+    expect(container.querySelector('.import-preview')).not.toBeNull()
     expect(document.activeElement).toBe(close)
-    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Complete import')!.click())
+    await act(async () => button('Add to portfolio').click())
+    expect(state.commitImport).toHaveBeenCalledOnce()
     expect(dialog.open).toBe(false)
     expect(document.activeElement).toBe(trigger)
   })
 
-  it('keeps a failed load inside the dialog and retries after reopening', async () => {
-    vi.doMock('./ImportView', () => { throw new Error('Import chunk unavailable') })
+  it('keeps file and save failures inside the dialog without losing the review', async () => {
     const onClose = vi.fn()
     await act(async () => root.render(<PortfolioImportDialog open onClose={onClose} />))
-    await act(async () => vi.dynamicImportSettled())
-    const dialog = container.querySelector('dialog')!
-    const close = container.querySelector<HTMLButtonElement>('[aria-label="Close portfolio import"]')!
-    expect(dialog.open).toBe(true)
-    expect(document.activeElement).toBe(close)
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Close and reopen to try again')
-    await act(async () => close.click())
-    expect(onClose).toHaveBeenCalledOnce()
-    await act(async () => root.render(<PortfolioImportDialog open={false} onClose={onClose} />))
-    vi.doMock('./ImportView', () => ({ ImportView: () => <section aria-label="Import screen" /> }))
-    await act(async () => root.render(<PortfolioImportDialog open onClose={onClose} />))
-    await act(async () => vi.dynamicImportSettled())
-    expect(container.querySelector('dialog')).toBe(dialog)
-    expect(container.querySelector('[role="alert"]')).toBeNull()
-    expect(container.querySelector('[aria-label="Import screen"]')).not.toBeNull()
-    expect(document.activeElement).toBe(close)
+    state.previewFile.mockRejectedValueOnce(new Error('Could not read holdings.'))
+    await upload()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Could not read holdings.')
+    expect(onClose).not.toHaveBeenCalled()
+
+    await upload()
+    state.commitImport.mockResolvedValue(false)
+    await act(async () => button('Add to portfolio').click())
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('could not be saved')
+    expect(container.querySelector('.import-preview')).not.toBeNull()
+    expect(container.querySelector('dialog')?.open).toBe(true)
+    expect(onClose).not.toHaveBeenCalled()
   })
 })

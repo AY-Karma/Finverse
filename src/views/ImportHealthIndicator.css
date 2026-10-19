@@ -1,0 +1,22 @@
+.import-health {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  vertical-align: middle;
+  cursor: help;
+}
+
+.import-health:focus-visible {
+  outline: 2px solid var(--primary-focus);
+  outline-offset: 2px;
+}
+
+.import-health-texture {
+  width: 36px;
+  height: 10px;
+  flex: none;
+}
