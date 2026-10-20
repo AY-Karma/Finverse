@@ -205,6 +205,7 @@ export function useMonitor() {
 
   const redact = <T extends MonitorRecord | MonitorAlert>(item: T): T => !settings.hideValues ? item : ({
     ...item,
+    holding: privateValue(item.holding, true),
     title: item.kind === 'price' ? 'Watch observation hidden' : item.title,
     reason: 'Values are hidden.',
     evidence: 'Provider observation details are hidden while Hide values is enabled.',
@@ -220,7 +221,9 @@ export function useMonitor() {
     alerts: state.alerts.map(redact),
     quoteRecords: quoteRecords.map(redact),
     rules,
-    events: [...state.events].sort((a, b) => a.date.localeCompare(b.date)).map((event) => event.unresolved ? { ...event, holding: `${event.holding} · Holding unavailable` } : event),
+    events: [...state.events].sort((a, b) => a.date.localeCompare(b.date)).map((event) => settings.hideValues
+      ? { ...event, holding: privateValue(event.holding, true), title: privateValue(event.title, true) }
+      : event.unresolved ? { ...event, holding: `${event.holding} · Holding unavailable` } : event),
     counts: {
       open: state.alerts.filter((alert) => alert.state === 'open').length,
       reviewed: state.alerts.filter((alert) => alert.state === 'reviewed').length,

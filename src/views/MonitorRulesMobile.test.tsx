@@ -39,6 +39,22 @@ afterEach(async () => {
 })
 
 describe('mobile watch rule actions', () => {
+  it('closes a private rule form and blocks editing when masking is enabled', async () => {
+    await renderMonitor()
+    const edit = [...container.querySelectorAll<HTMLButtonElement>('.mp-rule-menu button')].find(button => button.textContent === 'Edit')!
+    await act(async () => edit.click())
+    const dialog = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-rule-title"]')!
+    expect(dialog.open).toBe(true)
+    state.store.settings = { ...state.store.settings, hideValues: true }
+    await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
+    expect(dialog.open).toBe(false)
+    expect(edit.disabled).toBe(true)
+    expect(container.textContent).not.toContain('Nippon India')
+    const actions = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === '+ New rule' || button.textContent === '+ Reminder')
+    expect(actions).toHaveLength(2)
+    expect(actions.every(button => button.disabled)).toBe(true)
+  })
+
   async function openAfterTouchBlur() {
     await renderMonitor()
     const menu = container.querySelector<HTMLDetailsElement>('.mp-rule-menu')!

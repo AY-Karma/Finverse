@@ -191,6 +191,8 @@ describe('overview valuation and visible work', () => {
       expect(summary.querySelector('.current-value-move-arrow')?.textContent).toBe('')
       expect([...summary.querySelectorAll('.performer-half .score-value')].every((node) => node.getAttribute('title') === '••••••')).toBe(true)
       expect(summary.textContent).not.toMatch(/₹|WIN|LOSS|20\.00|10\.00/)
+      const labels = [...container.querySelectorAll('[title], [aria-label]')].map(element => `${element.getAttribute('title') || ''} ${element.getAttribute('aria-label') || ''}`).join(' ')
+      expect(labels).not.toMatch(/WIN|LOSS/)
       expect(container.querySelector('.daily-brief-copy strong')?.textContent).toBe('Session movement hidden.')
       expect(container.querySelector('.daily-brief')?.textContent).not.toMatch(/gained|lost|₹/)
     } finally { await act(async () => root.unmount()) }

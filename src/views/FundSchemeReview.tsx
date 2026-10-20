@@ -4,6 +4,7 @@ import { marketData } from '../marketData'
 import { canConfirmFundScheme, type FundSchemeReview as SchemeReview } from '../fundSchemes'
 import { hasSupportedValuationCurrency } from '../valuation'
 import type { Position } from '../types'
+import { HiddenValuesState } from './HiddenValuesState'
 
 function supportsFundNav(fund: Position): boolean {
   return hasSupportedValuationCurrency({ ...fund, currency: fund.currency ?? 'INR' })
@@ -22,13 +23,20 @@ export function FundSchemeReview() {
   const selected = funds.find((fund) => fund.id === selectedId)
 
   useEffect(() => {
-    if (!settings?.allowExternalData) { setBusy(false); setSelectedId(null); setReview(null) }
+    if (!settings?.allowExternalData || settings.hideValues) {
+      controllerRef.current?.abort()
+      setBusy(false)
+      setSelectedId(null)
+      setReview(null)
+      setCode('')
+      setMessage('')
+    }
     return () => controllerRef.current?.abort()
-  }, [settings?.allowExternalData])
+  }, [settings?.allowExternalData, settings?.hideValues])
 
   async function findScheme(id: string) {
     const fund = funds.find((position) => position.id === id)
-    if (!fund || busy || !settings.allowExternalData || !supportsFundNav(fund)) return
+    if (!fund || busy || settings.hideValues || !settings.allowExternalData || !supportsFundNav(fund)) return
     controllerRef.current?.abort()
     const controller = new AbortController()
     controllerRef.current = controller
@@ -51,7 +59,7 @@ export function FundSchemeReview() {
 
   async function confirm() {
     const candidate = review?.candidates.find((item) => String(item.schemeCode) === code)
-    if (!selected || !candidate || busy || !settings.allowExternalData || !supportsFundNav(selected)
+    if (!selected || !candidate || busy || settings.hideValues || !settings.allowExternalData || !supportsFundNav(selected)
       || !canConfirmFundScheme(selected.name || selected.ticker, candidate)) return
     setBusy(true)
     setMessage('')
@@ -66,6 +74,7 @@ export function FundSchemeReview() {
   }
 
   if (!funds.length) return null
+  if (settings.hideValues) return <section className="workspace-recovery fund-review" aria-label="Review mutual-fund schemes"><HiddenValuesState /></section>
   const candidate = review?.candidates.find((item) => String(item.schemeCode) === code)
   return <details className={`workspace-recovery fund-review${reviewCount > 0 ? ' review-required' : ''}`}>
     <summary>Review mutual-fund schemes · {reviewCount} need confirmation</summary>

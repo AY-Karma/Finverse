@@ -7,11 +7,28 @@ import type { Position } from '../types'
 
 const { initialPosition, state } = vi.hoisted(() => {
   const initialPosition: Position = { id: 'holding', ticker: '500112', name: 'State Bank', type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 100, invested: 100, exchange: 'NSE', currency: 'INR', providerSymbol: '500112.NS', exchangeSource: 'inferred', identityIssue: 'Confirm the venue', reportedExchange: 'BSE', reportedCurrency: 'INR' }
-  return { initialPosition, state: { positions: [initialPosition] as Position[], confirmInstrument: vi.fn() } }
+  return { initialPosition, state: { positions: [initialPosition] as Position[], confirmInstrument: vi.fn(), settings: { hideValues: false } } }
 })
 vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-afterEach(() => { state.positions = [initialPosition]; vi.resetAllMocks() })
+afterEach(() => { state.positions = [initialPosition]; state.settings.hideValues = false; vi.resetAllMocks() })
+
+it('hides listing identities and editing fields while masked, then restores them', async () => {
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<InstrumentReview />))
+    expect(container.textContent).toContain('State Bank')
+    state.settings.hideValues = true
+    await act(async () => root.render(<InstrumentReview />))
+    expect(container.textContent).toContain('Values are hidden')
+    expect(container.textContent).not.toMatch(/State Bank|500112/)
+    expect(container.querySelector('input, select, .instrument-review-item')).toBeNull()
+    state.settings.hideValues = false
+    await act(async () => root.render(<InstrumentReview />))
+    expect(container.textContent).toContain('State Bank')
+  } finally { await act(async () => root.unmount()) }
+})
 
 it('previews an explicit listing correction and keeps the edits after a save failure', async () => {
   state.confirmInstrument.mockRejectedValueOnce(new Error('Browser storage is full. Correction not saved.')).mockResolvedValueOnce(undefined)

@@ -175,7 +175,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   if (snapshot.positions.length === 0) {
     return (
       <PortfolioRequiredState
-        area="02 · Insights"
+        area="Insights"
         description="Bring in your holdings to turn market prices into contribution, allocation, performance, and risk views."
         onImport={onRequestImport}
       />
@@ -200,52 +200,50 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     <div className="insights-page">
       <div className="page-head enter d0">
         <div>
-          <div className="page-eyebrow">02 · Investment intelligence</div>
-          <h1 className="page-title">Read the market story.</h1>
+          <h1 className="page-title">Insights</h1>
         </div>
         <p className="page-sub">A visual explanation of what moved your portfolio, where your exposure sits, and how your record compares with the market.</p>
       </div>
 
       {!snapshot.valuationComplete && <p className="panel hint" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Allocation, concentration, and current P&L cover the {snapshot.pricedCount} priced holdings only. Incomplete portfolio values are not saved to tracked history.</p>}
 
-      <div className="insight-kpis enter d1">
+      <div className="insight-kpis enter d1" data-health-color={dataHealthColor(dataLabels.healthLabel)}>
         <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
           <span className="score-label insight-kpi-label"><span>{dataLabels.sessionLabel}</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: !hide && dataLabels.sessionValue != null && dataLabels.sessionValue < 0 ? 'red' : 'blue' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue, currency, snapshot.fxRate?.usdInr)}`)}</strong>
           <span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span>
         </button>
+        {openKpi === 'session' && <div className="insight-kpi-detail enter" id="session-detail" role="region" aria-labelledby="session-kpi">
+          <div><span className="score-label">What contributed to the session move</span><strong>{dataLabels.sessionLabel}</strong><p className="hint">{dataLabels.coverageLabel}. Each amount is the price change multiplied by the quantity you hold.</p></div>
+          {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
+        </div>}
         <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">
           <span className="score-label insight-kpi-label"><span>Worst drawdown</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: 'red' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong className={!hide && risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong>
           <span className="hint">See the peak-to-trough chart</span>
         </button>
+        {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
+          <div><span className="score-label">How this was calculated</span><strong className={!hide && risk.worst < 0 ? 'down' : undefined}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of priced INR value covered. Uses shared observation dates.</>}</p></div>
+          {hide ? <HiddenValuesState /> : hasHistory ? <WorstDrawdownChart points={analyticsHistory} risk={risk} formatValue={value} /> : <p>{backcastLoading ? 'Historical prices are loading for this calculation.' : settings.allowExternalData ? 'Historical prices are unavailable. Try again later.' : 'Enable external market data in Settings to calculate historical drawdown.'}</p>}
+        </div>}
         <button type="button" id="top-five-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail">
           <span className="score-label insight-kpi-label"><span>Top five weight</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: 'purple' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong>
           <span className="hint">See the five-position split</span>
         </button>
-        <button type="button" id="data-health-kpi" data-health-color={dataHealthColor(dataLabels.healthLabel)} className={`insight-kpi insight-kpi--interactive${openKpi === 'data-health' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'data-health' ? null : 'data-health')} aria-expanded={openKpi === 'data-health'} aria-controls="data-health-detail">
+        {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
+          <div><span className="score-label">Largest five holdings</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}% of priced portfolio`) : 'Unpriced'}</strong></div>
+          {hide ? <HiddenValuesState /> : topFive.length === 0 ? <p>No priced holdings are available for this split.</p> : <div className="kpi-split-list">{topFive.map((item, index) => <div key={`${item.type}:${item.symbol}`}><span>{item.symbol}</span><DitherBar className="kpi-split-bar" segments={[{ value: item.weight, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} scale={topFiveMaxWeight} /><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div>}
+        </div>}
+        <button type="button" id="data-health-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'data-health' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'data-health' ? null : 'data-health')} aria-expanded={openKpi === 'data-health'} aria-controls="data-health-detail">
           <span className="score-label insight-kpi-label"><span>Data health</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: dataHealthColor(dataLabels.healthLabel) }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong>{dataLabels.healthLabel}</strong>
           <span className="hint">{dataLabels.healthDetail}</span>
         </button>
+        {openKpi === 'data-health' && <div className="insight-kpi-detail insight-kpi-detail--health enter" id="data-health-detail" role="region" aria-labelledby="data-health-kpi">
+          <DataHealthGuide healthLabel={dataLabels.healthLabel} allowExternalData={settings.allowExternalData} />
+        </div>}
       </div>
-
-      {openKpi === 'session' && <div className="insight-kpi-detail enter" id="session-detail" role="region" aria-labelledby="session-kpi">
-        <div><span className="score-label">What contributed to the session move</span><strong>{dataLabels.sessionLabel}</strong><p className="hint">{dataLabels.coverageLabel}. Each amount is the price change multiplied by the quantity you hold.</p></div>
-        {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
-      </div>}
-      {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
-        <div><span className="score-label">How this was calculated</span><strong className={!hide && risk.worst < 0 ? 'down' : undefined}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of priced INR value covered. Uses shared observation dates.</>}</p></div>
-        {hide ? <HiddenValuesState /> : hasHistory ? <WorstDrawdownChart points={analyticsHistory} risk={risk} formatValue={value} /> : <p>{backcastLoading ? 'Historical prices are loading for this calculation.' : settings.allowExternalData ? 'Historical prices are unavailable. Try again later.' : 'Enable external market data in Settings to calculate historical drawdown.'}</p>}
-      </div>}
-      {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
-        <div><span className="score-label">Largest five holdings</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}% of priced portfolio`) : 'Unpriced'}</strong></div>
-        {hide ? <HiddenValuesState /> : topFive.length === 0 ? <p>No priced holdings are available for this split.</p> : <div className="kpi-split-list">{topFive.map((item, index) => <div key={`${item.type}:${item.symbol}`}><span>{item.symbol}</span><DitherBar className="kpi-split-bar" segments={[{ value: item.weight, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} scale={topFiveMaxWeight} /><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div>}
-      </div>}
-      {openKpi === 'data-health' && <div className="insight-kpi-detail insight-kpi-detail--health enter" id="data-health-detail" role="region" aria-labelledby="data-health-kpi">
-        <DataHealthGuide healthLabel={dataLabels.healthLabel} allowExternalData={settings.allowExternalData} />
-      </div>}
 
       <div className="insight-grid enter d2">
         <section className="panel insight-panel insight-panel--wide insight-panel--benchmark">
@@ -328,7 +326,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
         <section className="panel insight-panel insight-panel--exposure">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Exposure mix</span><span className="section-index">03 · Sectors / type</span></div></div>
-          <ExposureMix items={snapshot.sectors.slice(0, 10)} hideValues={hide} formatValue={value} />
+          {hide ? <HiddenValuesState /> : <ExposureMix items={snapshot.sectors.slice(0, 10)} formatValue={value} />}
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
@@ -387,9 +385,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   )
 }
 
-function ExposureMix({ items, hideValues, formatValue }: { items: SectorAllocation[]; hideValues: boolean; formatValue: (value: number) => string }) {
+function ExposureMix({ items, formatValue }: { items: SectorAllocation[]; formatValue: (value: number) => string }) {
   const [active, setActive] = useState<number | null>(null)
-  const mask = (text: string) => (hideValues ? '••••••' : text)
   if (items.length === 0 || items.every((item) => item.value <= 0)) {
     return <div className="expo-empty muted">No valued exposure yet.</div>
   }
@@ -422,15 +419,15 @@ function ExposureMix({ items, hideValues, formatValue }: { items: SectorAllocati
               onFocus={() => setActive(index)}
               onBlur={() => setActive(null)}
               aria-pressed={active === index}
-              aria-label={`${sector.label}: ${hideValues ? 'weight hidden' : `${sector.weight.toFixed(1)}%`}, ${hideValues ? 'value hidden' : formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
+              aria-label={`${sector.label}: ${sector.weight.toFixed(1)}%, ${formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
             >
               <span className="expo-tile-head">
                 <i className="legend-swatch" style={{ background: rgb(seedOfColor(color).fill) }} />
                 <span className="expo-name" title={sector.label}>{sector.label}</span>
                 <span className="expo-type">{type}</span>
               </span>
-              <strong className="expo-weight">{mask(`${sector.weight.toFixed(1)}%`)}</strong>
-              <span className="expo-meta">{mask(formatValue(sector.value))} · {sector.count} {sector.count === 1 ? 'position' : 'positions'}</span>
+              <strong className="expo-weight">{sector.weight.toFixed(1)}%</strong>
+              <span className="expo-meta">{formatValue(sector.value)} · {sector.count} {sector.count === 1 ? 'position' : 'positions'}</span>
               <DitherBar className="expo-tile-track" segments={[{ value: sector.value, color }]} scale={max} />
             </button>
           )

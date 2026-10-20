@@ -90,11 +90,20 @@ describe('workspace settings', () => {
     const privacy = [...container.querySelectorAll<HTMLButtonElement>('.settings-nav-item')].find((button) => button.textContent?.includes('Data & privacy'))!
     await act(async () => privacy.click())
     expect(container.querySelector('[aria-label="Manage holdings"]')).toBeNull()
-    expect([...container.querySelectorAll('.data-handling-row strong')].map((item) => item.textContent)).toEqual(['Portfolio & history', 'Market data'])
+    expect([...container.querySelectorAll('.data-handling-card h4')].map((item) => item.textContent)).toEqual(['Portfolio & history', 'Market data'])
     expect(container.textContent).toContain('Holdings and tracked history use local storage.')
     const externalData = container.querySelector<HTMLInputElement>('#external-data')!
+    expect(externalData.getAttribute('role')).toBe('switch')
+    expect(container.querySelector(`#${externalData.getAttribute('aria-describedby')}`)?.textContent).toContain('Allow quote')
+    expect(container.querySelector('.setting-toggle-status')?.textContent).toBe('Off')
+    expect(container.querySelector('.data-handling-card:last-child .data-destination')?.textContent).toBe('Blocked')
     expect(externalData.checked).toBe(false)
     await act(async () => externalData.click())
     expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, allowExternalData: true })
+    state.settings = state.setSettings.mock.lastCall![0]
+    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
+    expect(externalData.checked).toBe(true)
+    expect(container.querySelector('.setting-toggle-status')?.textContent).toBe('On')
+    expect(container.querySelector('.data-handling-card:last-child .data-destination')?.textContent).toBe('Identifiers only')
   })
 })

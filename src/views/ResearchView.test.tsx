@@ -86,11 +86,38 @@ describe('research desk', () => {
     expect(new Set(icons.map((icon) => icon.innerHTML)).size).toBe(3)
   })
 
-  it('keeps portfolio amounts hidden when values are hidden', async () => {
+  it('keeps portfolio amounts and identities hidden when masking is enabled', async () => {
     state.settings.hideValues = true
     await render()
     expect([...container.querySelectorAll('.rd-metrics dd')].every((metric) => metric.textContent === PRIVATE_VALUE_MASK)).toBe(true)
     expect(container.querySelector('textarea')).toBeNull()
+    expect(container.textContent).not.toMatch(/Tata Consultancy|TCS/)
+    expect(container.querySelector('.rd-avatar img')).toBeNull()
+    expect(container.querySelector('a[href*="TCS"], a[href*="Tata"]')).toBeNull()
+    expect(container.querySelector<HTMLInputElement>('[aria-label="Search research holdings"]')?.disabled).toBe(true)
+    state.settings.hideValues = false
+    await render()
+    expect(container.textContent).toContain(position.name)
+    expect(container.querySelector('.rd-avatar img')).not.toBeNull()
+  })
+
+  it('hides an open Sources dossier and cancels its lookup when masking changes', async () => {
+    state.settings.allowExternalData = true
+    state.resolvePath.mockImplementation(() => new Promise(() => {}))
+    await render()
+    const signal = state.resolvePath.mock.lastCall![1] as AbortSignal
+    await click('Sources')
+    expect(container.querySelector('.rd-source')).not.toBeNull()
+    state.settings.hideValues = true
+    await render()
+    expect(signal.aborted).toBe(true)
+    expect(container.textContent).not.toMatch(/Tata Consultancy|TCS/)
+    expect(container.querySelector('.rd-source, .rd-avatar img')).toBeNull()
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Sources')
+    state.settings.hideValues = false
+    await render()
+    expect(container.querySelector('.rd-source')).not.toBeNull()
+    expect(container.textContent).toContain(position.name)
   })
 
   it('restores selection and section from browser navigation, including removed holdings', async () => {

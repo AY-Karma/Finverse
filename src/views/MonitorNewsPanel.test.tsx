@@ -75,6 +75,38 @@ afterEach(async () => {
 })
 
 describe('portfolio news', () => {
+  it('blocks Holdings news while masked and keeps Market news independent of the portfolio', async () => {
+    state.store.settings.hideValues = true
+    await renderPanel({ initialQuery: 'HDFC Bank Ltd', selectedIdentity: newsIdentity('HDFCBANK'), selectedRevision: 1 })
+    expect(container.textContent).toContain('Masked mode enabled')
+    expect(container.querySelectorAll('article')).toHaveLength(0)
+    expect(container.querySelector('.mn-holding-search')).toBeNull()
+    expect(container.textContent).not.toMatch(/HDFCBANK|HDFC Bank|TCS|Tata Consultancy/)
+    expect(loadFeed).not.toHaveBeenCalled()
+    await clickButton('Market')
+    expect(loadFeed.mock.lastCall?.[0]).toEqual([])
+    expect(loadFeed.mock.lastCall?.[1]?.query).toBe('')
+    expect(container.querySelectorAll('article')).toHaveLength(2)
+    expect([...container.querySelectorAll('.mn-story-tag')].map(tag => tag.textContent)).toEqual(['MARKET', 'MARKET'])
+    expect(container.querySelector('.mn-coverage')).toBeNull()
+    await clickButton('Holdings')
+    expect(container.textContent).toContain('Masked mode enabled')
+    expect(container.querySelector('article')).toBeNull()
+  })
+
+  it('clears an existing company search immediately when masking is enabled', async () => {
+    await renderPanel({ initialQuery: 'HDFC Bank Ltd' })
+    const signal = loadFeed.mock.lastCall![1]!.signal!
+    state.store.settings.hideValues = true
+    await renderPanel({ initialQuery: 'HDFC Bank Ltd' })
+    expect(signal.aborted).toBe(true)
+    expect(container.textContent).not.toContain('HDFC Bank')
+    expect(container.querySelector('.mn-query, .mn-search, article')).toBeNull()
+    await clickButton('Market')
+    expect(loadFeed.mock.lastCall?.[0]).toEqual([])
+    expect(loadFeed.mock.lastCall?.[1]?.query).toBe('')
+  })
+
   it('shows explained tone badges beside Market and filters using the same classification', async () => {
     const titles = [
       'US jobless claims hover near 57-year low for fourth consecutive week',

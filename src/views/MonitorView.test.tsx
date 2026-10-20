@@ -60,6 +60,32 @@ afterEach(async () => {
 })
 
 describe('Portfolio Watch masking', () => {
+  it('masks observation coverage, counts and freshness geometry', async () => {
+    await renderWatch(true)
+    const observations = container.querySelectorAll('.pa-summary-card')[2]
+    expect(observations.querySelector('.pa-summary-value')?.textContent).toBe('••••••')
+    expect(observations.querySelector('canvas, time')).toBeNull()
+    expect(observations.textContent).not.toMatch(/\d/)
+  })
+
+  it('hides holding names across activity, rules and form options without changing saved records', async () => {
+    await renderWatch(false)
+    const saved = localStorage.getItem(MONITOR_STORAGE_KEY)
+    state.store.settings = { ...state.store.settings, hideValues: true }
+    await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
+    for (const view of ['Brief', 'Holdings', 'Activity']) {
+      await clickButton(view)
+      expect(container.textContent).not.toMatch(/\bUP\b|\bDOWN\b/)
+      const labels = [...container.querySelectorAll('[aria-label], [title]')].map(element => `${element.getAttribute('aria-label') || ''} ${element.getAttribute('title') || ''}`).join(' ')
+      expect(labels).not.toMatch(/\bUP\b|\bDOWN\b/)
+      expect(container.querySelector('.pa-news-button')).toBeNull()
+    }
+    expect(localStorage.getItem(MONITOR_STORAGE_KEY)).toBe(saved)
+    state.store.settings = { ...state.store.settings, hideValues: false }
+    await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
+    expect(container.textContent).toContain('UP')
+  })
+
   it('neutralizes quote and alert indicators, titles, and rule labels, then restores them', async () => {
     await renderWatch(false)
     expect(container.querySelector('[data-tone="up"]')).not.toBeNull()

@@ -20,8 +20,8 @@
 .mp-page button:focus-visible, .mp-page a:focus-visible, .mp-page input:focus-visible, .mp-page select:focus-visible, .mp-page textarea:focus-visible, .mp-page summary:focus-visible { outline: 2px solid var(--mp-accent); outline-offset: 3px; }
 .mp-hero { margin-bottom: var(--sp-xl); }
 .mp-hero-top, .mp-hero-main, .mp-data-status { display: flex; align-items: center; }
-.mp-hero-top { justify-content: space-between; gap: 16px; margin-bottom: 9px; }
-.mp-eyebrow, .mp-kicker { color: var(--ink-subtle); font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
+.mp-hero-top { justify-content: flex-end; gap: 16px; margin-bottom: 9px; }
+.mp-kicker { color: var(--ink-subtle); font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
 .mp-data-status { gap: 8px; border: 1px solid var(--hairline-strong); border-radius: 20px; padding: 5px 11px; color: var(--ink-muted); font-size: 13px; }
 .mp-data-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mp-accent); flex-shrink: 0; }
 .mp-data-status a { display: inline-flex; align-items: center; gap: 5px; color: var(--mp-accent); text-underline-offset: 3px; }

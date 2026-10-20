@@ -193,8 +193,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
     return (
       <div className="overview-empty enter">
         <div>
-          <div className="page-eyebrow">Finverse · Portfolio workspace</div>
-          <h1 className="page-title">See your portfolio clearly.</h1>
+          <h1 className="page-title">Overview</h1>
           <p className="page-sub">
             Bring in your latest holdings file to see value, allocation, performance, and the market around your investments.
           </p>
@@ -211,7 +210,6 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
     return (
       <div className="enter" style={{ display: 'grid', gap: 28, justifyItems: 'center', padding: '12vh 24px', textAlign: 'center' }}>
         <div>
-          <div className="page-eyebrow">Live Market Scoreboard</div>
           <h1 className="page-title" style={{ textTransform: 'none' }}>
             {scope === 'mutual' ? 'No mutual funds on the board yet.' : 'No equity holdings on the board yet.'}
           </h1>
@@ -295,7 +293,6 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
     <div className={hideValues ? 'peek' : undefined} style={{ display: 'contents' }}>
       <div className="page-head overview-head enter d0">
         <div className="overview-heading">
-          <div className="page-eyebrow">Portfolio</div>
           <div className="overview-title-row">
             <h1 className="page-title">Overview</h1>
             {pendingListings > 0 && <div className="overview-review">
@@ -307,43 +304,45 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
         <div className="page-sub overview-sub">
           <div className="overview-actions">
             <Scope />
-            <button
-              className={`icon-btn${hideValues ? ' icon-btn--active' : ''}`}
-              onClick={() => setSettings({ ...settings, hideValues: !hideValues })}
-              title={hideValues ? 'Reveal values (peek mode off)' : 'Hide values (peek mode on)'}
-              aria-label={hideValues ? 'Reveal portfolio values' : 'Hide portfolio values'}
-              aria-pressed={hideValues}
-            >
-              {hideValues ? (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-                  <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M14.1 5.6A11.4 11.4 0 0 1 22 12c-.9 1.9-2.5 4.1-4.6 5.6M13.4 17A10.9 10.9 0 0 1 2 12c1.3-2.7 3.6-5.4 7.1-6.7" />
-                  <path d="M4 20 20 4" />
-                </svg>
-              ) : (
+            <div className="overview-tools">
+              <button
+                className={`icon-btn${hideValues ? ' icon-btn--active' : ''}`}
+                onClick={() => setSettings({ ...settings, hideValues: !hideValues })}
+                title={hideValues ? 'Reveal values (peek mode off)' : 'Hide values (peek mode on)'}
+                aria-label={hideValues ? 'Reveal portfolio values' : 'Hide portfolio values'}
+                aria-pressed={hideValues}
+              >
+                {hideValues ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+                    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M14.1 5.6A11.4 11.4 0 0 1 22 12c-.9 1.9-2.5 4.1-4.6 5.6M13.4 17A10.9 10.9 0 0 1 2 12c1.3-2.7 3.6-5.4 7.1-6.7" />
+                    <path d="M4 20 20 4" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+              <button
+                className={`icon-btn${refreshing ? ' icon-btn--spinning' : ''}`}
+                onClick={onManualRefresh}
+                title={
+                  positions.length === 0
+                    ? 'Import a portfolio first'
+                    : refreshCooldownSeconds > 0
+                      ? `Refresh available in ${refreshCooldownSeconds}s`
+                      : 'Refresh latest market prices'
+                }
+                disabled={refreshing || refreshCooldownSeconds > 0 || positions.length === 0}
+                aria-label="Refresh prices now"
+              >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-                  <circle cx="12" cy="12" r="3" />
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                  <path d="M21 3v6h-6" />
                 </svg>
-              )}
-            </button>
-            <button
-              className={`icon-btn${refreshing ? ' icon-btn--spinning' : ''}`}
-              onClick={onManualRefresh}
-              title={
-                positions.length === 0
-                  ? 'Import a portfolio first'
-                  : refreshCooldownSeconds > 0
-                    ? `Refresh available in ${refreshCooldownSeconds}s`
-                    : 'Refresh latest market prices'
-              }
-              disabled={refreshing || refreshCooldownSeconds > 0 || positions.length === 0}
-              aria-label="Refresh prices now"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                <path d="M21 3v6h-6" />
-              </svg>
-            </button>
+              </button>
+            </div>
           </div>
           <div className="overview-meta">
             <div className={`market-status ${marketOpen ? 'market-open' : 'market-closed'}`} role="status" aria-live="polite">
@@ -543,13 +542,13 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
                   return (
                     <Fragment key={r.id}>
                       <tr className={open ? 'trow--open' : undefined}>
-                        <td className="sym" title={r.symbol}>
+                        <td className="sym" title={mask(r.symbol)}>
                           <button
                             className={`ledger-caret${open ? ' ledger-caret--open' : ''}${expandable ? '' : ' ledger-caret--muted'}`}
                             onClick={() => setExpandedId(open ? null : r.id)}
                             disabled={!expandable}
                             aria-expanded={open}
-                            aria-label={expandable ? `Show the ${members.length} merged entries for ${r.symbol}` : undefined}
+                            aria-label={expandable ? `Show the ${members.length} merged entries for ${mask(r.symbol)}` : undefined}
                             title={expandable ? `${members.length} entries merged into this row` : undefined}
                           >
                             ▾
@@ -795,12 +794,12 @@ function MFLedger({
                     onClick={() => setExpandedId(open ? null : p.id)}
                     disabled={!expandable}
                     aria-expanded={open}
-                    aria-label={expandable ? `Show the ${members.length} merged entries for ${p.name || p.ticker}` : undefined}
+                    aria-label={expandable ? `Show the ${members.length} merged entries for ${mask(p.name || p.ticker)}` : undefined}
                     title={expandable ? `${members.length} entries merged into this row` : undefined}
                   >
                     ▾
                   </button>
-                  <span className="mf-name" data-full={p.name || p.ticker}>
+                  <span className="mf-name" data-full={mask(p.name || p.ticker)}>
                     {mask(p.name || p.ticker)}
                   </span>
                 </td>

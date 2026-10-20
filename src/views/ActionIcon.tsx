@@ -13,6 +13,7 @@ const ICON_PATHS = {
   settings: 'm9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3H9Zm3 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z',
   preferences: 'M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6',
   privacy: 'm12 3 8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6l8-3Zm-3 9 2 2 4-4',
+  device: 'M3 4h18v13H3V4Zm5 17h8m-4-4v4',
   import: 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',
   external: 'M14 3h7v7m0-7L10 14M10 3H3v18h18v-7',
 } as const

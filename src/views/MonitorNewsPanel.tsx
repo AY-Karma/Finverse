@@ -11,13 +11,21 @@ const EMPTY_FEED: LoadedMarketFeed = { items: [], issues: [], fetchedAt: 0 }
 const PAGE_SIZE = 3
 const TONE_LABELS: Record<HeadlineTone, string> = { positive: '+ Positive', negative: '− Negative', mixed: '± Mixed', unknown: '? Unclear' }
 
-export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selectedRevision }: { initialQuery?: string; selectedIdentity?: string; selectedRevision?: number }) {
+type MonitorNewsPanelProps = { initialQuery?: string; selectedIdentity?: string; selectedRevision?: number }
+
+export function MonitorNewsPanel(props: MonitorNewsPanelProps) {
+  const { settings } = useStore()
+  // Discard company searches and loaded headlines when masking changes.
+  return <MonitorNewsContent key={settings.hideValues ? 'masked' : 'visible'} {...props} />
+}
+
+function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevision }: MonitorNewsPanelProps) {
   const { positions, settings } = useStore()
   const holdingsKey = useMemo(() => positions.map((position) => `${position.id}:${position.ticker}:${position.name}:${position.type}:${position.providerSymbol ?? ''}:${position.exchange ?? ''}:${position.currency ?? ''}:${position.instrumentKey ?? ''}:${position.isin ?? ''}`).sort().join('|'), [positions])
   const monitorPositions = useMemo(() => positions, [holdingsKey])
-  const holdings = useMemo(() => eligibleHoldings(monitorPositions).sort((left, right) => left.ticker.localeCompare(right.ticker) || left.identity.localeCompare(right.identity)), [monitorPositions])
+  const holdings = useMemo(() => settings.hideValues ? [] : eligibleHoldings(monitorPositions).sort((left, right) => left.ticker.localeCompare(right.ticker) || left.identity.localeCompare(right.identity)), [monitorPositions, settings.hideValues])
   const selectedHolding = holdings.find((holding) => holding.identity === selectedIdentity)
-  const startingQuery = selectedHolding ? selectedHolding.name || selectedHolding.ticker : initialQuery
+  const startingQuery = settings.hideValues ? '' : selectedHolding ? selectedHolding.name || selectedHolding.ticker : initialQuery
   const [feed, setFeed] = useState<LoadedMarketFeed | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshCount, setRefreshCount] = useState(0)
@@ -25,6 +33,7 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
   const [showTools, setShowTools] = useState(false)
   const [activeQuery, setActiveQuery] = useState(startingQuery)
   const [scope, setScope] = useState<'holdings' | 'market'>('holdings')
+  const holdingsMasked = settings.hideValues && scope === 'holdings'
   const [holdingIdentity, setHoldingIdentity] = useState(selectedHolding?.identity ?? '')
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
   const [filters, setFilters] = useState<NewsFeedFilters>({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
@@ -33,17 +42,17 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
   const previousInitialQuery = useRef(initialQuery)
 
   useEffect(() => {
-    if (previousInitialQuery.current === initialQuery) return
+    if (settings.hideValues || previousInitialQuery.current === initialQuery) return
     previousInitialQuery.current = initialQuery
     setSearchDraft(initialQuery)
     setActiveQuery(initialQuery)
     setHoldingIdentity('')
     setFilters({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
     setPage(1)
-  }, [initialQuery])
+  }, [initialQuery, settings.hideValues])
 
   useEffect(() => {
-    if (!selectedIdentity || !selectedHolding) return
+    if (settings.hideValues || !selectedIdentity || !selectedHolding) return
     const query = selectedHolding.name || selectedHolding.ticker
     setSearchDraft(query)
     setActiveQuery(query)
@@ -51,17 +60,17 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
     setScope('holdings')
     setFilters({ query: '', ticker: 'all', sentiment: 'all', sort: 'latest' })
     setPage(1)
-  }, [selectedIdentity, selectedRevision, selectedHolding?.name, selectedHolding?.identity, selectedHolding?.region])
+  }, [selectedIdentity, selectedRevision, selectedHolding?.name, selectedHolding?.identity, selectedHolding?.region, settings.hideValues])
 
   useEffect(() => {
     setFeed(null)
-    if (!settings.allowExternalData || monitorPositions.length === 0) {
+    if (!settings.allowExternalData || monitorPositions.length === 0 || holdingsMasked) {
       setLoading(false)
       return
     }
     const controller = new AbortController()
     setLoading(true)
-    void loadMarketFeed(monitorPositions, {
+    void loadMarketFeed(settings.hideValues ? [] : monitorPositions, {
       signal: controller.signal,
       query: activeQuery,
       ...(activeRegion ? { region: activeRegion } : {}),
@@ -79,7 +88,7 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [monitorPositions, settings.allowExternalData, activeQuery, activeRegion, refreshCount])
+  }, [monitorPositions, settings.allowExternalData, settings.hideValues, holdingsMasked, activeQuery, activeRegion, refreshCount])
 
   const current = feed ?? EMPTY_FEED
   const eligibleTickers = new Set(holdings.map((holding) => holding.ticker))
@@ -119,9 +128,9 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
       <span className="mn-heading-icon"><MonitorNewsIcon /></span>
       <div>
         <h2 id="monitor-news-heading">Portfolio news</h2>
-        <p>Holdings in the headlines</p>
+        <p>{settings.hideValues ? 'Market headlines' : 'Holdings in the headlines'}</p>
       </div>
-      {enabled && <div className="mn-head-actions">
+      {enabled && !holdingsMasked && <div className="mn-head-actions">
         <button className="mn-icon-button" type="button" aria-label="Search and filter market news" title="Search and filter market news" aria-expanded={showTools} aria-controls="monitor-news-tools" onClick={() => setShowTools((value) => !value)}><SearchIcon /></button>
         <button className="mn-icon-button" type="button" aria-label="Refresh market news" title="Refresh market news" disabled={loading} onClick={() => setRefreshCount((count) => count + 1)}><RefreshIcon /></button>
       </div>}
@@ -133,12 +142,15 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
         <button type="button" aria-pressed={scope === 'market'} disabled={!enabled} onClick={() => { setScope('market'); setSearchDraft(''); selectQuery('') }}><ActionIcon name="market" />Market</button>
       </div>
     </div>
-    <label className="mn-holding-search"><span className="mn-sr-only">Find news for a holding</span><select aria-label="Find news for a holding" value={holdingIdentity} disabled={!enabled || holdings.length === 0} onChange={(event) => findHoldingNews(event.target.value)}>
+    {!settings.hideValues && <label className="mn-holding-search"><span className="mn-sr-only">Find news for a holding</span><select aria-label="Find news for a holding" value={holdingIdentity} disabled={!enabled || holdings.length === 0} onChange={(event) => findHoldingNews(event.target.value)}>
       <option value="">Find news for a holding</option>
       {holdings.map((holding) => <option value={holding.identity} key={holding.identity}>{holding.ticker}{holding.name ? ` · ${holding.name}` : ''}</option>)}
-    </select></label>
+    </select></label>}
 
-    {!enabled ? <div className="mn-empty">
+    {holdingsMasked ? <div className="mn-empty" role="status">
+      <strong>Masked mode enabled</strong>
+      <p>Holdings news is hidden. Switch to Market for general headlines.</p>
+    </div> : !enabled ? <div className="mn-empty">
       <strong>{positions.length === 0 ? 'Add holdings to follow the wire' : 'External data is off'}</strong>
       <p>{positions.length === 0 ? 'Import your portfolio in Settings to see its news here.' : 'Enable external market data in Settings to load news.'}</p>
       <a className="workspace-action mn-settings" href="/app/settings"><ActionIcon name="settings" />Open Settings</a>
@@ -149,10 +161,10 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
         <button className="mn-button" type="submit">Search</button>
       </form>
       <div className="mn-filter-row">
-        <label className="mn-holding-filter"><span className="mn-sr-only">Filter news by holding</span><select value={filters.ticker} onChange={(event) => updateFilters({ ticker: event.target.value })}>
+        {!settings.hideValues && <label className="mn-holding-filter"><span className="mn-sr-only">Filter news by holding</span><select value={filters.ticker} onChange={(event) => updateFilters({ ticker: event.target.value })}>
           <option value="all">All stories</option>
           {[...eligibleTickers].map((ticker) => <option value={ticker} key={ticker}>{ticker}</option>)}
-        </select></label>
+        </select></label>}
         <details className="mn-filters">
           <summary><FilterIcon /> Filters</summary>
           <div className="mn-filter-fields">
@@ -164,11 +176,11 @@ export function MonitorNewsPanel({ initialQuery = '', selectedIdentity, selected
       </div>
       </div>
       {activeQuery && <div className="mn-query"><strong>Search: {activeQuery}</strong><button className="workspace-action" type="button" onClick={() => { setSearchDraft(''); selectQuery('') }}><MonitorNewsIcon />Back to wire</button></div>}
-      <div className="mn-coverage">
+      {!settings.hideValues && <div className="mn-coverage">
         <strong>{loading && feed == null ? 'Checking holding mentions...' : holdings.length ? `${matchedHoldings} of ${eligibleTickers.size} ${eligibleTickers.size === holdings.length ? 'holdings' : 'holding symbols'} mentioned` : 'No eligible company holdings'}</strong>
         <p>{activeQuery ? 'Search results may include other companies. Matches use headline names and tickers.' : 'Matches use headline names and tickers. Coverage varies by publisher.'}</p>
         {positions.some((position) => position.type === 'mutual-fund') && <p>Mutual funds use NAV updates; constituent news is not available.</p>}
-      </div>
+      </div>}
       <div className="mn-feed-status" role="status">
         <span>{loading ? 'Scanning the wire…' : `${first}–${last} of ${filtered.length} stories`}</span>
         {current.fetchedAt > 0 && <time dateTime={new Date(current.fetchedAt).toISOString()}>Updated {new Date(current.fetchedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}

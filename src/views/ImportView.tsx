@@ -151,8 +151,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
     <>
       {!compact && <div className="page-head enter d0">
         <div>
-          <div className="page-eyebrow">02 · Portfolio</div>
-          <h1 className="page-title">Feed the machine</h1>
+          <h1 className="page-title">Import holdings</h1>
         </div>
         <p className="page-sub">Import an equity, ETF, or mutual-fund statement. Add another account or update an existing account after review.</p>
       </div>}

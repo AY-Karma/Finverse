@@ -6,7 +6,7 @@ import type { Accent, Density, Mode } from '../types'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
 import { InstrumentReview } from './InstrumentReview'
-import { ActionIcon } from './ActionIcon'
+import { ActionIcon, type ActionIconName } from './ActionIcon'
 
 type SettingsSection = 'preferences' | 'privacy'
 
@@ -72,16 +72,15 @@ export function SettingsView({ onRequestImport }: { onRequestImport: () => void 
   useEffect(() => {
     if (settings.accent !== 'custom') setPickerOpen(false)
   }, [settings.accent])
-  const sections: { id: SettingsSection; index: string; label: string; summary: string }[] = [
-    { id: 'preferences', index: '01', label: 'Preferences', summary: `${settings.currency} · ${settings.density}` },
-    { id: 'privacy', index: '02', label: 'Data & privacy', summary: settings.allowExternalData ? 'External data on' : 'Local-first' },
+  const sections: { id: SettingsSection; label: string; summary: string }[] = [
+    { id: 'preferences', label: 'Preferences', summary: `${settings.currency} · ${settings.density}` },
+    { id: 'privacy', label: 'Data & privacy', summary: settings.allowExternalData ? 'External data on' : 'Local-first' },
   ]
 
   return (
     <>
       <div className="page-head enter d0">
         <div>
-          <div className="page-eyebrow">05 · Workspace</div>
           <h1 className="page-title">Settings</h1>
         </div>
         <p className="page-sub">Control the workspace and where portfolio data can go.</p>
@@ -103,7 +102,6 @@ export function SettingsView({ onRequestImport }: { onRequestImport: () => void 
                 onClick={() => setActiveSection(section.id)}
               >
                 <span className="settings-nav-icon"><ActionIcon name={section.id} /></span>
-                <span className="settings-nav-index">{section.index}</span>
                 <span className="settings-nav-copy">
                   <strong>{section.label}</strong>
                   <small>{section.summary}</small>
@@ -215,7 +213,7 @@ export function SettingsView({ onRequestImport }: { onRequestImport: () => void 
               <SettingToggle
                 id="hide-values"
                 label="Hide portfolio values"
-                description="Mask balances, gains, and losses when someone else can see your screen."
+                description="Mask holdings, values, and portfolio details when sharing your screen."
                 checked={settings.hideValues}
                 onChange={(hideValues) => update({ hideValues })}
               />
@@ -243,7 +241,6 @@ export function SettingsView({ onRequestImport }: { onRequestImport: () => void 
                   description="Allow quote, NAV, company feed, and optional media requests for this portfolio."
                   checked={settings.allowExternalData}
                   onChange={(allowExternalData) => update({ allowExternalData })}
-                  status={settings.allowExternalData ? 'On' : 'Off'}
                 />
               </div>
 
@@ -254,13 +251,13 @@ export function SettingsView({ onRequestImport }: { onRequestImport: () => void 
                     <p>What stays here and what can leave the browser.</p>
                   </div>
                 </div>
-                <div className="settings-group">
-                  <DataRow label="Portfolio & history" destination="This browser">
+                <div className="data-handling-grid">
+                  <DataHandlingCard icon="device" label="Portfolio & history" destination="This browser">
                     Holdings and tracked history use local storage.
-                  </DataRow>
-                  <DataRow label="Market data" destination={settings.allowExternalData ? 'Identifiers only' : 'Blocked'}>
+                  </DataHandlingCard>
+                  <DataHandlingCard icon="market" label="Market data" destination={settings.allowExternalData ? 'Identifiers only' : 'Blocked'}>
                     Quote providers receive instrument identifiers, never quantities or cost basis.
-                  </DataRow>
+                  </DataHandlingCard>
                 </div>
               </section>
             </div>
@@ -335,35 +332,39 @@ function SettingRow({ label, description, children }: {
   )
 }
 
-function SettingToggle({ id, label, description, checked, onChange, status }: {
+function SettingToggle({ id, label, description, checked, onChange }: {
   id: string
   label: string
   description: string
   checked: boolean
   onChange: (checked: boolean) => void
-  status?: string
 }) {
   return (
     <label className="setting-row setting-row--toggle" htmlFor={id}>
       <span className="setting-copy">
-        <span className="setting-label-line"><strong>{label}</strong>{status && <small>{status}</small>}</span>
-        <span>{description}</span>
+        <strong>{label}</strong>
+        <span id={`${id}-description`}>{description}</span>
       </span>
-      <span className="switch">
-        <input id={id} type="checkbox" aria-label={label} checked={checked} onChange={(event) => onChange(event.target.checked)} />
-        <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+      <span className="setting-toggle-control">
+        <span className="setting-toggle-status" aria-hidden="true">{checked ? 'On' : 'Off'}</span>
+        <span className="switch">
+          <input id={id} type="checkbox" role="switch" aria-label={label} aria-describedby={`${id}-description`} checked={checked} onChange={(event) => onChange(event.target.checked)} />
+          <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+        </span>
       </span>
     </label>
   )
 }
 
-function DataRow({ label, destination, children }: { label: string; destination: string; children: ReactNode }) {
+function DataHandlingCard({ icon, label, destination, children }: { icon: ActionIconName; label: string; destination: string; children: ReactNode }) {
   return (
-    <div className="data-handling-row">
-      <span className="data-handling-mark" aria-hidden="true" />
-      <span className="setting-copy"><strong>{label}</strong><span>{children}</span></span>
-      <span className="data-destination">{destination}</span>
-    </div>
+    <article className="data-handling-card">
+      <div className="data-handling-card-head">
+        <span className="data-handling-icon"><ActionIcon name={icon} /></span>
+        <span className="data-destination">{destination}</span>
+      </div>
+      <div className="setting-copy"><h4>{label}</h4><p>{children}</p></div>
+    </article>
   )
 }
 

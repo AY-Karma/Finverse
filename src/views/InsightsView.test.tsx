@@ -110,7 +110,7 @@ it('shows the full-history trough even when chart rows are sampled', async () =>
   expect(container.querySelector('#drawdown-detail')?.textContent).toContain('-50.0%')
 })
 
-it('orders the four cards and switches or collapses their dropdowns', async () => {
+it('keeps each detail directly after its card and switches or collapses the dropdowns', async () => {
   await renderInsights([100, 80].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: 100 })))
   const cards = [...container.querySelectorAll<HTMLButtonElement>('.insight-kpi')]
   expect(cards.map((card) => card.querySelector('.score-label')?.textContent)).toEqual([
@@ -120,6 +120,8 @@ it('orders the four cards and switches or collapses their dropdowns', async () =
     await act(async () => card.click())
     expect(card.getAttribute('aria-expanded')).toBe('true')
     const detail = container.querySelector(`#${card.getAttribute('aria-controls')}`)
+    expect(card.nextElementSibling).toBe(detail)
+    expect(detail?.parentElement).toBe(card.parentElement)
     expect(detail?.getAttribute('aria-labelledby')).toBe(card.id)
     expect(container.querySelectorAll('.insight-kpi-detail')).toHaveLength(1)
     expect(cards.filter((item) => item.getAttribute('aria-expanded') === 'true')).toHaveLength(1)
@@ -129,6 +131,19 @@ it('orders the four cards and switches or collapses their dropdowns', async () =
   await act(async () => cards[3].click())
   expect(cards[3].getAttribute('aria-expanded')).toBe('false')
   expect(container.querySelector('.insight-kpi-detail')).toBeNull()
+})
+
+it('hides exposure labels, counts and relative sizes while masked, then restores them', async () => {
+  await renderInsights([])
+  expect(container.querySelector('.expo-mix')).not.toBeNull()
+  state.store.settings.hideValues = true
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  const panel = container.querySelector('.insight-panel--exposure')!
+  expect(panel.querySelector('.expo-mix')).toBeNull()
+  expect(panel.textContent).toContain('Values are hidden')
+  state.store.settings.hideValues = false
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(panel.querySelector('.expo-mix')).not.toBeNull()
 })
 
 it('hides the drawdown geometry and holding identities in all value dropdowns', async () => {

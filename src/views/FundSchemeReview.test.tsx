@@ -7,7 +7,7 @@ import { FundSchemeReview } from './FundSchemeReview'
 
 const state = vi.hoisted(() => ({
   positions: [] as Position[],
-  settings: { allowExternalData: true }, confirmFundScheme: vi.fn(), search: vi.fn(),
+  settings: { allowExternalData: true, hideValues: false }, confirmFundScheme: vi.fn(), search: vi.fn(),
 }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
 vi.mock('../marketData', () => ({ marketData: { reviewFundScheme: state.search } }))
@@ -16,6 +16,31 @@ beforeEach(() => {
   vi.clearAllMocks()
   state.positions = [{ id: 'fund', name: 'Example Equity Fund Direct IDCW', ticker: 'Example', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }]
   state.settings.allowExternalData = true
+  state.settings.hideValues = false
+})
+
+it('hides fund identities and aborts an in-flight lookup when masking turns on', async () => {
+  let resolveSearch!: (value: unknown) => void
+  state.search.mockImplementation(() => new Promise((resolve) => { resolveSearch = resolve }))
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<FundSchemeReview />))
+    await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+    const signal = state.search.mock.calls[0][1] as AbortSignal
+    state.settings.hideValues = true
+    await act(async () => root.render(<FundSchemeReview />))
+    expect(signal.aborted).toBe(true)
+    expect(container.innerHTML).not.toContain(state.positions[0].name)
+    expect(container.querySelector('details')).toBeNull()
+    expect(container.querySelector('button')).toBeNull()
+    await act(async () => resolveSearch({ candidates: [{ schemeCode: 987654, schemeName: 'Private provider scheme' }], reason: 'Private match' }))
+    expect(container.innerHTML).not.toContain('Private')
+    state.settings.hideValues = false
+    await act(async () => root.render(<FundSchemeReview />))
+    expect(container.querySelector('[aria-label="Review fund scheme"]')).toBeNull()
+    expect(state.confirmFundScheme).not.toHaveBeenCalled()
+  } finally { await act(async () => root.unmount()) }
 })
 
 it('requires explicit confirmation, blocks Growth for an IDCW holding and retains review after a save failure', async () => {

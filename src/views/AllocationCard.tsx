@@ -3,6 +3,7 @@ import type { Currency } from '../types'
 import { formatCurrency, type Allocation, type PortfolioPulse } from '../valuation'
 import { allocationColor, DitherDonut } from './overview/DitherCharts'
 import { DitherBar } from './DitherBar'
+import { HiddenValuesState } from './HiddenValuesState'
 
 const SEGMENT_CAP = 7
 
@@ -32,6 +33,8 @@ export function AllocationCard({
       ? [...top, { symbol: `Other · ${valued.length - top.length} more`, value: restValue }]
       : top
   }, [valued])
+
+  if (hideValues) return <HiddenValuesState />
 
   if (valued.length === 0 || total <= 0) {
     return <div className="alloc-empty muted">No valued holdings yet — refresh prices or check the ledger.</div>

@@ -36,11 +36,11 @@
 .insights-page .data-health-guide-current { border-color: var(--insight-dither-blue); }
 .insights-page .data-health-guide-texture { width: 44px; height: 10px; }
 
-.insights-page #data-health-kpi { --health-accent: var(--ink-muted); }
-.insights-page #data-health-kpi[data-health-color='green'] { --health-accent: var(--insight-dither-positive); }
-.insights-page #data-health-kpi[data-health-color='orange'] { --health-accent: var(--insight-dither-watch); }
-.insights-page #data-health-kpi[data-health-color='blue'] { --health-accent: var(--insight-dither-blue); }
-.insights-page #data-health-kpi[data-health-color='red'] { --health-accent: var(--insight-dither-negative); }
+.insights-page .insight-kpis { --health-accent: var(--ink-muted); }
+.insights-page .insight-kpis[data-health-color='green'] { --health-accent: var(--insight-dither-positive); }
+.insights-page .insight-kpis[data-health-color='orange'] { --health-accent: var(--insight-dither-watch); }
+.insights-page .insight-kpis[data-health-color='blue'] { --health-accent: var(--insight-dither-blue); }
+.insights-page .insight-kpis[data-health-color='red'] { --health-accent: var(--insight-dither-negative); }
 .insights-page #data-health-kpi > strong { color: var(--health-accent); }
 .insights-page #data-health-kpi.insight-kpi--open { border-color: var(--health-accent); }
 .insights-page #data-health-kpi:focus-visible { outline-color: var(--health-accent); }

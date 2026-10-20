@@ -1,8 +1,8 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { freshQuote, hasDuplicateMonitorRule, holdingIdentity, usableQuote, type MonitorRule, type RuleCondition, validReminderDate } from '../monitor'
 import type { MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
-import { visibleQuotes } from '../privacy'
+import { privateValue, visibleQuotes } from '../privacy'
 import { quoteKey } from '../valuation'
 
 type PanelProps = { controller: MonitorController }
@@ -28,6 +28,10 @@ export function ReminderAction({ controller, onAdded }: PanelProps & { onAdded?:
   const [holdingId, setHoldingId] = useState('')
   const [error, setError] = useState('')
   const remaining = MAX_REMINDERS - controller.events.length
+
+  useEffect(() => {
+    if (controller.hideValues && dialog.current?.open) dialog.current.close()
+  }, [controller.hideValues])
 
   function open() {
     setError('')
@@ -62,7 +66,7 @@ export function ReminderAction({ controller, onAdded }: PanelProps & { onAdded?:
   }
 
   return <>
-    <button type="button" disabled={remaining <= 0} onClick={open}>+ Reminder</button>
+    <button type="button" disabled={controller.hideValues || remaining <= 0} title={controller.hideValues ? 'Turn off masking to add a reminder.' : undefined} onClick={open}>+ Reminder</button>
     <dialog className="mp-dialog" ref={dialog} aria-labelledby="mp-reminder-title">
       <form className="mp-form" onSubmit={submit}>
         <div className="mp-section-head">
@@ -74,12 +78,12 @@ export function ReminderAction({ controller, onAdded }: PanelProps & { onAdded?:
           About
           <select value={holdingId} onChange={(event) => setHoldingId(event.target.value)}>
             <option value="">My portfolio</option>
-            {controller.positions.map((position) => <option value={position.id} key={position.id}>{position.name || position.ticker}</option>)}
+            {controller.positions.map((position) => <option value={position.id} key={position.id}>{privateValue(position.name || position.ticker, controller.hideValues)}</option>)}
           </select>
         </label>
         <label className="mp-field">
           Reminder
-          <input autoFocus required maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Review my watch levels" />
+          <input autoFocus required maxLength={160} value={controller.hideValues ? '' : title} onChange={(event) => setTitle(event.target.value)} placeholder="Review my watch levels" />
         </label>
         <label className="mp-field">
           Date
@@ -109,7 +113,12 @@ export function RulesPanel({ controller }: PanelProps) {
   const unavailableRules = controller.rules.filter((rule) => rule.unresolved || !controller.positions.some((position) => position.id === rule.holdingId))
   const remainingRules = Math.max(0, MAX_RULES - controller.rules.length)
 
+  useEffect(() => {
+    if (controller.hideValues && dialog.current?.open) dialog.current.close()
+  }, [controller.hideValues])
+
   function defaultThreshold(id: string, nextCondition: RuleCondition) {
+    if (controller.hideValues) return ''
     if (nextCondition === 'daily_move') return '3'
     const position = controller.positions.find((item) => item.id === id)
     if (!position || !controller.allowExternalData) return ''
@@ -167,17 +176,17 @@ export function RulesPanel({ controller }: PanelProps) {
         <h2>Your watch rules</h2>
         <span className="mp-rule-capacity" aria-label={`${remainingRules} of ${MAX_RULES} watch rules available`} title={`${remainingRules} of ${MAX_RULES} watch rules available`}>{remainingRules} left</span>
       </div>
-      <button type="button" disabled={!controller.positions.length || controller.rules.length >= MAX_RULES} onClick={() => open()}>+ New rule</button>
+      <button type="button" disabled={controller.hideValues || !controller.positions.length || controller.rules.length >= MAX_RULES} title={controller.hideValues ? 'Turn off masking to add a watch rule.' : undefined} onClick={() => open()}>+ New rule</button>
     </div>
     <div className="mp-rule-list">
       {availableRules.map((rule) => <article className={`mp-rule-row${rule.active ? '' : ' mp-rule-paused'}`} key={rule.id}>
         <div className="mp-row-main">
           <div className="mp-rule-summary">
-            <strong>{controller.positions.find((position) => position.id === rule.holdingId)?.name || controller.positions.find((position) => position.id === rule.holdingId)?.ticker || rule.holding}</strong>
+            <strong>{privateValue(controller.positions.find((position) => position.id === rule.holdingId)?.name || controller.positions.find((position) => position.id === rule.holdingId)?.ticker || rule.holding, controller.hideValues)}</strong>
             <span className={`mp-kind mp-rule-state mp-rule-state--${rule.active ? 'active' : 'paused'}`}>{rule.active ? 'Active' : 'Paused'}</span>
           </div>
           <div className="mp-rule-controls">
-            <p className="mp-rule-condition" aria-label={`${rule.holding}: ${conditionLabel(rule)}`}>
+            <p className="mp-rule-condition" aria-label={`${privateValue(rule.holding, controller.hideValues)}: ${conditionLabel(rule)}`}>
               {!controller.hideValues && <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d={rule.condition === 'price_above' ? 'M4 17l6-6 4 4 6-10M14 5h6v6' : rule.condition === 'price_below' ? 'M4 7l6 6 4-4 6 10M14 19h6v-6' : 'M3 12h4l3-7 4 14 3-7h4'} />
               </svg>}
@@ -190,11 +199,11 @@ export function RulesPanel({ controller }: PanelProps) {
               event.currentTarget.removeAttribute('open')
               event.currentTarget.querySelector('summary')?.focus()
             }}>
-              <summary aria-label={`Manage ${rule.holding} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} title="Manage rule">
+              <summary aria-label={`Manage ${privateValue(rule.holding, controller.hideValues)} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} title="Manage rule">
                 <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
               </summary>
               <div className="mp-rule-menu-actions">
-                <button type="button" onClick={(event) => {
+                <button type="button" disabled={controller.hideValues} title={controller.hideValues ? 'Turn off masking to edit watch rules.' : undefined} onClick={(event) => {
                   event.currentTarget.closest('details')?.removeAttribute('open')
                   open(rule)
                 }}>Edit</button>
@@ -202,7 +211,7 @@ export function RulesPanel({ controller }: PanelProps) {
                   event.currentTarget.closest('details')?.removeAttribute('open')
                   controller.toggleRule(rule.id)
                 }}>{rule.active ? 'Pause' : 'Resume'}</button>
-                <button type="button" aria-label={`Delete ${rule.holding} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} onClick={() => controller.deleteRule(rule.id)}>Delete</button>
+                <button type="button" aria-label={`Delete ${privateValue(rule.holding, controller.hideValues)} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} onClick={() => controller.deleteRule(rule.id)}>Delete</button>
               </div>
             </details>
           </div>
@@ -210,9 +219,9 @@ export function RulesPanel({ controller }: PanelProps) {
       </article>)}
       {unavailableRules.map((rule) => <article className="mp-rule-row mp-rule-paused" key={rule.id}>
         <div className="mp-row-main">
-          <div className="mp-rule-summary"><strong>{rule.holding || 'Unavailable holding'}</strong><span className="mp-kind mp-rule-state mp-rule-state--paused">Unavailable</span></div>
+          <div className="mp-rule-summary"><strong>{privateValue(rule.holding || 'Unavailable holding', controller.hideValues)}</strong><span className="mp-kind mp-rule-state mp-rule-state--paused">Unavailable</span></div>
           <div className="mp-rule-controls"><p className="mp-rule-condition">{controller.hideValues ? 'Watch level hidden' : conditionLabel(rule)}</p>
-            <button className="mp-text-button" type="button" aria-label={`Remove unavailable ${rule.holding} rule`} onClick={() => controller.deleteRule(rule.id)}>Remove</button>
+            <button className="mp-text-button" type="button" aria-label={`Remove unavailable ${privateValue(rule.holding, controller.hideValues)} rule`} onClick={() => controller.deleteRule(rule.id)}>Remove</button>
           </div>
         </div>
       </article>)}
@@ -232,7 +241,7 @@ export function RulesPanel({ controller }: PanelProps) {
             setThreshold(defaultThreshold(event.target.value, condition))
           }}>
             {!selected && <option value="">Choose a holding</option>}
-            {controller.positions.map((position) => <option value={position.id} key={position.id}>{position.name || position.ticker}</option>)}
+            {controller.positions.map((position) => <option value={position.id} key={position.id}>{privateValue(position.name || position.ticker, controller.hideValues)}</option>)}
           </select>
         </label>
         <label className="mp-field">
@@ -247,7 +256,7 @@ export function RulesPanel({ controller }: PanelProps) {
         </label>
         <label className="mp-field">
           {condition === 'daily_move' ? 'Move threshold (%)' : `Price threshold (${selected?.currency === 'USD' ? '$' : '₹'})`}
-          <input type="number" required min="0.01" step="0.01" value={threshold} onChange={(event) => setThreshold(event.target.value)} />
+          <input type="number" required min="0.01" step="0.01" value={controller.hideValues ? '' : threshold} onChange={(event) => setThreshold(event.target.value)} />
         </label>
         <p className="mp-muted">{condition === 'daily_move' ? 'Checks the size of either an upward or downward daily move.' : controller.allowExternalData ? 'Uses a fresh provider quote only to suggest a starting level. Enter a value if no quote is available.' : 'External market data is off, so enter a price level manually.'} No background notification is sent.</p>
         {error && <p role="alert">{error}</p>}

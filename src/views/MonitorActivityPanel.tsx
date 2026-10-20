@@ -87,22 +87,22 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <span className="pa-summary-label">{fundOnly && !controller.hideValues ? 'Latest published NAV' : 'Largest reported impact'}</span>
         <strong className="pa-summary-value" data-trend={valueTrend(largestImpact?.dayContribution ?? null)} title={largestImpact ? signedMoney(largestImpact.dayContribution) : undefined} aria-label={largestImpact ? signedMoney(largestImpact.dayContribution) : undefined}>{controller.hideValues ? privateValue('', true) : largestImpact ? summaryImpact(largestImpact.dayContribution!) : latestNav ? money(latestNav.price, latestNav.assetCurrency) : model.summary.impactCount ? money(0) : <span className="pa-summary-empty">{fundOnly ? 'Unavailable' : 'Not reported'}</span>}</strong>
         <span className="pa-summary-context">{controller.hideValues ? 'Values and rankings hidden' : largestImpact ? <>{largestImpact.ticker}{largestImpact.changePct != null && <> · <span className="pa-change" data-trend={valueTrend(largestImpact.changePct)}>{percent(largestImpact.changePct)}</span></>}</> : latestNav ? latestNav.name : fundOnly ? 'No recent fund NAV is available' : model.summary.impactCount ? 'Available impact estimates are zero' : 'A reported price change is needed to estimate impact'}</span>
-        {(largestImpact || latestNav) && <span className="pa-summary-time">{observedLabel((largestImpact ?? latestNav)!)}</span>}
-        <div className="pa-summary-footer"><span>{fundOnly ? 'Daily NAV publication' : `${model.summary.impactCount} of ${model.summary.impactEligibleCount} quote estimates`}</span><button type="button" className="workspace-action" aria-expanded={view === 'holdings'} aria-controls="portfolio-holdings-details" onClick={() => toggleView('holdings')}><ActionIcon name={view === 'holdings' ? 'close' : 'details'} /><span>{view === 'holdings' ? 'Hide details' : 'Details'}</span></button></div>
+        {!controller.hideValues && (largestImpact || latestNav) && <span className="pa-summary-time">{observedLabel((largestImpact ?? latestNav)!)}</span>}
+        <div className="pa-summary-footer"><span>{controller.hideValues ? 'Coverage hidden' : fundOnly ? 'Daily NAV publication' : `${model.summary.impactCount} of ${model.summary.impactEligibleCount} quote estimates`}</span><button type="button" className="workspace-action" aria-expanded={view === 'holdings'} aria-controls="portfolio-holdings-details" onClick={() => toggleView('holdings')}><ActionIcon name={view === 'holdings' ? 'close' : 'details'} /><span>{view === 'holdings' ? 'Hide details' : 'Details'}</span></button></div>
       </div>
       <div className="pa-summary-card">
         <span className="pa-summary-label">Reported moves</span>
         <strong className="pa-summary-value pa-summary-breadth">{controller.hideValues ? privateValue('', true) : <><span className="pa-move-count" data-trend={model.counts.gainers ? 'up' : 'neutral'}>{model.counts.gainers}<small> up</small></span><small> / </small><span className="pa-move-count" data-trend={model.counts.decliners ? 'down' : 'neutral'}>{model.counts.decliners}<small> down</small></span></>}</strong>
         <DitherBar className="pa-summary-rail" segments={controller.hideValues ? [] : breadth} />
         {controller.hideValues ? <span className="pa-summary-context">Movement details hidden</span> : <div className="pa-summary-legend"><span>{model.counts.flat} flat</span><span>{notReported} not reported</span></div>}
-        <span className="pa-summary-note">{model.counts.movement} of {model.counts.total} holdings report a change</span>
+        <span className="pa-summary-note">{controller.hideValues ? 'Coverage hidden' : `${model.counts.movement} of ${model.counts.total} holdings report a change`}</span>
       </div>
       <div className="pa-summary-card">
         <span className="pa-summary-label">Recent observations</span>
-        <strong className="pa-summary-value">{model.counts.fresh}<small> / {model.counts.total}</small></strong>
-        <DitherBar className="pa-summary-rail" segments={[{ value: model.counts.fresh, color: 'purple' }]} scale={model.counts.total} />
-        <span className="pa-summary-context">{model.summary.quoteCount} {model.summary.quoteCount === 1 ? 'quote' : 'quotes'} · {model.summary.navCount} daily {model.summary.navCount === 1 ? 'NAV' : 'NAVs'}</span>
-        <span className="pa-summary-note">{latestObservation ? <>Latest · <time dateTime={new Date(model.summary.latestObservedAt!).toISOString()}>{latestObservation} IST</time></> : controller.allowExternalData ? 'No recent provider observations' : 'External market data is off'}</span>
+        <strong className="pa-summary-value">{controller.hideValues ? privateValue('', true) : <>{model.counts.fresh}<small> / {model.counts.total}</small></>}</strong>
+        {!controller.hideValues && <DitherBar className="pa-summary-rail" segments={[{ value: model.counts.fresh, color: 'purple' }]} scale={model.counts.total} />}
+        <span className="pa-summary-context">{controller.hideValues ? 'Observation details hidden' : <>{model.summary.quoteCount} {model.summary.quoteCount === 1 ? 'quote' : 'quotes'} · {model.summary.navCount} daily {model.summary.navCount === 1 ? 'NAV' : 'NAVs'}</>}</span>
+        {!controller.hideValues && <span className="pa-summary-note">{latestObservation ? <>Latest · <time dateTime={new Date(model.summary.latestObservedAt!).toISOString()}>{latestObservation} IST</time></> : controller.allowExternalData ? 'No recent provider observations' : 'External market data is off'}</span>}
       </div>
       <button type="button" className="pa-summary-card pa-summary-review" aria-expanded={view === 'activity'} aria-controls="portfolio-activity-details" aria-label={view === 'activity' ? 'Close activity' : `Review ${controller.counts.open} open watch ${controller.counts.open === 1 ? 'alert' : 'alerts'}`} onClick={reviewActivity}>
         <span className="pa-summary-label">To review</span>
@@ -112,16 +112,16 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <span className="workspace-action pa-summary-review-link"><ActionIcon name={view === 'activity' ? 'close' : controller.counts.open ? 'review' : 'activity'} /><span>{view === 'activity' ? 'Close activity' : controller.counts.open ? 'Review alerts' : 'Open activity'}</span></span>
       </button>
     </div>
-    {(model.counts.stale > 0 || model.counts.imported > 0 || model.counts.unavailable > 0 || !controller.allowExternalData) && <p className="pa-data-note" role="status">{!controller.allowExternalData ? 'External data is off. Showing imported prices. ' : ''}{model.counts.stale > 0 ? `${model.counts.stale} older quotes. ` : ''}{model.counts.imported > 0 ? `${model.counts.imported} imported prices. ` : ''}{model.counts.unavailable > 0 ? `${model.counts.unavailable} prices unavailable. ` : ''}Only recent provider observations enter the move list.</p>}
+    {!controller.hideValues && (model.counts.stale > 0 || model.counts.imported > 0 || model.counts.unavailable > 0 || !controller.allowExternalData) && <p className="pa-data-note" role="status">{!controller.allowExternalData ? 'External data is off. Showing imported prices. ' : ''}{model.counts.stale > 0 ? `${model.counts.stale} older quotes. ` : ''}{model.counts.imported > 0 ? `${model.counts.imported} imported prices. ` : ''}{model.counts.unavailable > 0 ? `${model.counts.unavailable} prices unavailable. ` : ''}Only recent provider observations enter the move list.</p>}
 
     {view === 'brief' && <div className="pa-brief">
       {(model.holdings.some((row) => row.type !== 'mutual-fund') || navRows.length === 0) && <>
       <div className="pa-section-title"><h3>{controller.hideValues ? 'Holding updates' : model.movers.some((row) => row.dayContribution != null) ? 'Largest reported impacts' : 'Reported moves'}</h3><button type="button" className="workspace-action" onClick={() => chooseView('holdings')}><ActionIcon name="holdings" /><span>All holdings</span></button></div>
       {briefRows.length > 0 ? <ul className="pa-movers" aria-label={controller.hideValues ? 'Holding updates' : 'Largest reported holding moves'}>{briefRows.map((row) => <li className="pa-mover" data-tone={row.trend} key={row.id}>
-        <span className="pa-symbol" aria-hidden="true">{row.type === 'mutual-fund' ? 'MF' : row.ticker.slice(0, 3)}</span>
-        <div className="pa-identity"><strong>{row.name || row.ticker}</strong><span>{row.movementLabel} · {row.source ?? 'No provider'} · {observedLabel(row)}</span></div>
+        <span className="pa-symbol" aria-hidden="true">{controller.hideValues ? <ActionIcon name="holdings" /> : row.type === 'mutual-fund' ? 'MF' : row.ticker.slice(0, 3)}</span>
+        <div className="pa-identity"><strong>{privateValue(row.name || row.ticker, controller.hideValues)}</strong><span>{row.movementLabel} · {row.source ?? 'No provider'} · {observedLabel(row)}</span></div>
         <div className="pa-mover-numbers"><strong className="pa-change" data-trend={valueTrend(row.changePct)}>{percent(row.changePct)}</strong><span className="pa-impact-line"><span>Impact:</span><b className="pa-impact" data-trend={valueTrend(row.dayContribution)}>{signedMoney(row.dayContribution)}</b></span></div>
-        {newsIdentities.has(row.instrumentIdentity) && <HoldingNewsAction holding={row} onClick={() => showNews(row.instrumentIdentity)} />}
+        {!controller.hideValues && newsIdentities.has(row.instrumentIdentity) && <HoldingNewsAction holding={row} onClick={() => showNews(row.instrumentIdentity)} />}
       </li>)}</ul> : <div className="pa-empty"><strong>No recent moves reported</strong><p>{model.counts.fresh > 0 ? 'Some providers publish a price or daily NAV without a change. See Holdings for their latest observations.' : 'Refresh prices to see reported changes. Older and imported prices stay in Holdings.'}</p></div>}
       <p className="pa-explainer">{controller.hideValues ? 'Values and movement rankings are hidden.' : 'Ranked by absolute estimated impact where available, then by reported percentage move. Observation dates can differ.'}</p>
       </>}
@@ -129,7 +129,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
         <div className="pa-section-title"><h3>Daily NAV updates</h3><span>{navRows.length} {navRows.length === 1 ? 'fund' : 'funds'} observed</span></div>
         <ul className="pa-movers" aria-label="Latest published fund NAVs">{navRows.slice(0, 2).map((row) => <li className="pa-mover" key={row.id}>
           <span className="pa-symbol" aria-hidden="true">MF</span>
-          <div className="pa-identity"><strong>{row.name}</strong><span>Published NAV · {observedLabel(row)}</span></div>
+          <div className="pa-identity"><strong>{privateValue(row.name, controller.hideValues)}</strong><span>Published NAV · {observedLabel(row)}</span></div>
           <div className="pa-mover-numbers"><strong>{money(row.price, row.assetCurrency)}</strong><span>per unit</span></div>
         </li>)}</ul>
         <p className="pa-explainer">Daily publications, not intraday quotes.{navRows.length > 2 ? ` See all ${navRows.length} funds in Holdings.` : ''}</p>
@@ -144,7 +144,7 @@ export function MonitorActivityPanel({ controller, onSelectNews }: { controller:
       <div className="pa-table" role="table" aria-label="Holding market observations">
         <div className="pa-table-head" role="row"><span role="columnheader">Holding / as of</span><span role="columnheader">Price / NAV</span><span role="columnheader">Move</span><span role="columnheader">Est. impact</span><span role="columnheader">Weight</span></div>
         {model.holdings.slice(0, visibleCount).map((row) => <div className="pa-table-row" role="row" data-tone={row.trend} key={row.id}>
-          <div className="pa-table-identity" role="cell"><strong>{row.name || row.ticker}</strong><span>{assetTypeLabel(row.type)} · {row.source ?? 'No provider'}</span><time dateTime={row.observedAt == null ? undefined : new Date(row.observedAt).toISOString()}>{observedLabel(row)}{row.freshness === 'stale' ? ' · Older quote' : ''}</time>{newsIdentities.has(row.instrumentIdentity) && <HoldingNewsAction holding={row} onClick={() => showNews(row.instrumentIdentity)} />}</div>
+          <div className="pa-table-identity" role="cell"><strong>{privateValue(row.name || row.ticker, controller.hideValues)}</strong><span>{assetTypeLabel(row.type)} · {row.source ?? 'No provider'}</span><time dateTime={row.observedAt == null ? undefined : new Date(row.observedAt).toISOString()}>{observedLabel(row)}{row.freshness === 'stale' ? ' · Older quote' : ''}</time>{!controller.hideValues && newsIdentities.has(row.instrumentIdentity) && <HoldingNewsAction holding={row} onClick={() => showNews(row.instrumentIdentity)} />}</div>
           <div role="cell" data-label="Price / NAV">{money(row.price, row.assetCurrency)}</div>
           <div role="cell" className="pa-direction" data-label={row.movementLabel}><span className="pa-change" data-trend={valueTrend(row.changePct)}>{percent(row.changePct)}</span></div>
           <div role="cell" className="pa-direction" data-label="Est. impact"><span className="pa-impact" data-trend={valueTrend(row.dayContribution)}>{signedMoney(row.dayContribution)}</span></div>

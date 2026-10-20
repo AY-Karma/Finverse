@@ -8,6 +8,7 @@ import { ManageHoldings } from './ManageHoldings'
 
 const state = vi.hoisted(() => ({
   folios: [] as Folio[], positions: [] as Position[],
+  settings: { hideValues: false, allowExternalData: false },
   previewFile: vi.fn(), commitImport: vi.fn(), commitImports: vi.fn(), removeFolio: vi.fn(),
   exportPortfolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null as string | null,
 }))
@@ -25,9 +26,33 @@ beforeEach(() => {
   state.folios = [folio]
   state.positions = [position]
   state.undoImportFolioId = folio.id
+  state.settings.hideValues = false
 })
 
 describe('holdings management', () => {
+  it('masks account identities and import details while preserving removal and undo targets', async () => {
+    state.settings.hideValues = true
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      expect(container.innerHTML).not.toContain(folio.name)
+      expect(container.textContent).toContain('Import details hidden')
+      expect(container.textContent).not.toContain('1 holding')
+      expect(container.textContent).not.toContain('inferred or unresolved')
+      expect(container.querySelector('.import-health')).toBeNull()
+      const remove = container.querySelector<HTMLButtonElement>('.folio-list .btn-remove')!
+      expect(remove.getAttribute('aria-label')).toBe('Remove ••••••')
+      await act(async () => remove.click())
+      expect(container.innerHTML).not.toContain(folio.name)
+      await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Delete')!.click())
+      expect(state.removeFolio).toHaveBeenCalledExactlyOnceWith(folio.id)
+      await act(async () => container.querySelector<HTMLButtonElement>('.undo-import')!.click())
+      await act(async () => container.querySelector<HTMLButtonElement>('.undo-import')!.click())
+      expect(state.undoLastImport).toHaveBeenCalledOnce()
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('shows each import age beside its filename and allows updates at every age', async () => {
     const now = Date.parse('2026-10-19T12:00:00Z')
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now)

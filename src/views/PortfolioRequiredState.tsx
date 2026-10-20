@@ -10,8 +10,7 @@ export function PortfolioRequiredState({ area, description, onImport }: Portfoli
   return (
     <div className="overview-empty enter">
       <div>
-        <div className="page-eyebrow">{area}</div>
-        <h1 className="page-title">Import your portfolio to start.</h1>
+        <h1 className="page-title">{area}</h1>
         <p className="page-sub">{description}</p>
       </div>
       <button className="btn btn--primary" type="button" onClick={onImport}>

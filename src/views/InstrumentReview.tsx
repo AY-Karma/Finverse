@@ -3,6 +3,7 @@ import { useStore, type InstrumentCorrection } from '../useStore'
 import { isNumericBseScripCode, needsInstrumentReview } from '../instruments'
 import type { Currency, Exchange, Position } from '../types'
 import { ActionIcon } from './ActionIcon'
+import { HiddenValuesState } from './HiddenValuesState'
 
 const EXCHANGES: Exchange[] = ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER']
 
@@ -16,7 +17,7 @@ function defaultCorrection(position: Position): InstrumentCorrection {
 }
 
 export function InstrumentReview({ onClose }: { onClose?: () => void }) {
-  const { positions, confirmInstrument } = useStore()
+  const { positions, confirmInstrument, settings } = useStore()
   const holdings = positions.filter((position) => position.type !== 'mutual-fund')
   const pending = holdings.filter(needsInstrumentReview)
   const reviewCount = pending.length
@@ -90,6 +91,13 @@ export function InstrumentReview({ onClose }: { onClose?: () => void }) {
   }
 
   if (!holdings.length) return null
+  if (settings.hideValues) return <section id="instrument-review" ref={reviewRef} tabIndex={-1} aria-label="Review instrument listings" className="panel instrument-review fund-review">
+    <div className="instrument-review-head">
+      <h2>Review listings</h2>
+      {onClose && <button className="icon-btn" type="button" aria-label="Close listing review" onClick={onClose}><ActionIcon name="close" /></button>}
+    </div>
+    <HiddenValuesState />
+  </section>
   return <section id="instrument-review" ref={reviewRef} tabIndex={-1} aria-label="Review instrument listings" className={`panel instrument-review fund-review${reviewCount > 0 ? ' review-required' : ''}`}>
     <div className="instrument-review-head">
       <div><h2>Review listings</h2><span className="hint">{reviewCount} inferred or unresolved</span></div>
