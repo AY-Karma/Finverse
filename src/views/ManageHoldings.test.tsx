@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   settings: { hideValues: false, allowExternalData: false },
   previewFile: vi.fn(), commitImport: vi.fn(), commitImports: vi.fn(), removeFolio: vi.fn(),
   exportPortfolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null as string | null,
+  confirmFolioUnchanged: vi.fn(),
 }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -23,6 +24,7 @@ beforeEach(() => {
   state.commitImport.mockResolvedValue(true)
   state.commitImports.mockResolvedValue(true)
   state.undoLastImport.mockResolvedValue(true)
+  state.confirmFolioUnchanged.mockResolvedValue(undefined)
   state.folios = [folio]
   state.positions = [position]
   state.undoImportFolioId = folio.id
@@ -30,6 +32,56 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('shows unchanged confirmation only after seven days and ignores repeat clicks while saving', async () => {
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    state.folios = [
+      { ...folio, id: 'new', importedAt: now },
+      { ...folio, id: 'boundary', importedAt: now - 7 * 86_400_000 },
+      { ...folio, id: 'aging', importedAt: now - 7 * 86_400_000 - 1 },
+      { ...folio, id: 'reviewed', importedAt: 1234, reviewedAt: now },
+    ]
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const render = () => act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+    let finish!: () => void
+    state.confirmFolioUnchanged.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve }))
+    try {
+      await render()
+      const buttons = [...container.querySelectorAll<HTMLButtonElement>('.folio-review-actions button')].filter((button) => button.textContent === 'Holdings unchanged')
+      expect(buttons).toHaveLength(1)
+      await act(async () => { buttons[0].click(); buttons[0].click(); buttons[0].click() })
+      expect(state.confirmFolioUnchanged).toHaveBeenCalledExactlyOnceWith('aging')
+      expect(buttons[0].disabled).toBe(true)
+      state.folios = state.folios.map((account) => account.id === 'aging' ? { ...account, reviewedAt: now } : account)
+      await act(async () => finish())
+      await render()
+      expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Holdings unchanged')).toBe(false)
+      expect(container.textContent).toContain('Marked fresh')
+      expect(container.querySelectorAll('.folio-review-actions')).toHaveLength(4)
+    } finally { await act(async () => root.unmount()); clock.mockRestore() }
+  })
+
+  it('targets the selected folio for update and reports failed or successful unchanged confirmations', async () => {
+    const onRequestImport = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const button = (text: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === text)!
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
+      await act(async () => button('Update folio').click())
+      expect(onRequestImport).toHaveBeenCalledExactlyOnceWith(folio.id)
+      state.confirmFolioUnchanged.mockRejectedValueOnce(new Error('Storage full'))
+      await act(async () => button('Holdings unchanged').click())
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe('Storage full')
+      expect(container.textContent).not.toContain('Marked fresh')
+      await act(async () => button('Holdings unchanged').click())
+      expect(state.confirmFolioUnchanged).toHaveBeenLastCalledWith(folio.id)
+      expect(container.querySelector('[role="alert"]')).toBeNull()
+      expect(container.textContent).toContain('Marked fresh')
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('masks account identities and import details while preserving removal and undo targets', async () => {
     state.settings.hideValues = true
     const container = document.createElement('div')

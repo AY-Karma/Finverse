@@ -27,7 +27,7 @@ describe('workspace archives', () => {
   })
   it('round-trips statement revisions, imported price dates and account-removal balance events', () => {
     const statement = { id: 'new', fileName: 'new.csv', statementDate: '2026-10-10', completeness: 'complete' as const }
-    const accounts: Folio[] = [{ ...folios[0], statement, positions: [{ ...position, priceAsOf: '2026-10-10' }], previousRevision: { statement: { ...statement, id: 'old', statementDate: null }, importedAt: 1, positions: [{ ...position, priceAsOf: null }] }, lastOperation: 'updated', operationAt: 100 }]
+    const accounts: Folio[] = [{ ...folios[0], statement, reviewedAt: 200, positions: [{ ...position, priceAsOf: '2026-10-10' }], previousRevision: { statement: { ...statement, id: 'old', statementDate: null }, importedAt: 1, reviewedAt: 2, positions: [{ ...position, priceAsOf: null }] }, lastOperation: 'updated', operationAt: 100 }]
     const balances: PortfolioSnapshot[] = [{ ...snapshots[0], event: { kind: 'account-remove', accountId: 'removed', statementId: 'past' } }]
     const original = createWorkspaceArchive(accounts, settings, balances, monitor)
     expect(parseWorkspaceArchive(JSON.stringify(original)).archive).toEqual(original)

@@ -191,7 +191,7 @@ export function planStatementImport(
   const next: Folio = {
     id: accountId!, name: alias, importedAt: now, positions, statement,
     lastOperation: operation === 'add' ? 'added' : 'updated', operationAt: now,
-    ...(current ? { previousRevision: { statement: { ...currentStatement! }, importedAt: current.importedAt, positions: current.positions.map(copyPosition) } } : {}),
+    ...(current ? { previousRevision: { statement: { ...currentStatement! }, importedAt: current.importedAt, positions: current.positions.map(copyPosition), ...(current.reviewedAt !== undefined ? { reviewedAt: current.reviewedAt } : {}) } } : {}),
   }
   return {
     nextFolios: current ? folios.map((folio) => folio.id === current.id ? next : folio) : [...folios, next],
@@ -214,6 +214,7 @@ export function undoStatementImport(folios: Folio[], accountId: string): Folio[]
   const { previousRevision, lastOperation: _lastOperation, operationAt: _operationAt, ...restored } = account
   return folios.map((folio) => folio.id === accountId ? {
     ...restored, statement: { ...previousRevision.statement }, importedAt: previousRevision.importedAt,
+    reviewedAt: previousRevision.reviewedAt,
     positions: previousRevision.positions.map(copyPosition),
   } : folio)
 }

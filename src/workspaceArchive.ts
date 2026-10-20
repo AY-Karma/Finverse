@@ -116,6 +116,7 @@ function parseFolio(value: unknown): Folio {
     positions: unique(list(row.positions, 5_000, 'account holdings', parsePosition), 'holding'),
   }
   if (row.statement !== undefined) folio.statement = parseStatement(row.statement)
+  if (row.reviewedAt !== undefined) folio.reviewedAt = number(row.reviewedAt, 'holdings review time', 0, MAX_DATE)
   if (row.previousRevision !== undefined) {
     const previous = object(row.previousRevision, 'previous account revision')
     if (previous.previousRevision !== undefined) return fail('nested account revision')
@@ -123,6 +124,7 @@ function parseFolio(value: unknown): Folio {
       importedAt: number(previous.importedAt, 'previous upload time', 0, MAX_DATE),
       positions: unique(list(previous.positions, 5_000, 'previous holdings', parsePosition), 'previous holding'),
       statement: parseStatement(previous.statement),
+      ...(previous.reviewedAt !== undefined ? { reviewedAt: number(previous.reviewedAt, 'previous holdings review time', 0, MAX_DATE) } : {}),
     }
   }
   if (row.lastOperation !== undefined) {

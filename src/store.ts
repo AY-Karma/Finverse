@@ -95,7 +95,8 @@ function sanitizeRevision(value: unknown): AccountRevision | null {
   const importedAt = persistedNumber(value.importedAt)
   const positions = value.positions.map(sanitizePosition).filter((position): position is Position => position !== null)
   if (!statement || importedAt == null || importedAt < 0 || positions.length !== value.positions.length) return null
-  return { statement, importedAt, positions }
+  const reviewedAt = persistedNumber(value.reviewedAt)
+  return { statement, importedAt, positions, ...(reviewedAt != null && reviewedAt >= 0 ? { reviewedAt } : {}) }
 }
 
 function sanitizeFolio(value: unknown): Folio | null {
@@ -107,6 +108,8 @@ function sanitizeFolio(value: unknown): Folio | null {
   const name = persistedText(value.name)
   if (!id || !name || importedAt == null) return null
   const folio: Folio = { id, name, importedAt, positions }
+  const reviewedAt = persistedNumber(value.reviewedAt)
+  if (reviewedAt != null && reviewedAt >= 0) folio.reviewedAt = reviewedAt
   const statement = sanitizeStatement(value.statement)
   const previousRevision = sanitizeRevision(value.previousRevision)
   if (statement) folio.statement = statement

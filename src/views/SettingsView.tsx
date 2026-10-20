@@ -10,7 +10,7 @@ import { ActionIcon, type ActionIconName } from './ActionIcon'
 
 type SettingsSection = 'preferences' | 'privacy'
 
-export function SettingsView({ onRequestImport }: { onRequestImport: () => void }) {
+export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?: string) => void }) {
   const { positions, settings, setSettings, settingsSaved = true } = useStore()
   const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
   const [reviewOpen, setReviewOpen] = useState(() => window.location.hash === '#instrument-review')

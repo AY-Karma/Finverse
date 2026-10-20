@@ -19,6 +19,36 @@ vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => null }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
+  it('prompts after 21 days, links to folios, and clears after a review while retaining listing review', async () => {
+    vi.useFakeTimers()
+    const now = Date.parse('2026-10-20T12:00:00Z')
+    vi.setSystemTime(now)
+    const position: Position = { id: 'old', ticker: 'ABC', name: 'ABC', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchangeSource: 'inferred' }
+    const folios = ['old-account', 'other-account'].map((id) => ({ id, name: 'Private account', importedAt: now - 21 * 86_400_000, positions: [{ ...position, id: `${id}-holding` }] }))
+    state.store = { positions: [position], rawPositions: [position], snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }), settings: { ...loadSettings(), hideValues: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    const onGoTo = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const render = () => act(async () => root.render(<Overview onGoTo={onGoTo} onRequestImport={vi.fn()} />))
+    try {
+      await render()
+      expect(container.querySelector('.overview-review--folios')).toBeNull()
+      await act(async () => vi.advanceTimersByTime(30_000))
+      const notice = container.querySelector('.overview-review--folios')!
+      expect(notice.textContent).toContain('Update folios')
+      expect(notice.textContent).not.toContain('Private account')
+      await act(async () => notice.querySelector('button')!.click())
+      expect(onGoTo).toHaveBeenCalledWith('settings', 'manage-holdings')
+      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios: [{ ...folios[0], reviewedAt: Date.now() }, folios[1]], quotes: {}, fxRate: null }) }
+      await render()
+      expect(container.querySelector('.overview-review--folios')).not.toBeNull()
+      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios: folios.map((folio) => ({ ...folio, reviewedAt: Date.now() })), quotes: {}, fxRate: null }) }
+      await render()
+      expect(container.querySelector('.overview-review--folios')).toBeNull()
+      expect(container.querySelector('.overview-review')?.textContent).toContain('Review listings')
+    } finally { await act(async () => root.unmount()); vi.useRealTimers() }
+  })
+
   it('shows pending imported listings, links to their review, and clears the notice after approval', async () => {
     const onGoTo = vi.fn()
     const positions: Position[] = [

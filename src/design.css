@@ -336,10 +336,11 @@ body {
   text-align: right;
   line-height: 1.55;
 }
-.page-head.overview-head { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
-.overview-heading { flex: 1 1 360px; min-width: 0; }
-.overview-title-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; column-gap: clamp(24px, 4vw, 64px); }
-.overview-title-row > .page-title { line-height: 44px; }
+.page-head.overview-head { flex-direction: row; flex-wrap: wrap; align-items: flex-start; padding-bottom: 8px; }
+.overview-heading { flex: 1 1 360px; min-width: 0; align-self: flex-end; }
+.overview-title-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: end; column-gap: clamp(24px, 4vw, 64px); }
+.overview-title-row > .page-title { margin-top: 24px; font-size: clamp(32px, 3.6vw, 42px); line-height: 1.15; }
+.overview-notices { display: flex; flex-wrap: wrap; align-items: start; gap: 16px 24px; min-width: 0; transform: translateY(12px); }
 .overview-review {
   display: grid;
   justify-items: start;
@@ -350,22 +351,24 @@ body {
 }
 .overview-review-note { margin: 0; max-width: 320px; color: var(--ink-subtle); }
 .btn.overview-review-action {
-  --review-yellow: #e8c847;
+  --review-color: #e8c847;
   height: 44px;
   padding: 0 18px;
-  border: 1px solid color-mix(in srgb, var(--review-yellow) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--review-color) 65%, transparent);
   border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--review-yellow) 7%, var(--surface-1));
+  background: color-mix(in srgb, var(--review-color) 7%, var(--surface-1));
   color: var(--ink);
   font-family: var(--font-display);
   font-size: 16px;
   font-weight: 650;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--review-yellow) 15%, transparent), inset 0 0 12px color-mix(in srgb, var(--review-yellow) 5%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--review-color) 15%, transparent), inset 0 0 12px color-mix(in srgb, var(--review-color) 5%, transparent);
 }
-.btn.overview-review-action:hover { background: color-mix(in srgb, var(--review-yellow) 12%, var(--surface-1)); border-color: var(--review-yellow); }
-.btn.overview-review-action:focus-visible { outline-color: color-mix(in srgb, var(--review-yellow) 70%, var(--ink)); }
+.btn.overview-review-action:hover { background: color-mix(in srgb, var(--review-color) 12%, var(--surface-1)); border-color: var(--review-color); }
+.btn.overview-review-action:focus-visible { outline-color: color-mix(in srgb, var(--review-color) 70%, var(--ink)); }
+.btn.overview-review-action--red { --review-color: rgb(240, 70, 70); display: inline-flex; align-items: center; gap: 10px; }
+.overview-review-texture { width: 28px; height: 12px; flex: none; }
 @media (max-width: 480px) {
-  .overview-title-row { column-gap: 16px; }
+  .overview-title-row { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .btn.overview-review-action { padding: 0 12px; font-size: 14px; }
 }
 .overview-empty {
@@ -2857,18 +2860,6 @@ details.workspace-recovery > summary {
   border-radius: var(--r-sm);
   cursor: pointer;
 }
-.review-required > summary {
-  background: color-mix(in srgb, var(--chart-invested) 6%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chart-invested) 24%, transparent);
-}
-.review-required > summary::marker { color: var(--chart-invested); }
-.review-required:not([open]) > summary { animation: review-action-pulse 3.2s ease-in-out infinite; }
-@keyframes review-action-pulse {
-  50% {
-    background: color-mix(in srgb, var(--chart-invested) 11%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chart-invested) 42%, transparent);
-  }
-}
 .workspace-recovery .import-preview,
 .instrument-review .import-preview { padding: 14px; background: var(--surface-2); border-radius: 8px; }
 .statement-field { display: grid; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink-muted); }
@@ -2892,8 +2883,11 @@ details.workspace-recovery > summary {
 .instrument-review-head h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
 .instrument-review-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px; }
 .instrument-review-scroll > .import-actions { margin-bottom: 12px; }
-.listing-review-trigger { width: 100%; height: auto; justify-content: flex-start; white-space: normal; text-align: left; padding: 10px 12px; }
+.listing-review-trigger { width: 100%; height: auto; justify-content: flex-start; white-space: normal; text-align: left; padding: 10px 12px; line-height: 1.5; }
 .listing-review-trigger > span:last-child { margin-left: auto; }
+details.fund-review > summary { list-style: none; }
+details.fund-review > summary::-webkit-details-marker { display: none; }
+.fund-review[open] .fund-review-arrow { transform: rotate(90deg); }
 .import-quality {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3741,7 +3735,9 @@ details.workspace-recovery > summary {
 .monitor-empty { margin: 0; padding: var(--sp-lg) 0; }
 .monitor-pagination { justify-content: flex-end; color: var(--ink-subtle); font-size: 12px; }
 .monitor-page-head { padding-bottom: 0; }
-.holdings-manage { display: grid; gap: var(--sp-lg); }
+.holdings-manage { display: grid; gap: var(--sp-lg); scroll-margin-top: 24px; }
+.folio-review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.folio-review-actions .btn { min-height: 34px; white-space: normal; }
 .holdings-manage .panel-head { margin-bottom: 0; }
 .settings-preferences > .holdings-manage { min-width: 0; padding: 16px; gap: 12px; }
 .holdings-manage > .panel-head { padding: 0; margin: 0 0 8px; }
@@ -3801,6 +3797,9 @@ details.workspace-recovery > summary {
   .monitor-feed-actions { justify-content: flex-start; }
 }
 @media (max-width: 768px) {
+  .overview-heading { order: 1; }
+  .overview-notices { transform: none; }
+  .holdings-manage { scroll-margin-top: 124px; }
   .panel--ledger { padding: 0; overflow-x: hidden; }
   .panel--ledger .panel-head { padding: 18px 18px 14px; margin-bottom: 0; }
   .panel--ledger .panel-head .scope-switch { margin-left: 0; }
@@ -4091,7 +4090,6 @@ details.workspace-recovery > summary {
     scroll-behavior: auto !important;
   }
   .ticker-track { animation: none !important; }
-  .review-required > summary { animation: none !important; }
 }
 
 /* ============ Root recovery ============ */

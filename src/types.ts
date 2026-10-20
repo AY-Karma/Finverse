@@ -60,6 +60,7 @@ export interface AccountStatement {
 export interface AccountRevision {
   statement: AccountStatement
   importedAt: number
+  reviewedAt?: number
   positions: Position[]
 }
 
@@ -67,6 +68,7 @@ export interface Folio {
   id: string
   name: string
   importedAt: number
+  reviewedAt?: number
   positions: Position[]
   statement?: AccountStatement
   previousRevision?: AccountRevision

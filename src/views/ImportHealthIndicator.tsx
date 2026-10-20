@@ -1,6 +1,7 @@
-import { useEffect, useId, useState } from 'react'
+import { useId } from 'react'
 import type { DitherColor } from '../components/dither-kit/palette'
-import { getImportFreshness, type ImportFreshness } from '../importFreshness'
+import { getFolioFreshness, type ImportFreshness } from '../importFreshness'
+import { useFolioReviewTime } from '../useFolioReviewTime'
 import { DitherBar } from './DitherBar'
 import './ImportHealthIndicator.css'
 
@@ -11,29 +12,18 @@ const STATUS: Record<ImportFreshness, { label: string; description: string; colo
   unknown: { label: 'Import age unavailable', description: 'The import date is unavailable.', color: 'grey' },
 }
 
-export function ImportHealthIndicator({ importedAt }: { importedAt: number }) {
+export function ImportHealthIndicator({ importedAt, reviewedAt }: { importedAt: number; reviewedAt?: number }) {
   const descriptionId = useId()
-  const [now, setNow] = useState(Date.now)
-  const freshness = getImportFreshness(importedAt, now)
+  const now = useFolioReviewTime()
+  const freshness = getFolioFreshness({ importedAt, reviewedAt }, now)
   const status = STATUS[freshness]
-
-  useEffect(() => {
-    const refresh = () => setNow(Date.now())
-    const onVisibility = () => { if (document.visibilityState === 'visible') refresh() }
-    refresh()
-    const timer = window.setInterval(refresh, 60_000)
-    window.addEventListener('focus', refresh)
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('focus', refresh)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [importedAt])
+  const reviewed = reviewedAt != null && reviewedAt >= importedAt
+  const label = reviewed ? status.label.replace('import', 'folio') : status.label
+  const description = reviewed ? status.description.replace('Imported', 'Holdings confirmed unchanged') : status.description
 
   return <span className="import-health" data-status={freshness} role="img" tabIndex={0}
-    aria-label={status.label} aria-describedby={descriptionId} title={`${status.label}. ${status.description}`}>
+    aria-label={label} aria-describedby={descriptionId} title={`${label}. ${description}`}>
     <DitherBar className="import-health-texture" segments={[{ value: 1, color: status.color }]} />
-    <span className="sr-only" id={descriptionId}>{status.description}</span>
+    <span className="sr-only" id={descriptionId}>{description}</span>
   </span>
 }

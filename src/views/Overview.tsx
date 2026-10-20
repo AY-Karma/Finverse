@@ -3,6 +3,7 @@ import { combinedPositionMembers, computePortfolioStats, effectivePrice as liveP
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { needsInstrumentReview } from '../instruments'
+import { getFolioFreshness } from '../importFreshness'
 import type { Currency, LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
 import {
@@ -13,6 +14,7 @@ import {
 import { AllocationCard } from './AllocationCard'
 import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
+import { DitherBar } from './DitherBar'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
 const LEDGER_PAGE_SIZE = 100
@@ -105,6 +107,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   const equityCount = positions.filter((p) => p.type !== 'mutual-fund').length
   const mfCount = positions.filter((p) => p.type === 'mutual-fund').length
   const pendingListings = positions.filter(needsInstrumentReview).length
+  const foliosNeedReview = snapshot.folios.some((folio) => getFolioFreshness(folio, marketNow.getTime()) === 'old')
 
   const scopePositions = useMemo(
     () =>
@@ -295,9 +298,17 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
         <div className="overview-heading">
           <div className="overview-title-row">
             <h1 className="page-title">Overview</h1>
-            {pendingListings > 0 && <div className="overview-review">
-              <button className="btn overview-review-action" type="button" onClick={() => onGoTo('settings', 'instrument-review')}>Review listings</button>
-              <p className="overview-review-note" role="status">Approve listings to confirm prices &amp; calibration.</p>
+            {(foliosNeedReview || pendingListings > 0) && <div className="overview-notices">
+              {foliosNeedReview && <div className="overview-review overview-review--folios">
+                <button className="btn overview-review-action overview-review-action--red" type="button" onClick={() => onGoTo('settings', 'manage-holdings')}>
+                  <DitherBar className="overview-review-texture" segments={[{ value: 1, color: 'red' }]} />Update folios
+                </button>
+                <p className="overview-review-note" role="status">Over 21 days since your last check. Review or confirm no changes.</p>
+              </div>}
+              {pendingListings > 0 && <div className="overview-review">
+                <button className="btn overview-review-action" type="button" onClick={() => onGoTo('settings', 'instrument-review')}>Review listings</button>
+                <p className="overview-review-note" role="status">Approve listings to confirm prices &amp; calibration.</p>
+              </div>}
             </div>}
           </div>
         </div>

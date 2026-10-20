@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { Folio, FxRate, LiveQuote, PortfolioSnapshot, Position, Settings } from './types'
+import { canConfirmFolioUnchanged } from './importFreshness'
 import { loadFolios, loadSettings, saveFolios, saveSettings } from './store'
 import { MAX_IMPORT_FILE_BYTES } from './importLimits'
 import { exportPortfolioCsv, importIdentitySummary, investmentWorkspace, type InvestmentSnapshot } from './investmentWorkspace'
@@ -68,6 +69,7 @@ interface Store {
   marketDataRefreshing: boolean
   marketDataResult: LiveQuotesResult | null
   removeFolio: (id: string) => Promise<boolean>
+  confirmFolioUnchanged: (id: string) => Promise<void>
   setSettings: (s: Settings) => void
   settings: Settings
   previewFile: (file: File) => Promise<ImportPreview>
@@ -208,6 +210,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (history) setPortfolioHistory(history)
     window.dispatchEvent(new Event('finverse:monitor-restored'))
   }, [assertCurrentWorkspace, setLiveQuotes, settings])
+
+  const confirmFolioUnchanged = useCallback(async (id: string) => {
+    assertCurrentWorkspace()
+    const target = foliosRef.current.find((folio) => folio.id === id)
+    if (!target) throw new Error('This folio is no longer available. Reload and try again.')
+    const reviewedAt = Date.now()
+    if (!canConfirmFolioUnchanged(target, reviewedAt)) throw new Error('This folio is fresh. Review it again after 7 days.')
+    const next = foliosRef.current.map((folio) => folio.id === id ? { ...folio, reviewedAt } : folio)
+    const expected = captureWorkspaceRecords()
+    await writeWorkspaceRecords({ ...expected, 'finverse:folios': JSON.stringify(next) }, expected, { keepRecoveryCopy: false, invalidateCaches: false })
+    durableFoliosRef.current = localStorage.getItem('finverse:folios')
+    foliosRef.current = next
+    setFoliosState(next)
+  }, [assertCurrentWorkspace])
 
   const confirmFundScheme = useCallback(async (holdingId: string, candidate: FundSchemeCandidate) => {
     if (!settings.allowExternalData) throw new Error('Enable external market data before confirming a provider scheme.')
@@ -507,6 +523,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     marketDataRefreshing,
     marketDataResult,
     removeFolio,
+    confirmFolioUnchanged,
     settings,
     setSettings,
     previewFile,
@@ -521,7 +538,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     settingsSaved: !settingsSaveFailed && !workspaceChanged,
     refreshNow,
   }), [folios, positions, rawPositions, liveQuotes, fxRate, snapshot, portfolioHistory, marketDataRefreshing,
-    marketDataResult, removeFolio, settings, setSettings, previewFile, commitImport, commitImports,
+    marketDataResult, removeFolio, confirmFolioUnchanged, settings, setSettings, previewFile, commitImport, commitImports,
     undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, workspaceChanged, settingsSaveFailed, refreshNow])
 
   return <StoreContext.Provider value={value}>

@@ -15,12 +15,13 @@ import folderIcon from '../assets/imports/folder.svg'
 interface ImportViewProps {
   compact?: boolean
   initialStep?: 'dropzone' | 'sources'
+  targetAccountId?: string
   onImported?: () => void
 }
 
 const QUANTITY_FORMATTER = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 6 })
 
-export function ImportView({ compact = false, initialStep = 'dropzone', onImported }: ImportViewProps) {
+export function ImportView({ compact = false, initialStep = 'dropzone', targetAccountId, onImported }: ImportViewProps) {
   const { previewFile, commitImport, commitImports, folios, positions, settings, liveQuotes, fxRate, removeFolio, undoLastImport, undoImportFolioId, exportPortfolio } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -47,9 +48,10 @@ export function ImportView({ compact = false, initialStep = 'dropzone', onImport
     if (files.length === 0 || busyRef.current) return
     setError(null)
     setPreviews([])
-    setOperation('add')
-    setAccountId('')
-    setExpectedStatementId(undefined)
+    const targetAccount = folios.find((folio) => folio.id === targetAccountId)
+    setOperation(targetAccount ? 'replace' : 'add')
+    setAccountId(targetAccount?.id ?? '')
+    setExpectedStatementId(targetAccount ? targetAccount.statement?.id ?? `legacy:${targetAccount.id}` : undefined)
     setStatementDate('')
     setComplete(false)
     setAllowUndatedReplacement(false)

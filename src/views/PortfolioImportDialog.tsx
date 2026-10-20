@@ -3,10 +3,11 @@ import { ImportView } from './ImportView'
 
 interface PortfolioImportDialogProps {
   open: boolean
+  accountId?: string
   onClose: () => void
 }
 
-export function PortfolioImportDialog({ open, onClose }: PortfolioImportDialogProps) {
+export function PortfolioImportDialog({ open, accountId, onClose }: PortfolioImportDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -48,7 +49,7 @@ export function PortfolioImportDialog({ open, onClose }: PortfolioImportDialogPr
           Need your latest holdings file? Open your broker below, download the latest holdings statement,
           then return here and choose Local files. Already have it? Go straight to Local files.
         </p>
-        <ImportView compact initialStep="sources" onImported={closeDialog} />
+        <ImportView key={accountId ?? 'add'} compact initialStep="sources" targetAccountId={accountId} onImported={closeDialog} />
         <p id="portfolio-import-privacy" className="portfolio-import-privacy">
           Broker sites open in a new tab. Finverse never asks for or receives your broker login.
         </p>

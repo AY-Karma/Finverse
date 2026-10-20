@@ -5,6 +5,7 @@ import { canConfirmFundScheme, type FundSchemeReview as SchemeReview } from '../
 import { hasSupportedValuationCurrency } from '../valuation'
 import type { Position } from '../types'
 import { HiddenValuesState } from './HiddenValuesState'
+import { ActionIcon } from './ActionIcon'
 
 function supportsFundNav(fund: Position): boolean {
   return hasSupportedValuationCurrency({ ...fund, currency: fund.currency ?? 'INR' })
@@ -77,7 +78,11 @@ export function FundSchemeReview() {
   if (settings.hideValues) return <section className="workspace-recovery fund-review" aria-label="Review mutual-fund schemes"><HiddenValuesState /></section>
   const candidate = review?.candidates.find((item) => String(item.schemeCode) === code)
   return <details className={`workspace-recovery fund-review${reviewCount > 0 ? ' review-required' : ''}`}>
-    <summary>Review mutual-fund schemes · {reviewCount} need confirmation</summary>
+    <summary className="btn btn--ghost listing-review-trigger">
+      <ActionIcon name="review" />
+      <span>Review mutual-fund schemes · {reviewCount} need confirmation</span>
+      <span className="fund-review-arrow" aria-hidden="true">→</span>
+    </summary>
     <p className="hint">Unconfirmed funds keep their imported values. Confirm the fund, Direct or Regular plan, and Growth or IDCW option before fetching NAV or history.</p>
     {!settings.allowExternalData && <p className="hint">Enable external market data in Settings to search scheme names. No search is sent while it is off.</p>}
     {funds.map((fund) => <div className="folio-row" key={fund.id}>

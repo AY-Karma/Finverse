@@ -35,6 +35,65 @@ function replacement(store: ReturnType<typeof useStore>): StatementImportOptions
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear() })
 
 describe('durable account updates', () => {
+  it('persists unchanged reviews through reload and backup without changing holdings, prices, history or undo targets', async () => {
+    let workspace = await mount()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-01T12:00:00Z'))
+    try {
+      await act(async () => { await workspace.store.commitImport(preview('original', 10, 120), addOptions) })
+      const original = workspace.store.folios[0]
+      await act(async () => { await expect(workspace.store.confirmFolioUnchanged(original.id)).rejects.toThrow('folio is fresh') })
+      const history = localStorage.getItem('finverse:portfolio-snapshots')
+      localStorage.setItem('finverse:history:v2:review-test', 'cached-history')
+      const reviewedAt = Date.parse('2026-10-25T12:00:00Z')
+      clock.mockReturnValue(reviewedAt)
+      await act(async () => { await workspace.store.confirmFolioUnchanged(original.id) })
+      expect(workspace.store.folios[0]).toMatchObject({ ...original, reviewedAt })
+      expect(localStorage.getItem('finverse:portfolio-snapshots')).toBe(history)
+      expect(localStorage.getItem('finverse:history:v2:review-test')).toBe('cached-history')
+      expect(workspace.store.snapshot).toMatchObject({ invested: 1000, currentValue: 1200 })
+      expect(workspace.store.undoImportFolioId).toBe(original.id)
+      const savedReview = localStorage.getItem('finverse:folios')
+      await act(async () => { await expect(workspace.store.confirmFolioUnchanged(original.id)).rejects.toThrow('folio is fresh') })
+      expect(localStorage.getItem('finverse:folios')).toBe(savedReview)
+      await workspace.close()
+      workspace = await mount()
+      expect(workspace.store.folios[0]).toMatchObject({ ...original, reviewedAt })
+      await act(async () => { await expect(workspace.store.confirmFolioUnchanged(original.id)).rejects.toThrow('folio is fresh') })
+      const archive = parseWorkspaceArchive(JSON.stringify(createWorkspaceArchive(workspace.store.folios, workspace.store.settings, workspace.store.portfolioHistory))).archive
+      expect(archive.folios[0].reviewedAt).toBe(reviewedAt)
+      await act(async () => { await workspace.store.commitImport(preview('updated', 8, 130), replacement(workspace.store)) })
+      expect(workspace.store.folios[0].reviewedAt).toBeUndefined()
+      expect(loadFolios()[0].previousRevision?.reviewedAt).toBe(reviewedAt)
+      await workspace.close()
+      workspace = await mount()
+      await act(async () => { await workspace.store.undoLastImport() })
+      expect(workspace.store.folios[0].reviewedAt).toBe(reviewedAt)
+      expect(workspace.store.folios[0].positions).toMatchObject(original.positions)
+    } finally { await workspace.close() }
+  })
+
+  it('does not mark a folio fresh when saving fails or the workspace has changed', async () => {
+    const workspace = await mount()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-01T12:00:00Z'))
+    try {
+      await act(async () => { await workspace.store.commitImport(preview('original', 10, 120), addOptions) })
+      clock.mockReturnValue(Date.parse('2026-10-25T12:00:00Z'))
+      const saved = localStorage.getItem('finverse:folios')
+      const setItem = Storage.prototype.setItem
+      const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+        if (key === 'finverse:workspace-write:v1') throw new DOMException('Full', 'QuotaExceededError')
+        setItem.call(this, key, value)
+      })
+      await act(async () => { await expect(workspace.store.confirmFolioUnchanged(workspace.store.folios[0].id)).rejects.toThrow('could not be saved') })
+      expect(workspace.store.folios[0].reviewedAt).toBeUndefined()
+      expect(localStorage.getItem('finverse:folios')).toBe(saved)
+      failure.mockRestore()
+      localStorage.setItem('finverse:folios', '[]')
+      await act(async () => { await expect(workspace.store.confirmFolioUnchanged(workspace.store.folios[0].id)).rejects.toThrow('changed in another tab') })
+      expect(localStorage.getItem('finverse:folios')).toBe('[]')
+    } finally { await workspace.close() }
+  })
+
   it('updates one account, preserves watch references, exports revisions and undoes after reload', async () => {
     let workspace = await mount()
     try {

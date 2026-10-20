@@ -44,11 +44,11 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await act(async () => root.unmount())
 })
 
-async function renderImport(onImported?: () => void) {
+async function renderImport(onImported?: () => void, targetAccountId?: string) {
   const container = document.createElement('div')
   const root = createRoot(container)
   roots.push(root)
-  await act(async () => root.render(<ImportView compact onImported={onImported} />))
+  await act(async () => root.render(<ImportView compact onImported={onImported} targetAccountId={targetAccountId} />))
   const button = (label: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === label)!
   const field = (label: string) => [...container.querySelectorAll('label')].find((item) => item.textContent?.startsWith(label))!.querySelector('input,select') as HTMLInputElement | HTMLSelectElement
   async function change(label: string, value: string) {
@@ -74,6 +74,20 @@ async function renderImport(onImported?: () => void) {
 }
 
 describe('statement import review', () => {
+  it('preselects the requested folio for replacement while still requiring a complete statement', async () => {
+    state.folios = [account()]
+    state.previewFile.mockResolvedValue(preview())
+    const view = await renderImport(undefined, 'account-one')
+    await view.upload()
+    expect(view.field('Import operation').value).toBe('replace')
+    expect(view.field('Target account').value).toBe('account-one')
+    expect(view.button('Update account').disabled).toBe(true)
+    await view.change('Statement date', '2020-10-02')
+    await act(async () => view.field('This is a complete account statement').click())
+    await act(async () => view.button('Update account').click())
+    expect(state.commitImport).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ operation: 'replace', accountId: 'account-one', expectedStatementId: 'statement-one', complete: true }))
+  })
+
   it('shows rejected rows and permits accepted holdings only as another account', async () => {
     const parsed = preview({ rejectedCount: 1, issues: [{ sheet: 'Sheet1', row: 3, field: 'Cost', message: 'Enter a numeric cost.' }] })
     state.folios = [account()]

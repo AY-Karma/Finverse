@@ -18,6 +18,16 @@ async function render(at = importedAt) {
 
 beforeEach(() => vi.useFakeTimers())
 
+it('uses the review date for status while describing a confirmation rather than a new upload', async () => {
+  const reviewedAt = Date.parse('2026-11-01T10:00:00Z')
+  vi.setSystemTime(reviewedAt)
+  await render()
+  expect(container.querySelector('.import-health')?.getAttribute('data-status')).toBe('old')
+  await act(async () => root!.render(<ImportHealthIndicator importedAt={importedAt} reviewedAt={reviewedAt} />))
+  expect(container.querySelector('.import-health')?.getAttribute('data-status')).toBe('healthy')
+  expect(container.querySelector('.import-health')?.getAttribute('title')).toContain('Holdings confirmed unchanged within the last 7 days')
+})
+
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
   root = undefined

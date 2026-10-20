@@ -29,6 +29,7 @@ const NAV: { id: View; label: string; index: string }[] = [
 export default function App({ initialView }: { initialView: View }) {
   const [view, setView] = useState<View>(initialView)
   const [importOpen, setImportOpen] = useState(false)
+  const [importAccountId, setImportAccountId] = useState<string>()
   const [researchVisited, setResearchVisited] = useState(initialView === 'research')
   const [monitorQuery, setMonitorQuery] = useState('')
   const [researchReturn, setResearchReturn] = useState(false)
@@ -52,7 +53,8 @@ export default function App({ initialView }: { initialView: View }) {
     setResearchReturn(true)
   }
 
-  const openPortfolioImport = () => {
+  const openPortfolioImport = (accountId?: string) => {
+    setImportAccountId(accountId)
     setImportOpen(true)
   }
 
@@ -132,7 +134,7 @@ export default function App({ initialView }: { initialView: View }) {
           </Suspense>
         )}
       </main>
-      <PortfolioImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <PortfolioImportDialog open={importOpen} accountId={importAccountId} onClose={() => setImportOpen(false)} />
     </div>
   )
 }
