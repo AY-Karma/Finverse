@@ -49,7 +49,7 @@ describe('allocation card', () => {
     expect(markup).toContain('Quant Mid Cap Fund Direct Growth')
   })
 
-  it('masks holding names and percentages in the summary and detail', () => {
+  it('replaces private allocation details with the hidden-values status', () => {
     const markup = renderToStaticMarkup(
       <AllocationCard
         allocations={[{ symbol: 'Private Fund', value: 100_000, type: 'mutual-fund' }]}
@@ -62,6 +62,8 @@ describe('allocation card', () => {
     const visibleText = markup.replace(/<[^>]+>/g, '')
     expect(markup).not.toContain('Private Fund')
     expect(visibleText).not.toContain('70%')
-    expect(markup).toContain('••••••')
+    expect(markup).toContain('Values are hidden')
+    expect(markup).toContain('role="status"')
+    expect(markup).not.toMatch(/alloc-(legend|summary|more)|<canvas/)
   })
 })
