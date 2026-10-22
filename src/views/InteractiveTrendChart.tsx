@@ -22,6 +22,7 @@ interface TrendLine {
   label: string
   color: string
   dashed?: boolean
+  connectGaps?: boolean
 }
 
 interface TrendMarker {
@@ -214,12 +215,17 @@ export function InteractiveTrendChart({
     () => visibleEndIndex >= visibleStartIndex ? chartRows.slice(visibleStartIndex, visibleEndIndex + 1) : [],
     [chartRows, visibleStartIndex, visibleEndIndex],
   )
-  // Keep paths continuous at the viewport edges without drawing offscreen history.
-  const pathStartIndex = Math.max(0, visibleStartIndex - 1)
-  const pathRows = useMemo(
-    () => chartRows.slice(pathStartIndex, visibleEndIndex + 2),
-    [chartRows, pathStartIndex, visibleEndIndex],
-  )
+  // Include observations across edge gaps; the SVG clip hides offscreen history.
+  const { pathStartIndex, pathRows } = useMemo(() => {
+    let start = Math.max(0, visibleStartIndex - 1)
+    let end = Math.min(chartRows.length - 1, visibleEndIndex + 1)
+    for (const line of lines) {
+      if (!line.connectGaps) continue
+      while (start > 0 && !Number.isFinite(chartRows[start]?.[line.key])) start -= 1
+      while (end < chartRows.length - 1 && !Number.isFinite(chartRows[end]?.[line.key])) end += 1
+    }
+    return { pathStartIndex: start, pathRows: chartRows.slice(start, end + 1) }
+  }, [chartRows, lines, visibleStartIndex, visibleEndIndex])
   const firstAt = chartRows[0]?.at ?? 0
   const visibleFirstAt = visibleRows[0]?.at ?? firstAt
   const visibleLastAt = visibleRows[visibleRows.length - 1]?.at ?? visibleFirstAt
@@ -232,13 +238,13 @@ export function InteractiveTrendChart({
     const domainRange = Math.max(domain.max - domain.min, 1)
     const xAtIndex = (index: number) => visiblePointCount <= 1 ? plotLeft + plotWidth / 2 : plotLeft + ((index - viewStart) / (visiblePointCount - 1)) * plotWidth
     const yAt = (value: number) => PLOT_TOP + (1 - (value - domain.min) / domainRange) * plotHeight
-    const pathFor = (key: string) => {
+    const pathFor = (line: TrendLine) => {
       let started = false
       return pathRows.flatMap((row, localIndex) => {
         const index = pathStartIndex + localIndex
-        const value = row[key]
+        const value = row[line.key]
         if (typeof value !== 'number' || !Number.isFinite(value)) {
-          started = false
+          if (!line.connectGaps) started = false
           return []
         }
         const command = started ? 'L' : 'M'
@@ -246,7 +252,7 @@ export function InteractiveTrendChart({
         return [`${command}${xAtIndex(index).toFixed(1)},${yAt(value).toFixed(1)}`]
       }).join(' ')
     }
-    const linePaths = lines.map((line) => pathFor(line.key))
+    const linePaths = lines.map(pathFor)
     const primaryPoints = primaryLine ? pathRows.map((row, index) => ({ row, index: pathStartIndex + index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
     const areaPath = showArea && primaryLine && primaryPoints.length > 1
       ? `${linePaths[0]} L${xAtIndex(primaryPoints[primaryPoints.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(primaryPoints[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`

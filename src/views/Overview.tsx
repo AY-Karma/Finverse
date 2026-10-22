@@ -16,6 +16,7 @@ import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
 import { DitherBar } from './DitherBar'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
+const PortfolioPerformance = lazy(() => import('./PortfolioPerformance').then((module) => ({ default: module.PortfolioPerformance })))
 
 const LEDGER_PAGE_SIZE = 100
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
@@ -127,8 +128,8 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   )
 
   const pulse = useMemo(
-    () => portfolioPulse(positions, live),
-    [positions, live],
+    () => portfolioPulse(scopePositions, live),
+    [scopePositions, live],
   )
   const tapeItems = useMemo(
     () => tickerItems(scopePositions, currency, hideValues, live, fxRate?.usdInr),
@@ -640,21 +641,26 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
           )}
         </div>
 
-        <div className="panel panel--alloc">
-          <div className="panel-head">
-            <div className="panel-head-titles">
-              <span className="panel-title">Allocation Mix</span>
-              <span className="section-index">02 · Exposure</span>
+        <div className="panel panel--portfolio">
+          <Suspense fallback={<div className="portfolio-performance-placeholder" role="status">Preparing portfolio performance…</div>}>
+            <PortfolioPerformance scope={scope} />
+          </Suspense>
+          <section className="portfolio-allocation" aria-label="Allocation mix">
+            <div className="panel-head">
+              <div className="panel-head-titles">
+                <span className="panel-title">Allocation Mix</span>
+                <span className="section-index">03 · Exposure</span>
+              </div>
+              <Scope />
             </div>
-            <Scope />
-          </div>
-          <AllocationCard
-            allocations={stats.allocations}
-            hideValues={hideValues}
-            currency={currency}
-            usdInrRate={fxRate?.usdInr}
-            pulse={pulse}
-          />
+            <AllocationCard
+              allocations={stats.allocations}
+              hideValues={hideValues}
+              currency={currency}
+              usdInrRate={fxRate?.usdInr}
+              pulse={pulse}
+            />
+          </section>
         </div>
       </div>
 

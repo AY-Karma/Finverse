@@ -226,11 +226,11 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
   }
 
   return (
-    <div className="panel history-panel enter d4">
+    <div className="panel history-panel chart-open enter d4">
       <div className="panel-head">
         <div className="panel-head-titles">
           <span className="panel-title">Holding Price History</span>
-          <span className="section-index">03 · Trends</span>
+          <span className="section-index">04 · Trends</span>
         </div>
         {!settings.hideValues && <div className="history-tools">
           <div className="history-picker">
@@ -307,7 +307,6 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                         valueFormatter={formatPrice}
                         yAxisLabel={`${isMf ? 'NAV' : 'Price'} (${nativeCurrency})`}
                         appearance="price"
-                        ditherColor="blue"
                         referenceLines={costComparison ? [{
                           value: costComparison.buy,
                           color: COST_LINE_COLOR,

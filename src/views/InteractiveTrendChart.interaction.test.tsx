@@ -28,6 +28,31 @@ afterEach(async () => {
 })
 
 describe('interactive chart controls', () => {
+  it.each([360, 1000])('keeps holiday gaps connected across both viewport edges at %dpx', async (width) => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(width)
+    vi.spyOn(SVGElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, width, 340))
+    const missing = new Set([39, 40, 41, 178, 179, 180, 181])
+    const rows = Array.from({ length: 220 }, (_, index) => ({
+      at: start + index * 86_400_000,
+      portfolio: index,
+      benchmark: missing.has(index) ? undefined : index * 2,
+    }))
+    await act(async () => root.render(<InteractiveTrendChart
+      rows={rows}
+      lines={[{ key: 'portfolio', label: 'Portfolio', color: '#828fff' }, { key: 'benchmark', label: 'Benchmark', color: '#e4b35b', connectGaps: true }]}
+      valueFormatter={format} yAxisLabel="Return (%)" appearance="insight"
+    />))
+    const clip = container.querySelector('clipPath rect')!
+    const left = Number(clip.getAttribute('x'))
+    const right = left + Number(clip.getAttribute('width'))
+    const benchmarkXs = () => [...(container.querySelector('.interactive-trend-line[stroke="#e4b35b"]')!.getAttribute('d') ?? '').matchAll(/[ML](-?[\d.]+),/g)].map((match) => Number(match[1]))
+    expect(benchmarkXs()[0]).toBeLessThan(left)
+    const chart = container.querySelector('.interactive-trend-chart > svg')!
+    await act(async () => chart.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Home' })))
+    const coordinates = benchmarkXs()
+    expect(coordinates[coordinates.length - 1]).toBeGreaterThan(right)
+  })
+
   it('selects the earlier point at a hover midpoint and updates purchase comparison through keyboard activation', async () => {
     const rows = [{ at: start, close: 100 }, { at: start + 86_400_000, close: 120 }]
     await act(async () => root.render(<InteractiveTrendChart

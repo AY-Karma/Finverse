@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
-import { applyPortfolioQuoteOverlay, buildPortfolioBackcast, type PortfolioBackcastHistory } from '../portfolioBackcast'
 import { calculatePortfolioRisk } from '../portfolioRisk'
 import { useStore } from '../useStore'
+import { usePortfolioBackcast } from '../usePortfolioBackcast'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { assetTypeLabel } from '../instruments'
 import { dateFormatter } from '../formatters'
@@ -20,9 +20,6 @@ import { rgb, seedOfColor, type DitherColor } from '../components/dither-kit/pal
 import './insights.css'
 
 const EXPO_PALETTE: DitherColor[] = ['purple', 'green', 'blue', 'orange', 'pink', 'red', 'grey']
-const INITIAL_BACKCAST_DAYS = 366
-const BACKCAST_PAGE_DAYS = 366
-const MAX_BACKCAST_DAYS = 3 * 366
 
 type BenchmarkPoint = { ts: number; portfolio: number; benchmark?: number }
 
@@ -37,46 +34,9 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
   const [openKpi, setOpenKpi] = useState<'session' | 'drawdown' | 'top-five' | 'data-health' | null>(null)
-  const [historicalBackcast, setHistoricalBackcast] = useState<{ key: string; history: PortfolioBackcastHistory } | null>(null)
-  const [backcastLoading, setBackcastLoading] = useState(false)
-  const [backcastDays, setBackcastDays] = useState(INITIAL_BACKCAST_DAYS)
-  const [performanceMode, setPerformanceMode] = useState<'backcast' | 'tracked'>('backcast')
-  const backcastKey = useMemo(
-    () => JSON.stringify(snapshot.positions.map((position) => [position.id, position.instrumentKey, position.identityIssue, position.ticker, position.type, position.quantity, position.invested, position.exchange, position.currency, position.reportedCurrency, position.providerSymbol, position.mfScheme?.code])),
-    [snapshot.positions],
-  )
-
-  useEffect(() => {
-    if (!settings.allowExternalData || snapshot.positions.length === 0) {
-      setHistoricalBackcast(null)
-      setBackcastLoading(false)
-      setBackcastDays(INITIAL_BACKCAST_DAYS)
-      return
-    }
-    let alive = true
-    const controller = new AbortController()
-    setBackcastLoading(true)
-    void buildPortfolioBackcast(snapshot.positions, marketData, backcastDays, controller.signal).then((result) => {
-      if (alive) {
-        setHistoricalBackcast({ key: backcastKey, history: result })
-        setBackcastLoading(false)
-      }
-    }).catch(() => {
-      if (alive) {
-        setHistoricalBackcast(null)
-        setBackcastLoading(false)
-      }
-    })
-    return () => {
-      alive = false
-      controller.abort()
-    }
-  }, [backcastDays, backcastKey, settings.allowExternalData])
-
-  const requestMoreBackcast = () => {
-    if (backcastLoading || backcastDays >= MAX_BACKCAST_DAYS) return
-    setBackcastDays((current) => Math.min(MAX_BACKCAST_DAYS, current + BACKCAST_PAGE_DAYS))
-  }
+  const { backcast, history: backcastHistory, loading: backcastLoading, days: backcastDays, key: backcastKey, requestMore: requestMoreBackcast } = usePortfolioBackcast({
+    positions: snapshot.positions, quotes: snapshot.quotes, allowExternalData: settings.allowExternalData,
+  })
 
   const contributionColumns = useMemo(() => buildContributionColumns(snapshot.contributions.map((item) => ({
     label: item.symbol.length > 14 ? `${item.symbol.slice(0, 13)}…` : item.symbol,
@@ -85,13 +45,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   })), contributionDisplay), [contributionDisplay, snapshot.contributions])
   const exposure = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 16), [snapshot.contributions])
   const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
-  const backcast = useMemo(() => settings.allowExternalData && historicalBackcast?.key === backcastKey && historicalBackcast.history
-    ? applyPortfolioQuoteOverlay(historicalBackcast.history, snapshot.positions, snapshot.quotes)
-    : null, [backcastKey, historicalBackcast, settings.allowExternalData, snapshot.positions, snapshot.quotes])
-  const backcastHistory = backcast?.points ?? []
   const analyticsHistory = backcastHistory
   const trackedAvailable = snapshot.history.length >= 2
-  const performanceHistory = performanceMode === 'tracked' ? snapshot.history : backcastHistory
 
   useEffect(() => {
     const symbol = selectedBenchmark.symbol
@@ -154,21 +109,12 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       }
     })
   }, [analyticsHistory, benchmarkPoints])
-  const benchmarkLatest = benchmarkSeries[benchmarkSeries.length - 1]
+  const latestPortfolioPoint = benchmarkSeries[benchmarkSeries.length - 1]
+  const benchmarkLatest = [...benchmarkSeries].reverse().find((point) => point.benchmark != null) ?? latestPortfolioPoint
   const benchmarkGap = benchmarkLatest?.benchmark == null ? null : benchmarkLatest.portfolio - benchmarkLatest.benchmark
-  const performanceLatest = performanceHistory[performanceHistory.length - 1]
-  const performanceGap = performanceLatest ? performanceLatest.value - performanceLatest.invested : null
-  const performanceGapPct = performanceLatest?.invested > 0 && performanceGap != null
-    ? performanceGap / performanceLatest.invested * 100
+  const benchmarkThrough = benchmarkLatest?.benchmark != null && benchmarkLatest.ts !== latestPortfolioPoint?.ts
+    ? dateFormatter({ day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(benchmarkLatest.ts)
     : null
-  const latestBackcastPoint = backcastHistory[backcastHistory.length - 1]
-  const observationDate = latestBackcastPoint ? dateFormatter({ day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(latestBackcastPoint.at) : null
-  const observationLabel = observationDate ? `${backcast?.currentObservation ? 'Provider observations' : 'Historical close'} · ${observationDate} IST` : 'Latest observation'
-  const observationTime = dateFormatter({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kolkata' })
-  const providerTimes = backcast?.currentObservation ? `${observationTime.format(backcast.currentObservation.from)}${backcast.currentObservation.from === backcast.currentObservation.to ? '' : ` to ${observationTime.format(backcast.currentObservation.to)}`}` : null
-  const observationNote = observationDate ? providerTimes
-    ? `Provider prices observed on ${observationDate}, ${providerTimes} IST.`
-    : `Latest quote comparison unavailable. Showing the shared historical close from ${observationDate} IST.` : null
 
   const risk = useMemo(() => calculatePortfolioRisk(analyticsHistory), [analyticsHistory])
 
@@ -186,10 +132,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const mask = (value: string) => hide ? '••••••' : value
   const currency = settings.currency
   const value = (amount: number) => mask(formatCurrency(amount, currency, snapshot.fxRate?.usdInr))
-  const axisCurrency = new Intl.NumberFormat('en-IN', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 })
-  const axisValue = (amount: number) => mask(currency === 'USD'
-    ? snapshot.fxRate?.usdInr ? axisCurrency.format(amount / snapshot.fxRate.usdInr) : '—'
-    : axisCurrency.format(amount))
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
   const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
@@ -246,7 +188,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       </div>
 
       <div className="insight-grid enter d2">
-        <section className="panel insight-panel insight-panel--wide insight-panel--benchmark">
+        <section className="panel insight-panel insight-panel--wide insight-panel--benchmark chart-open">
           <div className="panel-head">
             <div className="panel-head-titles">
               <span className="panel-title">Benchmark race</span>
@@ -285,7 +227,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
             <div className="insight-chart-metric insight-chart-metric--portfolio">
               <span><i aria-hidden="true" />Portfolio</span>
               <strong>{benchmarkLatest ? mask(`${benchmarkLatest.portfolio >= 0 ? '+' : ''}${benchmarkLatest.portfolio.toFixed(1)}%`) : '—'}</strong>
-              <small>Current holdings since comparison start</small>
+              <small>{benchmarkThrough ? `Compared through ${benchmarkThrough}` : 'Current holdings since comparison start'}</small>
             </div>
             <div className="insight-chart-metric insight-chart-metric--benchmark">
               <span><i aria-hidden="true" />{selectedBenchmark.label}</span>
@@ -303,14 +245,12 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
               <InteractiveTrendChart
                 key={benchmarkId}
                 rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))}
-                lines={[{ key: 'portfolio', label: 'Portfolio', color: 'var(--chart-portfolio)' }, { key: 'benchmark', label: selectedBenchmark.label, color: 'var(--chart-benchmark)' }]}
+                lines={[{ key: 'portfolio', label: 'Portfolio', color: 'var(--chart-portfolio)' }, { key: 'benchmark', label: selectedBenchmark.label, color: 'var(--chart-benchmark)', connectGaps: true }]}
                 valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)}
                 differenceFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)} pts`)}
                 differenceLabel="Return gap"
                 yAxisLabel="Return (%)"
                 includeZero
-                ditherColor="blue"
-                ditherTo="benchmark"
                 appearance="insight"
                 onReachStart={backcast ? requestMoreBackcast : undefined}
               />
@@ -319,7 +259,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
         </section>
 
-        <section className="panel insight-panel">
+        <section className="panel insight-panel insight-panel--allocation">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">02 · Exposure</span></div></div>
           {hide ? <HiddenValuesState /> : <AllocationMap items={exposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} formatValue={value} />}
         </section>
@@ -338,47 +278,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <section className="panel insight-panel insight-panel--wide insight-panel--risk">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · At a glance</span></div></div>
           {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : backcastLoading ? 'Historical prices are loading to build your risk profile.' : 'Historical risk is unavailable. Tracked balance changes include account changes and cash flows.'}</div>}
-        </section>
-
-        <section className="panel insight-panel insight-panel--wide insight-panel--performance">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">{performanceMode === 'tracked' ? 'Tracked balances' : 'Performance story'}</span><span className="section-index">06 · Value vs invested capital</span></div><div className="segmented-control" aria-label="Performance history method"><button type="button" className={performanceMode === 'backcast' ? 'is-active' : ''} onClick={() => setPerformanceMode('backcast')} aria-pressed={performanceMode === 'backcast'}>Backcast</button><button type="button" className={performanceMode === 'tracked' ? 'is-active' : ''} onClick={() => setPerformanceMode('tracked')} aria-pressed={performanceMode === 'tracked'} disabled={!trackedAvailable} title={trackedAvailable ? 'Use saved daily portfolio balances' : 'Available after two market-day snapshots'}>Tracked</button></div></div>
-          <p className="performance-method-note">{performanceMode === 'backcast' ? "Today's holdings at past prices. Past trades are not included." : 'Balance history, not investment returns. Account additions, removals and cash flows can change these values.'}</p>
-          {performanceMode === 'backcast' && observationNote && !hide && <p className="hint" role="status">{observationNote}</p>}
-          {performanceMode === 'tracked' && snapshot.history.some((balance) => balance.dataQuality) && <p className="hint">Earlier balances may use legacy or unconfirmed instrument identities. They are preserved as recorded and have not been reconstructed.</p>}
-          {performanceHistory.length >= 2 && <div className="insight-chart-readout">
-            <div className="insight-chart-metric insight-chart-metric--value">
-              <span><i aria-hidden="true" />Portfolio value</span>
-              <strong>{performanceLatest ? value(performanceLatest.value) : '—'}</strong>
-              <small>{performanceMode === 'backcast' ? hide ? 'Observation hidden' : observationLabel : 'Latest observation'}</small>
-            </div>
-            <div className="insight-chart-metric insight-chart-metric--invested">
-              <span><i aria-hidden="true" />Invested capital</span>
-              <strong>{performanceLatest ? value(performanceLatest.invested) : '—'}</strong>
-              <small>{performanceMode === 'tracked' ? 'Cost recorded at each snapshot' : "Cost of today's holdings"}</small>
-            </div>
-            <div className="insight-chart-metric insight-chart-metric--gap">
-              <span>Value − invested</span>
-              <strong className={hide || performanceGap == null ? '' : performanceGap >= 0 ? 'up' : 'down'}>{performanceGap == null ? '—' : mask(`${performanceGap >= 0 ? '+' : ''}${formatCurrency(performanceGap, currency, snapshot.fxRate?.usdInr)}`)}</strong>
-              <small>{performanceGapPct == null ? 'Current difference' : mask(formatPercent(performanceGapPct))}</small>
-            </div>
-          </div>}
-          <div className="insight-chart insight-chart--performance">
-            {performanceHistory.length >= 2 ? (
-              <InteractiveTrendChart
-                key={performanceMode}
-                rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))}
-                lines={[{ key: 'value', label: 'Portfolio value', color: 'var(--chart-value)' }, { key: 'invested', label: 'Invested capital', color: 'var(--chart-invested)', dashed: true }]}
-                valueFormatter={value}
-                axisFormatter={axisValue}
-                differenceFormatter={value}
-                differenceLabel="Value − invested"
-                yAxisLabel="Value"
-                ditherColor="green"
-                appearance="insight"
-                onReachStart={performanceMode === 'backcast' && backcast ? requestMoreBackcast : undefined}
-              />
-            ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{backcastLoading ? 'Building your historical series' : 'Historical prices are unavailable'}</strong><span>{backcastLoading ? 'Current holdings are being matched with real historical closes.' : 'Enable external market data or use tracked snapshots as they accumulate.'}</span></div>}
-          </div>
         </section>
       </div>
     </div>
@@ -405,15 +304,17 @@ function ExposureMix({ items, formatValue }: { items: SectorAllocation[]; format
           ><DitherBar segments={[{ value: 1, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} /></div>
         ))}
       </div>
-      <div className="expo-grid">
+      <div className="expo-list">
         {items.map((sector, index) => {
           const color = EXPO_PALETTE[index % EXPO_PALETTE.length]
           const type = sector.type === 'mixed' ? 'Mixed' : assetTypeLabel(sector.type)
+          const positionLabel = `${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`
+          const context = sector.label.toLowerCase() === type.toLowerCase() ? positionLabel : `${type} · ${positionLabel}`
           return (
             <button
               key={sector.label}
               type="button"
-              className={`expo-tile${active === index ? ' is-active' : ''}`}
+              className={`expo-row${active === index ? ' is-active' : ''}`}
               onMouseEnter={() => setActive(index)}
               onMouseLeave={() => setActive(null)}
               onFocus={() => setActive(index)}
@@ -421,14 +322,14 @@ function ExposureMix({ items, formatValue }: { items: SectorAllocation[]; format
               aria-pressed={active === index}
               aria-label={`${sector.label}: ${sector.weight.toFixed(1)}%, ${formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
             >
-              <span className="expo-tile-head">
+              <span className="expo-identity">
                 <i className="legend-swatch" style={{ background: rgb(seedOfColor(color).fill) }} />
                 <span className="expo-name" title={sector.label}>{sector.label}</span>
-                <span className="expo-type">{type}</span>
               </span>
               <strong className="expo-weight">{sector.weight.toFixed(1)}%</strong>
-              <span className="expo-meta">{formatValue(sector.value)} · {sector.count} {sector.count === 1 ? 'position' : 'positions'}</span>
-              <DitherBar className="expo-tile-track" segments={[{ value: sector.value, color }]} scale={max} />
+              <span className="expo-meta">{context}</span>
+              <span className="expo-value">{formatValue(sector.value)}</span>
+              <DitherBar className="expo-track" segments={[{ value: sector.value, color }]} scale={max} />
             </button>
           )
         })}
@@ -452,10 +353,10 @@ function AllocationMap({
   return <div className="allocation-map-wrap">
     <div className="allocation-map" aria-label="Allocation treemap">
       {items.map((item) => {
-        const span = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12)))
+        const widthPercent = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12))) / 12 * 100
         const isActive = item.symbol === active?.symbol
         const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
-        return <button key={item.symbol} type="button" className={`allocation-tile${isActive ? ' allocation-tile--active' : ''}`} style={{ gridColumn: `span ${span}` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio`}>
+        return <button key={item.symbol} type="button" className={`allocation-tile${isActive ? ' allocation-tile--active' : ''}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio`}>
           <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
           <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
         </button>

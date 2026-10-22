@@ -3,6 +3,28 @@ import { describe, expect, it } from 'vitest'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 
 describe('interactive trend chart', () => {
+  it('connects only opted-in series across missing observations without extending their endpoints', () => {
+    const start = Date.parse('2026-09-01T00:00:00Z')
+    const markup = renderToStaticMarkup(<InteractiveTrendChart
+      rows={[
+        { at: start, portfolio: 0 },
+        { at: start + 86_400_000, portfolio: 1, benchmark: 0 },
+        { at: start + 2 * 86_400_000 },
+        { at: start + 3 * 86_400_000, portfolio: 3, benchmark: 2 },
+        { at: start + 4 * 86_400_000, portfolio: 4 },
+      ]}
+      lines={[{ key: 'portfolio', label: 'Portfolio', color: '#828fff' }, { key: 'benchmark', label: 'Benchmark', color: '#e4b35b', connectGaps: true }]}
+      valueFormatter={(value) => `${value}%`}
+      yAxisLabel="Return (%)"
+      appearance="insight"
+    />)
+    const portfolioPath = markup.match(/<path d="([^"]+)" class="interactive-trend-line" stroke="#828fff"/)?.[1]
+    const benchmarkPath = markup.match(/<path d="([^"]+)" class="interactive-trend-line" stroke="#e4b35b"/)?.[1]
+    expect(portfolioPath?.match(/M/g)).toHaveLength(2)
+    expect(benchmarkPath?.match(/M/g)).toHaveLength(1)
+    expect(benchmarkPath?.match(/L/g)).toHaveLength(1)
+  })
+
   it('keeps an average-cost pointer within the chart even when it is outside the historical price range', () => {
     const at = +new Date('2026-09-21T00:00:00')
     const markup = renderToStaticMarkup(<InteractiveTrendChart

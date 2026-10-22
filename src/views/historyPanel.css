@@ -12,7 +12,6 @@
   --holding-chart-negative: #ad3030;
 }
 
-.history-panel .dither-area-fill { opacity: 0.28; }
 .history-panel .up { color: var(--holding-chart-positive); }
 .history-panel .down { color: var(--holding-chart-negative); }
 .history-panel .interactive-trend-current rect { fill: var(--surface-3); stroke: var(--holding-chart-line); }

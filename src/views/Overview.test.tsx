@@ -16,9 +16,40 @@ vi.mock('../valuation', async (original) => {
   return { ...actual, formatCurrency: (...args: Parameters<typeof actual.formatCurrency>) => { state.format(); return actual.formatCurrency(...args) } }
 })
 vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => null }))
+vi.mock('./PortfolioPerformance', () => ({ PortfolioPerformance: ({ scope }: { scope: string }) => <section className="portfolio-performance" data-scope={scope}>Portfolio performance</section> }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
+  it('groups performance above allocation and keeps their scope in sync with the composition summary', async () => {
+    const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    const positions: Position[] = [
+      { id: 'equity', ticker: 'EQUITY', name: 'Equity', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
+      { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 80 },
+    ]
+    const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
+    state.store = { positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }), settings: { ...loadSettings(), hideValues: false }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      const panel = container.querySelector('.panel--portfolio')!
+      expect(panel.firstElementChild?.className).toBe('portfolio-performance')
+      expect(panel.lastElementChild?.getAttribute('aria-label')).toBe('Allocation mix')
+      expect(panel.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('all')
+      expect(panel.querySelector('.alloc-summary')?.textContent).toContain('50% in profit')
+      const equity = [...panel.querySelectorAll<HTMLButtonElement>('.scope-btn')].find((button) => button.textContent?.startsWith('Equity'))!
+      await act(async () => equity.click())
+      expect(panel.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('equity')
+      expect(panel.querySelector('.alloc-legend')?.textContent).toContain('EQUITY')
+      expect(panel.querySelector('.alloc-legend')?.textContent).not.toContain('FUND')
+      expect(panel.querySelector('.alloc-summary')?.textContent).toContain('100% in profit')
+      expect(panel.querySelector('.alloc-summary')?.textContent).toContain('100% equity')
+    } finally {
+      await act(async () => root.unmount())
+      canvas.mockRestore()
+    }
+  })
+
   it('prompts after 21 days, links to folios, and clears after a review while retaining listing review', async () => {
     vi.useFakeTimers()
     const now = Date.parse('2026-10-20T12:00:00Z')

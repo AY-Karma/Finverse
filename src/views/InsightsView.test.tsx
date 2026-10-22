@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, expect, it, vi } from 'vitest'
 import { investmentWorkspace } from '../investmentWorkspace'
 import { loadSettings } from '../store'
@@ -11,11 +12,15 @@ import { quoteKey } from '../valuation'
 import { InsightsView } from './InsightsView'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn() }))
+const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn(), chart: vi.fn() }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
 vi.mock('../portfolioBackcast', async (original) => ({ ...await original<typeof import('../portfolioBackcast')>(), buildPortfolioBackcast: state.build }))
 vi.mock('../marketData', async (original) => ({ ...await original<typeof import('../marketData')>(), marketData: { benchmarkHistory: state.benchmark } }))
-vi.mock('./InteractiveTrendChart', () => ({ InteractiveTrendChart: ({ lines }: { lines: { key: string }[] }) => <div data-chart={lines.map((line) => line.key).join(',')} /> }))
+vi.mock('./InteractiveTrendChart', () => ({ InteractiveTrendChart: (props: ComponentProps<typeof import('./InteractiveTrendChart').InteractiveTrendChart>) => {
+  state.chart(props)
+  const { lines, onReachStart, rows } = props
+  return <div data-chart={lines.map((line) => line.key).join(',')} data-latest-portfolio={rows[rows.length - 1]?.portfolio}>{onReachStart && <button type="button" onClick={onReachStart}>Earlier benchmark history</button>}</div>
+} }))
 
 let root: Root | undefined
 let container: HTMLDivElement
@@ -45,23 +50,53 @@ it('rebases both comparison returns on the first shared date when the benchmark 
   expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('+0.0 pts')
 })
 
+it('keeps the benchmark line continuous across a market holiday without inventing a close', async () => {
+  state.benchmark.mockResolvedValueOnce([{ date: '2026-09-04', close: 100 }, { date: '2026-09-08', close: 110 }])
+  await renderInsights(['04', '07', '08'].map((day, index) => ({ at: Date.parse(`2026-09-${day}T00:00:00+05:30`), value: 100 + index * 10, invested: 100 })))
+  const props = state.chart.mock.lastCall![0] as ComponentProps<typeof import('./InteractiveTrendChart').InteractiveTrendChart>
+  expect(props.rows[1].benchmark).toBeUndefined()
+
+  const { InteractiveTrendChart } = await vi.importActual<typeof import('./InteractiveTrendChart')>('./InteractiveTrendChart')
+  const chart = document.createElement('div')
+  chart.innerHTML = renderToStaticMarkup(<InteractiveTrendChart {...props} />)
+  const path = chart.querySelector('.interactive-trend-line[stroke="var(--chart-benchmark)"]')?.getAttribute('d')
+  expect(path?.match(/M/g)).toHaveLength(1)
+  expect(path?.match(/L/g)).toHaveLength(1)
+})
+
+it('keeps benchmark totals visible when portfolio history extends beyond the latest benchmark date', async () => {
+  state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 105 }])
+  await renderInsights([200, 220, 240].map((value, index) => ({ at: Date.parse(`2026-09-${28 + index}T00:00:00+05:30`), value, invested: 100 })))
+  expect(container.querySelector('[data-chart="portfolio,benchmark"]')).not.toBeNull()
+  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+5.0%')
+  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
+  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('+5.0 pts')
+  expect(container.querySelector('.insight-chart-metric--portfolio small')?.textContent).toBe('Compared through 29 Sept 2026')
+  expect(Number(container.querySelector('[data-chart="portfolio,benchmark"]')?.getAttribute('data-latest-portfolio'))).toBeCloseTo(20)
+  expect(state.benchmark).toHaveBeenCalledTimes(1)
+})
+
+it('keeps benchmark totals unavailable when the series have no shared dates', async () => {
+  state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 105 }])
+  await renderInsights([200, 220].map((value, index) => ({ at: Date.UTC(2026, 9, 1 + index), value, invested: 100 })))
+  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
+  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('—')
+  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('—')
+})
+
 it('updates delayed and refreshed quote analytics in the same mounted view without refetching history', async () => {
   state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 110 }])
   await renderInsights([200, 220].map((value, index) => ({ at: Date.parse(`2026-09-${28 + index}T00:00:00+05:30`), value, invested: 100 })))
-  const latestValue = () => container.querySelector('.insight-chart-metric--value strong')?.textContent
-  expect(latestValue()).toBe('₹220.00')
+  expect(container.querySelector('.insight-panel--performance')).toBeNull()
   expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
-  expect(container.textContent).toContain('Showing the shared historical close from 29 Sept 2026 IST')
   const position = state.store.snapshot.positions[0]
   state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 240, at: Date.parse('2026-09-30T15:30:00+05:30'), source: 'yahoo' } } }
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
-  expect(latestValue()).toBe('₹240.00')
-  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+20.0%')
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('—')
-  expect(container.textContent).toContain('Provider prices observed on 30 Sept 2026, 15:30 IST')
+  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
+  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
+  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('+0.0 pts')
   state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 180, at: Date.parse('2026-10-01T15:30:00+05:30'), source: 'yahoo' } } }
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
-  expect(latestValue()).toBe('₹180.00')
   expect(container.querySelector('#drawdown-kpi strong')?.textContent).toBe('-18.2%')
   expect(state.build).toHaveBeenCalledTimes(1)
   expect(state.benchmark).toHaveBeenCalledTimes(1)
@@ -81,15 +116,22 @@ it('starts benchmark history while backcast is pending and cancels both when ext
   expect(backcastSignal.aborted).toBe(true)
 })
 
+it('extends both portfolio and benchmark history when navigating to earlier dates', async () => {
+  await renderInsights([100, 110].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: 100 })))
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Earlier benchmark history')!.click())
+  expect(state.build.mock.calls.map((call) => call[2])).toEqual([366, 732])
+  expect(state.benchmark).toHaveBeenCalledTimes(2)
+  const [, from, to] = state.benchmark.mock.lastCall as [string, Date, Date]
+  expect(to.getTime() - from.getTime()).toBe(732 * 24 * 60 * 60 * 1000)
+})
+
 it('does not turn an account addition into benchmark returns or risk', async () => {
   const history = [100, 200].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: value, pnl: 0, holdingCount: index + 1 }))
   await renderInsights([], history)
   expect(container.querySelector('[data-chart="portfolio,benchmark"]')).toBeNull()
   expect(container.querySelector('.insight-kpi[aria-controls="drawdown-detail"] strong')?.textContent).toBe('—')
   expect(container.textContent).toContain('Tracked balances include account changes and cash flows')
-  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Tracked')?.click())
-  expect(container.querySelector('[data-chart="value,invested"]')).not.toBeNull()
-  expect(container.textContent).toContain('Balance history, not investment returns')
+  expect(container.querySelector('[data-chart="value,invested"]')).toBeNull()
   expect(container.textContent).not.toContain('Portfolio leads')
 })
 
