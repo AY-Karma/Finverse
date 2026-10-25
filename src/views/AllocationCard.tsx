@@ -1,5 +1,4 @@
 import { useMemo, useState, type CSSProperties } from 'react'
-import type { Currency } from '../types'
 import { formatCurrency, type Allocation, type PortfolioPulse } from '../valuation'
 import { allocationColor, DitherDonut } from './overview/DitherCharts'
 import { DitherBar } from './DitherBar'
@@ -11,14 +10,10 @@ const SEGMENT_CAP = 7
 export function AllocationCard({
   allocations,
   hideValues,
-  currency,
-  usdInrRate,
   pulse,
 }: {
   allocations: Allocation[]
   hideValues: boolean
-  currency: Currency
-  usdInrRate?: number | null
   pulse: PortfolioPulse
 }) {
   const [active, setActive] = useState<number | null>(null)
@@ -69,7 +64,7 @@ export function AllocationCard({
                 <>
                   <span className="ring-sym" title={mask(activeSlice.symbol)}>{mask(activeSlice.symbol)}</span>
                   <strong>{mask(`${activeWeight.toFixed(1)}%`)}</strong>
-                  <small>{mask(formatCurrency(activeSlice.value, currency, usdInrRate))}</small>
+                  <small>{mask(formatCurrency(activeSlice.value))}</small>
                 </>
               ) : (
                 <>
@@ -165,16 +160,16 @@ export function AllocationCard({
 
             <section className="alloc-more-section">
               <h3>Equity and funds</h3>
-              <p>{splitTotal > 0 ? `${mask(formatCurrency(splitTotal, currency, usdInrRate))} total value` : 'No valued assets'}</p>
+              <p>{splitTotal > 0 ? `${mask(formatCurrency(splitTotal))} total value` : 'No valued assets'}</p>
               <div className="alloc-keys alloc-keys--two">
                 <span className="alloc-key-block alloc-key-block--equity">
                   <span className="alloc-key-name"><i className="alloc-dot equity" />Equity</span>
-                  <strong>{mask(formatCurrency(p.equityValue, currency, usdInrRate))}</strong>
+                  <strong>{mask(formatCurrency(p.equityValue))}</strong>
                   <small>{p.equityCount} position{p.equityCount === 1 ? '' : 's'} · {splitTotal > 0 ? mask(`${eqShare.toFixed(0)}%`) : '—'}</small>
                 </span>
                 <span className="alloc-key-block alloc-key-block--funds">
                   <span className="alloc-key-name"><i className="alloc-dot funds" />Mutual funds</span>
-                  <strong>{mask(formatCurrency(p.mutualValue, currency, usdInrRate))}</strong>
+                  <strong>{mask(formatCurrency(p.mutualValue))}</strong>
                   <small>{p.mutualCount} fund{p.mutualCount === 1 ? '' : 's'} · {splitTotal > 0 ? mask(`${(100 - eqShare).toFixed(0)}%`) : '—'}</small>
                 </span>
               </div>

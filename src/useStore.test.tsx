@@ -19,12 +19,45 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); refreshQuotes.mockReset() })
 
 describe('portfolio saving', () => {
-  it('starts manual USD conversion alongside quotes and keeps prepared holdings stable', async () => {
-    const position: Position = { id: 'overlap', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+  it('allows correcting a mistaken foreign venue when the original amounts are explicitly INR', async () => {
+    const position: Position = { id: 'inr-venue', ticker: 'TCS', name: 'TCS', type: 'stock', exchange: 'LSE', currency: 'INR', providerSymbol: 'TCS', identityVersion: 2, exchangeSource: 'explicit', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+    localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'account', name: 'Account', importedAt: 1, positions: [position] }]))
+    let store!: ReturnType<typeof useStore>
+    const Capture = () => { store = useStore(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
+      await act(async () => store.confirmInstrument('inr-venue', { ticker: 'TCS', type: 'stock', exchange: 'NSE', currency: 'INR', providerSymbol: 'TCS.NS' }))
+      expect(store.positions[0]).toMatchObject({ exchange: 'NSE', currency: 'INR', invested: 100, lastPrice: 120 })
+      expect(store.positions[0].identityIssue).toBeUndefined()
+      expect(store.snapshot).toMatchObject({ invested: 100, currentValue: 120 })
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('rejects listing corrections that would relabel unsupported amounts as INR', async () => {
+    const position: Position = { id: 'foreign', ticker: 'TCS', name: 'Example', type: 'stock', exchange: 'NSE', reportedCurrency: 'EUR', providerSymbol: 'TCS.NS', identityVersion: 2, exchangeSource: 'explicit', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+    localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'account', name: 'Account', importedAt: 1, positions: [position] }]))
+    let store!: ReturnType<typeof useStore>
+    const Capture = () => { store = useStore(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
+      const persisted = localStorage.getItem('finverse:folios')
+      await act(async () => {
+        await expect(store.confirmInstrument('foreign', { ticker: 'TCS', type: 'stock', exchange: 'NSE', currency: 'INR', providerSymbol: 'TCS.NS' })).rejects.toThrow('corrected INR statement')
+      })
+      expect(localStorage.getItem('finverse:folios')).toBe(persisted)
+      expect(store.positions[0]).toMatchObject({ reportedCurrency: 'EUR', invested: 100, lastPrice: 120 })
+      expect(store.positions[0].currency).toBeUndefined()
+      expect(store.snapshot).toMatchObject({ invested: 0, currentValue: 0 })
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('refreshes quotes manually and keeps prepared holdings stable', async () => {
+    const position: Position = { exchange: 'NSE', currency: 'INR', identityVersion: 2, exchangeSource: 'explicit', providerSymbol: 'TCS.NS', id: 'overlap', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
     localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'test', name: 'Test', importedAt: 1, positions: [position] }]))
-    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true, currency: 'USD' }))
+    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
     refreshQuotes.mockResolvedValue({ quotes: {}, updated: 0, failed: 0, skipped: 0 })
-    const fx = vi.spyOn(live, 'fetchUsdInrRate').mockResolvedValue({ usdInr: 85, at: 1 })
     let store!: ReturnType<typeof useStore>
     const Capture = () => { store = useStore(); return null }
     const root = createRoot(document.createElement('div'))
@@ -32,21 +65,15 @@ describe('portfolio saving', () => {
       await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
       const preparedPositions = store.positions
       let finishQuotes!: () => void
-      let finishFx!: () => void
       refreshQuotes.mockImplementationOnce(() => new Promise((resolve) => {
         finishQuotes = () => resolve({ quotes: { [quoteKey(position)]: { price: 150, at: Date.now(), source: 'yahoo' } }, updated: 1, failed: 0, skipped: 0 })
       }))
-      fx.mockImplementationOnce(() => new Promise((resolve) => {
-        finishFx = () => resolve({ usdInr: 86, at: 2 })
-      }))
       let pending!: ReturnType<typeof store.refreshNow>
       await act(async () => { pending = store.refreshNow() })
-      expect(fx).toHaveBeenCalledTimes(2)
       expect(refreshQuotes).toHaveBeenCalledTimes(2)
-      await act(async () => { finishQuotes(); finishFx(); expect(await pending).toMatchObject({ ok: true }) })
+      await act(async () => { finishQuotes(); expect(await pending).toMatchObject({ ok: true }) })
       expect(store.positions).toBe(preparedPositions)
       expect(store.snapshot.currentValue).toBe(150)
-      expect(store.fxRate).toEqual({ usdInr: 86, at: 2 })
     } finally { await act(async () => root.unmount()) }
   })
 
@@ -89,7 +116,7 @@ describe('portfolio saving', () => {
   it.each(['preferences', 'restore'])('cancels polling and stale manual refreshes after another tab changes %s', async (change) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-10-13T06:00:00Z'))
-    const position: Position = { id: 'priced', ticker: 'PRICED', name: 'Priced', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+    const position: Position = { exchange: 'NSE', currency: 'INR', identityVersion: 2, exchangeSource: 'explicit', providerSymbol: 'PRICED.NS', id: 'priced', ticker: 'PRICED', name: 'Priced', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
     localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'test', name: 'Test', importedAt: Date.now(), positions: [position] }]))
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
     let signal!: AbortSignal
@@ -151,32 +178,8 @@ describe('portfolio saving', () => {
       expect(localStorage.getItem('finverse:settings')).toBe(externalSettings)
     } finally { await act(async () => root.unmount()) }
   })
-  it('checks durable consent before the FX interval without a storage event', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-10-13T06:00:00Z'))
-    const fetchRate = vi.spyOn(live, 'fetchUsdInrRate').mockResolvedValue({ usdInr: 85, at: Date.now() })
-    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), currency: 'USD', allowExternalData: true }))
-    refreshQuotes.mockResolvedValue({ quotes: {}, updated: 0, failed: 0, skipped: 0 })
-    let store!: ReturnType<typeof useStore>
-    const Capture = () => { store = useStore(); return null }
-    const root = createRoot(document.createElement('div'))
-    try {
-      await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
-      expect(fetchRate).toHaveBeenCalledOnce()
-      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
-      const externalSettings = JSON.stringify({ ...store.settings, allowExternalData: false })
-      localStorage.setItem('finverse:settings', externalSettings)
-      await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 60_000) })
-      expect(fetchRate).toHaveBeenCalledOnce()
-      expect(refreshQuotes).toHaveBeenCalledOnce()
-      expect(store.settings.allowExternalData).toBe(false)
-      expect(store.workspaceReadOnly).toBe(true)
-      expect(store.fxRate).toBeNull()
-      expect(localStorage.getItem('finverse:settings')).toBe(externalSettings)
-    } finally { await act(async () => root.unmount()) }
-  })
-  it('rejects INR scheme confirmation for a fund imported in USD', async () => {
-    const fund: Position = { id: 'usd-fund', ticker: 'Example', name: 'Example Fund Direct Growth', type: 'mutual-fund', currency: 'USD', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+  it('rejects INR scheme confirmation for an unsupported fund currency', async () => {
+    const fund: Position = { id: 'foreign-fund', reportedCurrency: 'EUR', ticker: 'Example', name: 'Example Fund Direct Growth', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
     localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'account', name: 'Account', importedAt: Date.now(), positions: [fund] }]))
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
     refreshQuotes.mockResolvedValue({ quotes: {}, updated: 0, failed: 0, skipped: 1 })
@@ -185,7 +188,7 @@ describe('portfolio saving', () => {
     const root = createRoot(document.createElement('div'))
     try {
       await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
-      await expect(store.confirmFundScheme('usd-fund', { schemeCode: 2, schemeName: 'Example Fund Direct Growth' })).rejects.toThrow('INR mutual-fund holdings only')
+      await expect(store.confirmFundScheme('foreign-fund', { schemeCode: 2, schemeName: 'Example Fund Direct Growth' })).rejects.toThrow('INR mutual-fund holdings only')
       expect(store.positions[0].mfScheme).toBeUndefined()
     } finally { await act(async () => root.unmount()) }
   })
@@ -252,7 +255,7 @@ describe('portfolio saving', () => {
   })
 
   it('gates retained prices consistently and cancels manual refresh when external permission is revoked', async () => {
-    const position: Position = { id: 'priced', ticker: 'PRICED', name: 'Priced', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+    const position: Position = { exchange: 'NSE', currency: 'INR', identityVersion: 2, exchangeSource: 'explicit', providerSymbol: 'PRICED.NS', id: 'priced', ticker: 'PRICED', name: 'Priced', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
     localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'test', name: 'Test', importedAt: Date.now(), positions: [position] }]))
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
     refreshQuotes.mockResolvedValueOnce({ quotes: { [quoteKey(position)]: { price: 150, at: Date.now(), source: 'yahoo' } }, updated: 1, failed: 0, skipped: 0 })

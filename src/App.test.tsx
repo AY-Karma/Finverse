@@ -8,11 +8,10 @@ import type { Position, Settings } from './types'
 import type { View } from './useStore'
 
 const state = vi.hoisted(() => ({
-  positions: [] as Position[], settings: {} as Settings, liveQuotes: {}, fxRate: null,
+  positions: [] as Position[], settings: {} as Settings, liveQuotes: {}, setSettings: vi.fn(),
 }))
 vi.mock('./useStore', () => ({ useStore: () => state }))
 vi.mock('./theme', () => ({ applyTheme: vi.fn() }))
-vi.mock('./views/ResearchHistory', () => ({ ResearchHistory: () => null }))
 vi.mock('./views/Overview', () => ({ Overview: ({ onGoTo }: { onGoTo: (view: View, anchor?: string) => void }) => <><h1>Overview workspace</h1><button onClick={() => onGoTo('settings', 'instrument-review')}>Review listings</button></> }))
 vi.mock('./views/MonitorView', () => ({
   MonitorView: ({ initialQuery }: { initialQuery: string }) => <section aria-label="Monitor workspace"><output>{initialQuery}</output></section>,
@@ -35,6 +34,7 @@ beforeEach(() => {
   localStorage.clear()
   state.positions = [holding]
   state.settings = { ...loadSettings(), allowExternalData: false }
+  state.setSettings.mockReset().mockImplementation((settings: Settings) => { state.settings = settings })
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -86,6 +86,38 @@ async function browserBack() {
 }
 
 describe('workspace navigation', () => {
+  it('keeps one shared privacy control across every workspace and preserves the route when toggled', async () => {
+    await render('overview', '/app')
+    const control = container.querySelector<HTMLButtonElement>('.shell-privacy-toggle')!
+    expect(control.closest('.sidebar-head')).not.toBeNull()
+    expect(control.getAttribute('aria-label')).toBe('Hide portfolio values')
+    const originalSettings = { ...state.settings }
+
+    for (const label of ['Overview', 'Insights', 'Monitor', 'Research', 'Settings']) {
+      await navigate(label)
+      expect(container.querySelectorAll('.shell-privacy-toggle')).toHaveLength(1)
+      expect(container.querySelector('.shell-privacy-toggle')).toBe(control)
+      const route = window.location.pathname + window.location.search
+      const hideValues = !state.settings.hideValues
+      await act(async () => control.click())
+      await act(async () => root.render(<App initialView="overview" />))
+      expect(state.setSettings).toHaveBeenLastCalledWith({ ...originalSettings, hideValues })
+      expect(control.getAttribute('aria-pressed')).toBe(String(hideValues))
+      expect(control.getAttribute('aria-label')).toBe(hideValues ? 'Reveal portfolio values' : 'Hide portfolio values')
+      expect(window.location.pathname + window.location.search).toBe(route)
+    }
+  })
+
+  it('offers the shared privacy control before a portfolio is imported', async () => {
+    state.positions = []
+    state.settings.hideValues = true
+    await render('research', '/app/research')
+    const control = container.querySelector<HTMLButtonElement>('.shell-privacy-toggle')!
+    expect(control.getAttribute('aria-pressed')).toBe('true')
+    await act(async () => control.click())
+    expect(state.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ hideValues: false }))
+  })
+
   it('opens and closes portfolio import from Settings without changing the active route', async () => {
     await render('settings', '/app/settings#instrument-review')
     await click('Import holdings')

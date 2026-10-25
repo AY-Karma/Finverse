@@ -31,7 +31,7 @@ const points = (values = [200, 220]) => values.map((value, index) => ({ at: Date
 async function renderPerformance(backcast = points(), options: { positions?: Position[]; history?: PortfolioSnapshot[]; scope?: Scope; allowExternalData?: boolean } = {}) {
   const positions = options.positions ?? defaultPositions
   state.store = {
-    snapshot: investmentWorkspace.readSnapshot({ folios: [{ id: 'test', name: 'Test', importedAt: 0, positions }], quotes: {}, fxRate: null, history: options.history ?? [] }),
+    snapshot: investmentWorkspace.readSnapshot({ folios: [{ id: 'test', name: 'Test', importedAt: 0, positions }], quotes: {}, history: options.history ?? [] }),
     settings: { ...loadSettings(), allowExternalData: options.allowExternalData ?? true },
   } as ReturnType<typeof useStore>
   state.build.mockResolvedValue({ points: backcast, coveredPositions: positions, holdingsIncluded: positions.length, holdingsTotal: positions.length })
@@ -150,11 +150,9 @@ it('shows missing scoped holdings without fetching history or offering tracked b
   expect(button('Tracked').disabled).toBe(true)
 })
 
-it('converts compact chart labels using the selected display currency', async () => {
+it('formats compact chart labels in INR', async () => {
   await renderPerformance(points([200000, 220000]))
-  state.store.settings.currency = 'USD'
-  state.store.snapshot = { ...state.store.snapshot, fxRate: { usdInr: 100, at: Date.now() } }
   await rerender()
-  expect(container.querySelector('[data-chart]')?.getAttribute('data-axis')).toBe('$2.2K')
-  expect(container.querySelector('.insight-chart-metric--value strong')?.textContent).toBe('$2,200')
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-axis')).toBe('₹2.2L')
+  expect(container.querySelector('.insight-chart-metric--value strong')?.textContent).toBe('₹2,20,000')
 })

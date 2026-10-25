@@ -40,7 +40,7 @@ Run `npm run build` to check the TypeScript code and create a production build.
 
 Finverse stores holdings and preferences in your browser. External market data is off by default; turning it on sends instrument identifiers to market data providers for quotes, history, and news.
 
-Portfolio totals use INR holdings. USD holdings retain their native amounts in storage and exports, but are excluded from aggregate INR cost and valuation with a partial-total notice. Choosing USD as the display currency converts the INR subtotal; it does not combine native USD holdings into it.
+Finverse is built for Indian investors. All portfolio values use INR with Indian digit grouping. Unsupported currency amounts remain in import and backup metadata for review and are excluded from INR totals.
 
 Historical backcasts apply **today's holdings** to past prices, so they do not represent past trades. Tracked history starts when daily portfolio snapshots begin accumulating on this device.
 

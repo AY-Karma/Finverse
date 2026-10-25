@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
@@ -19,9 +19,12 @@ import { DitherBar } from './DitherBar'
 import { rgb, seedOfColor, type DitherColor } from '../components/dither-kit/palette'
 import './insights.css'
 
+const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
+
 const EXPO_PALETTE: DitherColor[] = ['purple', 'green', 'blue', 'orange', 'pink', 'red', 'grey']
 
 type BenchmarkPoint = { ts: number; portfolio: number; benchmark?: number }
+type ExposureHighlight = { label: string; color: string }
 
 export function InsightsView({ onRequestImport }: { onRequestImport: () => void }) {
   const { snapshot, settings } = useStore()
@@ -32,6 +35,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [benchmarkError, setBenchmarkError] = useState(false)
   const [benchmarkReload, setBenchmarkReload] = useState(0)
   const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
+  const [hoveredSector, setHoveredSector] = useState<string | null>(null)
+  const [focusedSector, setFocusedSector] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
   const [openKpi, setOpenKpi] = useState<'session' | 'drawdown' | 'top-five' | 'data-health' | null>(null)
   const { backcast, history: backcastHistory, loading: backcastLoading, days: backcastDays, key: backcastKey, requestMore: requestMoreBackcast } = usePortfolioBackcast({
@@ -47,6 +52,12 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
   const analyticsHistory = backcastHistory
   const trackedAvailable = snapshot.history.length >= 2
+
+  useEffect(() => {
+    if (!settings.hideValues) return
+    setHoveredSector(null)
+    setFocusedSector(null)
+  }, [settings.hideValues])
 
   useEffect(() => {
     const symbol = selectedBenchmark.symbol
@@ -130,11 +141,17 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
   const hide = settings.hideValues
   const mask = (value: string) => hide ? '••••••' : value
-  const currency = settings.currency
-  const value = (amount: number) => mask(formatCurrency(amount, currency, snapshot.fxRate?.usdInr))
+  const value = (amount: number) => mask(formatCurrency(amount))
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
   const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
+  const exposureSectors = snapshot.sectors.slice(0, 10)
+  const activeSector = exposureSectors.find((sector) => sector.label === hoveredSector) ?? exposureSectors.find((sector) => sector.label === focusedSector)
+  const activeSectorIndex = activeSector ? exposureSectors.indexOf(activeSector) : -1
+  const exposureHighlight: ExposureHighlight | null = !hide && activeSectorIndex >= 0 ? {
+    label: exposureSectors[activeSectorIndex].label,
+    color: rgb(seedOfColor(EXPO_PALETTE[activeSectorIndex % EXPO_PALETTE.length]).fill),
+  } : null
   const topFiveMaxWeight = Math.max(...topFive.map((holding) => holding.weight), 1)
   const dataLabels = portfolioDataLabels(snapshot)
 
@@ -152,7 +169,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       <div className="insight-kpis enter d1" data-health-color={dataHealthColor(dataLabels.healthLabel)}>
         <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
           <span className="score-label insight-kpi-label"><span>{dataLabels.sessionLabel}</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: !hide && dataLabels.sessionValue != null && dataLabels.sessionValue < 0 ? 'red' : 'blue' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
-          <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue, currency, snapshot.fxRate?.usdInr)}`)}</strong>
+          <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
           <span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span>
         </button>
         {openKpi === 'session' && <div className="insight-kpi-detail enter" id="session-detail" role="region" aria-labelledby="session-kpi">
@@ -261,12 +278,12 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
         <section className="panel insight-panel insight-panel--allocation">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">02 · Exposure</span></div></div>
-          {hide ? <HiddenValuesState /> : <AllocationMap items={exposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} formatValue={value} />}
+          {hide ? <HiddenValuesState /> : <AllocationMap items={exposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} formatValue={value} highlight={exposureHighlight} />}
         </section>
 
         <section className="panel insight-panel insight-panel--exposure">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Exposure mix</span><span className="section-index">03 · Sectors / type</span></div></div>
-          {hide ? <HiddenValuesState /> : <ExposureMix items={snapshot.sectors.slice(0, 10)} formatValue={value} />}
+          {hide ? <HiddenValuesState /> : <ExposureMix items={exposureSectors} formatValue={value} activeLabel={exposureHighlight?.label ?? null} onHover={setHoveredSector} onFocus={setFocusedSector} />}
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
@@ -280,12 +297,21 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : backcastLoading ? 'Historical prices are loading to build your risk profile.' : 'Historical risk is unavailable. Tracked balance changes include account changes and cash flows.'}</div>}
         </section>
       </div>
+      <Suspense fallback={<div className="panel history-panel-placeholder" role="status">Preparing price history…</div>}>
+        <HistoryPanel scope="all" />
+      </Suspense>
     </div>
   )
 }
 
-function ExposureMix({ items, formatValue }: { items: SectorAllocation[]; formatValue: (value: number) => string }) {
-  const [active, setActive] = useState<number | null>(null)
+function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
+  items: SectorAllocation[]
+  formatValue: (value: number) => string
+  activeLabel: string | null
+  onHover: (label: string | null) => void
+  onFocus: (label: string | null) => void
+}) {
+  const active = items.findIndex((sector) => sector.label === activeLabel)
   if (items.length === 0 || items.every((item) => item.value <= 0)) {
     return <div className="expo-empty muted">No valued exposure yet.</div>
   }
@@ -297,10 +323,10 @@ function ExposureMix({ items, formatValue }: { items: SectorAllocation[]; format
         {items.map((sector, index) => (
           <div
             key={sector.label}
-            className={`expo-seg${active === index ? ' is-active' : active != null ? ' is-dim' : ''}`}
+            className={`expo-seg${active === index ? ' is-active' : active >= 0 ? ' is-dim' : ''}`}
             style={{ flexGrow: Math.max(sector.value, 1) }}
-            onMouseEnter={() => setActive(index)}
-            onMouseLeave={() => setActive(null)}
+            onMouseEnter={() => onHover(sector.label)}
+            onMouseLeave={() => onHover(null)}
           ><DitherBar segments={[{ value: 1, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} /></div>
         ))}
       </div>
@@ -315,10 +341,10 @@ function ExposureMix({ items, formatValue }: { items: SectorAllocation[]; format
               key={sector.label}
               type="button"
               className={`expo-row${active === index ? ' is-active' : ''}`}
-              onMouseEnter={() => setActive(index)}
-              onMouseLeave={() => setActive(null)}
-              onFocus={() => setActive(index)}
-              onBlur={() => setActive(null)}
+              onMouseEnter={() => onHover(sector.label)}
+              onMouseLeave={() => onHover(null)}
+              onFocus={() => onFocus(sector.label)}
+              onBlur={() => onFocus(null)}
               aria-pressed={active === index}
               aria-label={`${sector.label}: ${sector.weight.toFixed(1)}%, ${formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
             >
@@ -343,20 +369,23 @@ function AllocationMap({
   selected,
   onSelect,
   formatValue,
+  highlight,
 }: {
-  items: { symbol: string; value: number; weight: number; pnl: number | null }[]
+  items: { symbol: string; value: number; weight: number; pnl: number | null; sector: string }[]
   selected: string | null
   onSelect: (symbol: string) => void
   formatValue: (amount: number) => string
+  highlight: ExposureHighlight | null
 }) {
   const active = items.find((item) => item.symbol === selected) ?? items[0]
-  return <div className="allocation-map-wrap">
+  return <div className="allocation-map-wrap" style={highlight ? { '--exposure-highlight': highlight.color } as CSSProperties : undefined}>
     <div className="allocation-map" aria-label="Allocation treemap">
       {items.map((item) => {
         const widthPercent = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12))) / 12 * 100
         const isActive = item.symbol === active?.symbol
+        const exposureClass = !highlight ? '' : item.sector === highlight.label ? ' allocation-tile--exposure-match' : ' allocation-tile--exposure-muted'
         const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
-        return <button key={item.symbol} type="button" className={`allocation-tile${isActive ? ' allocation-tile--active' : ''}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio`}>
+        return <button key={item.symbol} type="button" className={`allocation-tile${isActive ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
           <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
           <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
         </button>

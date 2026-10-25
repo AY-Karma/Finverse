@@ -12,6 +12,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 const { state } = vi.hoisted(() => ({ state: {} as Record<string, unknown> }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
+vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => null }))
 vi.mock('../portfolioBackcast', () => ({ buildPortfolioBackcast: async () => null }))
 
 let root: Root
@@ -35,7 +36,7 @@ describe('Insights privacy', () => {
     state.snapshot = investmentWorkspace.readSnapshot({
       folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions: [
         { id: 'a', ticker: 'A', name: 'A', type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 110, invested: 100 },
-      ] }], quotes: {}, fxRate: null,
+      ] }], quotes: {},
     })
     container = document.createElement('div')
     root = createRoot(container)
@@ -53,7 +54,7 @@ describe('Insights privacy', () => {
     ))
     state.snapshot = investmentWorkspace.readSnapshot({
       folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }],
-      quotes: { [quoteKey(positions[0])]: { price: 110, change: 10, changePct: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' } }, fxRate: null,
+      quotes: { [quoteKey(positions[0])]: { price: 110, change: 10, changePct: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' } },
     })
     container = document.createElement('div')
     root = createRoot(container)
@@ -86,7 +87,6 @@ describe('Insights privacy', () => {
         [quoteKey(positions[0])]: { price: 120, change: 5, changePct: 4, at: Date.now(), source: 'yahoo' },
         [quoteKey(positions[1])]: { price: 80, change: -3, changePct: -4, at: Date.now(), source: 'yahoo' },
       },
-      fxRate: null,
     })
     container = document.createElement('div')
     document.body.append(container)

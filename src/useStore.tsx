@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Folio, FxRate, LiveQuote, PortfolioSnapshot, Position, Settings } from './types'
+import type { Folio, LiveQuote, PortfolioSnapshot, Position, Settings } from './types'
 import { canConfirmFolioUnchanged } from './importFreshness'
 import { loadFolios, loadSettings, saveFolios, saveSettings } from './store'
 import { MAX_IMPORT_FILE_BYTES } from './importLimits'
@@ -19,14 +19,13 @@ import type { LiveQuotesResult } from './live'
 import type { ImportRowIssue } from './spreadsheet'
 import { createWorkspaceArchive } from './workspaceArchive'
 import { canConfirmFundScheme, type FundSchemeCandidate } from './fundSchemes'
-import { normalizePosition } from './instruments'
+import { hasInrDenomination, normalizePosition } from './instruments'
 import { combinedPositionMembers, hasSupportedValuationCurrency } from './valuation'
 import { loadMonitorState } from './monitor'
 import { remapMonitorReferences } from './workspaceReferences'
 import { captureWorkspaceRecords, workspaceWritesBlocked, writeWorkspaceRecords } from './workspaceStorage'
 import { latestUndoableAccount, planStatementImport, undoStatementImport, type StatementImportOptions } from './accountStatements'
 import {
-  fetchUsdInrRate,
   isMarketOpen,
   MANUAL_REFRESH_COOLDOWN_MS,
   manualRefreshCheck,
@@ -42,7 +41,6 @@ type RefreshResult =
 const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
 const REFRESH_MS = 5 * 60_000 // live quote refresh cadence during market hours (5m)
 const CLOSED_REFRESH_MS = 24 * 60 * 60_000
-const FX_REFRESH_MS = 6 * 60 * 60_000 // Frankfurter publishes daily reference rates
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
 
 export interface ImportPreview {
@@ -63,7 +61,6 @@ interface Store {
   /** The un-combined holdings exactly as imported (duplicates included). */
   rawPositions: Position[]
   liveQuotes: Record<string, LiveQuote>
-  fxRate: FxRate | null
   snapshot: InvestmentSnapshot
   portfolioHistory: PortfolioSnapshot[]
   marketDataRefreshing: boolean
@@ -99,7 +96,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [folios, setFoliosState] = useState<Folio[]>(() => loadFolios())
   const [savedSettings, setSettingsState] = useState<Settings>(() => loadSettings())
   const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>({})
-  const [fxRate, setFxRateState] = useState<FxRate | null>(null)
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [marketDataRefreshing, setMarketDataRefreshing] = useState(savedSettings.allowExternalData)
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
@@ -172,8 +168,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const holdings = useMemo(() => investmentWorkspace.prepareHoldings(folios), [folios])
   const snapshot = useMemo(
-    () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, fxRate, history: portfolioHistory }),
-    [folios, holdings, liveQuotes, settings.allowExternalData, fxRate, portfolioHistory],
+    () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, history: portfolioHistory }),
+    [folios, holdings, liveQuotes, settings.allowExternalData, portfolioHistory],
   )
   const rawPositions = snapshot.rawPositions
   const positions = snapshot.positions
@@ -242,6 +238,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const before = foliosRef.current.flatMap((folio) => folio.positions)
     const members = combinedPositionMembers(before).get(holdingId) ?? before.filter((position) => position.id === holdingId)
     if (!members.length || members.some((position) => position.type === 'mutual-fund') || correction.type === 'mutual-fund') throw new Error('Choose a current equity or ETF listing to correct.')
+    if (members.some((position) => !hasInrDenomination(position))) throw new Error('Import a corrected INR statement before reviewing this listing. Original unsupported amounts are retained.')
     const ids = new Set(members.map((position) => position.id))
     const next = foliosRef.current.map((folio) => ({ ...folio, positions: folio.positions.map((position) => {
       if (!ids.has(position.id)) return position
@@ -281,11 +278,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const balanceEventHistory = useCallback((next: Folio[], event: NonNullable<PortfolioSnapshot['event']>) => {
-    const result = investmentWorkspace.readSnapshot({ folios: next, quotes: settings.allowExternalData ? liveQuotesRef.current : EMPTY_QUOTES, fxRate })
+    const result = investmentWorkspace.readSnapshot({ folios: next, quotes: settings.allowExternalData ? liveQuotesRef.current : EMPTY_QUOTES })
     const history = loadPortfolioSnapshots()
     if (!result.valuationComplete) return history
     return updatePortfolioSnapshots({ at: Date.now(), value: result.currentValue, invested: result.invested, pnl: result.pnl, holdingCount: result.positions.length, event }, history)
-  }, [settings.allowExternalData, fxRate])
+  }, [settings.allowExternalData])
 
   const commitImports = useCallback(async (previews: ImportPreview[], options: StatementImportOptions) => {
     assertCurrentWorkspace()
@@ -362,7 +359,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     manualRefreshControllers.current.add(controller)
     try {
-      const fxRefresh = settings.currency === 'USD' ? fetchUsdInrRate(controller.signal).catch(() => null) : Promise.resolve(null)
       const result = await marketData.refreshQuotes(positions, liveQuotesRef.current, controller.signal)
       controller.signal.throwIfAborted()
       setMarketDataResult(result)
@@ -371,9 +367,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       setLiveQuotes(result.quotes)
       recordManualRefresh()
-      const rate = await fxRefresh
-      controller.signal.throwIfAborted()
-      if (rate) setFxRateState(rate)
       return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
     } catch {
       if (!controller.signal.aborted) setMarketDataResult({ quotes: liveQuotesRef.current, updated: 0, failed: positions.length, skipped: 0 })
@@ -382,7 +375,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       controller.abort()
       manualRefreshControllers.current.delete(controller)
     }
-  }, [assertCurrentWorkspace, positions, settings.allowExternalData, settings.currency, setLiveQuotes])
+  }, [assertCurrentWorkspace, positions, settings.allowExternalData, setLiveQuotes])
 
   // Live-quote polling: every 30s while NSE market is open; one final fetch after
   // close to capture the official closing price; and one immediate fetch on load
@@ -469,28 +462,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [assertCurrentWorkspace, folioRefreshKey, settings.allowExternalData, setLiveQuotes])
 
-  useEffect(() => {
-    if (!settings.allowExternalData || settings.currency !== 'USD') {
-      setFxRateState(null)
-      return
-    }
-    let active = true
-    const controller = new AbortController()
-    const refresh = async () => {
-      if (workspaceChangedRef.current) return
-      try { assertCurrentWorkspace() } catch { return }
-      const rate = await fetchUsdInrRate(controller.signal)
-      if (active && rate) setFxRateState(rate)
-    }
-    void refresh()
-    const timer = window.setInterval(refresh, FX_REFRESH_MS)
-    return () => {
-      active = false
-      controller.abort()
-      window.clearInterval(timer)
-    }
-  }, [assertCurrentWorkspace, settings.allowExternalData, settings.currency])
-
   // Keep a small local performance history so the portfolio story survives
   // between sessions without sending holdings to a remote system.
   useEffect(() => {
@@ -517,7 +488,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     positions,
     rawPositions,
     liveQuotes,
-    fxRate,
     snapshot,
     portfolioHistory,
     marketDataRefreshing,
@@ -537,12 +507,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     workspaceReadOnly: workspaceChanged,
     settingsSaved: !settingsSaveFailed && !workspaceChanged,
     refreshNow,
-  }), [folios, positions, rawPositions, liveQuotes, fxRate, snapshot, portfolioHistory, marketDataRefreshing,
+  }), [folios, positions, rawPositions, liveQuotes, snapshot, portfolioHistory, marketDataRefreshing,
     marketDataResult, removeFolio, confirmFolioUnchanged, settings, setSettings, previewFile, commitImport, commitImports,
     undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, workspaceChanged, settingsSaveFailed, refreshNow])
 
   return <StoreContext.Provider value={value}>
-    {!!snapshot.unsupportedCurrencyCount && <div className="folio-save-warning" role="status"><span>Partial INR totals. {snapshot.unsupportedCurrencyCount} holding{snapshot.unsupportedCurrencyCount === 1 ? '' : 's'} in unsupported native currencies excluded. Native currency conversion is not supported; original amounts remain in exports.</span></div>}
+    {!!snapshot.unsupportedCurrencyCount && <div className="folio-save-warning" role="status"><span>Partial INR totals. {snapshot.unsupportedCurrencyCount} holding{snapshot.unsupportedCurrencyCount === 1 ? '' : 's'} in unsupported native currencies excluded. Original amounts remain in exports.</span></div>}
     {workspaceChanged && <div className="folio-save-warning" role="alert"><span>This workspace changed in another tab. Reload before saving more changes.</span><button type="button" onClick={() => window.location.reload()}>Reload workspace</button></div>}
     {settingsSaveFailed && <div className="folio-save-warning" role="alert"><span>Preferences could not be saved. They will only last in this session. A workspace backup includes the current preferences.</span></div>}
     {workspaceError && <div className="folio-save-warning" role="alert"><span>{workspaceError}</span><button type="button" onClick={() => setWorkspaceError('')}>Dismiss</button></div>}

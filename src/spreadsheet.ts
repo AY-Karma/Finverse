@@ -11,6 +11,21 @@ const MAX_IMPORT_CELLS = 2_000_000
 const MAX_IMPORT_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 const MAX_IMPORT_ISSUES = 100
 
+const currencyCodeCache = new Map<string, boolean>()
+
+function isCurrencyCode(value: string): boolean {
+  if (!/^[a-z]{3}$/i.test(value)) return false
+  const code = value.toUpperCase()
+  const cached = currencyCodeCache.get(code)
+  if (cached != null) return cached
+  const currencyName = new Intl.NumberFormat('en', { style: 'currency', currency: code, currencyDisplay: 'name' })
+    .formatToParts(1).find(part => part.type === 'currency')?.value
+  // Intl echoes unknown codes, including ordinary labels such as NAV.
+  const recognized = currencyName != null && currencyName !== code
+  currencyCodeCache.set(code, recognized)
+  return recognized
+}
+
 export interface ImportRowIssue {
   sheet: string
   row: number
@@ -268,6 +283,11 @@ function normalizeHeader(s: string): string {
   return s.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
+function currencyCodeSuffix(value: string): string | null {
+  const code = value.match(/([a-z]{3})$/i)?.[1]
+  return code && isCurrencyCode(code) ? code.toUpperCase() : null
+}
+
 function headerCellText(v: unknown): string {
   return v == null ? '' : String(v).trim()
 }
@@ -280,7 +300,10 @@ function matchScore(head: string, aliases: string[]): number {
     const candidate = normalizeHeader(alias)
     if (normalized === candidate) {
       best = Math.max(best, 200 + candidate.length)
-    } else if (normalized.startsWith(candidate) && /^(in)?(rs|inr|rupees|usd|eur|gbp)$/.test(normalized.slice(candidate.length))) {
+    } else if (normalized.startsWith(candidate) && (
+      /^(in)?(rs|inr|rupees)$/.test(normalized.slice(candidate.length)) ||
+      currencyCodeSuffix(normalized.slice(candidate.length).replace(/^in(?=[a-z]{3}$)/, '')) != null
+    )) {
       best = Math.max(best, candidate.length)
     }
   }
@@ -326,7 +349,9 @@ function detectHeader(head: string[]) {
       ? { mode: 'activity' as const, cols: equity }
       : null
   }
-  const mf = assignColumns(head, MF_ALIASES)
+  // Percentage returns are neither monetary gains nor annualized XIRR.
+  const mfHead = head.map(cell => cell.includes('%') && matchScore(cell, MF_ALIASES.returns) > 0 ? '' : cell)
+  const mf = assignColumns(mfHead, MF_ALIASES)
   if (mf.scheme == null && mf.xirr != null) mf.scheme = equity.ticker ?? equity.name
   if (mf.scheme != null && mf.units != null &&
     (mf.investedValue != null || mf.currentValue != null || mf.buyPrice != null || mf.lastPrice != null)) {
@@ -347,8 +372,8 @@ function parseNumber(v: unknown, allowPercent = false): number | null {
   // Parenthetical negatives: (1,234.50) => -1234.5
   const neg = s.startsWith('(') && s.endsWith(')')
   const numeric = (neg ? s.slice(1, -1) : s).trim()
-    .replace(/^(?:(?:INR|USD|EUR|GBP|Rs\.?|rupees)\s*|[₹$€£]\s*)/i, '')
-    .replace(/\s*(?:INR|USD|EUR|GBP|rupees)$/i, '').trim()
+    .replace(/^(?:(?:INR|Rs\.?|rupees)\s*|₹\s*)/i, '')
+    .replace(/\s*(?:INR|rupees)$/i, '').trim()
   const amount = allowPercent ? numeric.replace(/%$/, '').trim() : numeric
   const plain = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i
   const grouped = /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d*)?$/
@@ -387,9 +412,9 @@ function identityFields(row: unknown[], cols: Columns<IdentityField>): Partial<P
   const mapping = { code: parseNumber(cols.mfSchemeCode == null ? null : row[cols.mfSchemeCode]), name: text('mfSchemeName'), source: text('mfMappingSource') }
   return {
     identityVersion: 2, exchange, exchangeSource: source === 'explicit' || source === 'inferred' ? source : rawExchange ? 'explicit' : 'inferred',
-    currency: rawCurrency === 'INR' || rawCurrency === 'USD' ? rawCurrency : undefined,
+    currency: rawCurrency === 'INR' ? rawCurrency : undefined,
     reportedExchange: text('reportedExchange') || (rawExchange && exchange === 'OTHER' ? rawExchange : undefined),
-    reportedCurrency: text('reportedCurrency') || (rawCurrency && rawCurrency !== 'INR' && rawCurrency !== 'USD' ? rawCurrency : undefined),
+    reportedCurrency: text('reportedCurrency') || (rawCurrency && rawCurrency !== 'INR' ? rawCurrency : undefined),
     isin: text('isin').toUpperCase() || undefined, sector: text('sector') || undefined, industry: text('industry') || undefined,
     providerSymbol: text('providerSymbol').toUpperCase() || undefined, identityIssue: text('identityIssue') || undefined,
     ...(isMfSchemeMapping(mapping) ? { mfScheme: mapping } : {}),
@@ -404,6 +429,15 @@ function safeAmount(value: number): boolean {
   return Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER
 }
 
+function isUnavailableNumber(raw: unknown): boolean {
+  return /^(?:-|—|n\/a|not available)?$/i.test(String(raw ?? '').trim())
+}
+
+function invalidOptionalNumber(raw: unknown, value: number | null, signed = false): boolean {
+  if (isUnavailableNumber(raw)) return false
+  return value == null || !safeAmount(signed ? Math.abs(value) : value)
+}
+
 function hasFinancialData(row: unknown[], columns: (number | null)[]): boolean {
   const firstCell = row.find((cell) => String(cell ?? '').trim() !== '')
   if (SUMMARY_LABELS.test(String(firstCell ?? ''))) return false
@@ -411,7 +445,7 @@ function hasFinancialData(row: unknown[], columns: (number | null)[]): boolean {
 }
 
 function prepareHolding(position: Position, validation: RowValidation, index: number): Position | null {
-  if (position.mfScheme && !hasCompatibleFundScheme(position)) {
+  if (position.mfScheme && !position.reportedCurrency && !hasCompatibleFundScheme(position)) {
     rejectRow(validation, index, 'Identity', 'The MF scheme mapping conflicts with the holding plan, option or native currency. Correct the mapping before importing.')
     return null
   }
@@ -454,8 +488,8 @@ function parseEquityRows(rows: unknown[][], cols: Columns<FieldKey>, validation:
     const { buy: buyRaw, invested } = cost
     const lastRaw = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
     const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
-    if ([lastRaw, value].some((amount) => amount != null && !safeAmount(amount))) {
-      rejectRow(validation, index, 'Cost', 'Last price and current value must be non-negative and no greater than 9,007,199,254,740,991.')
+    if ([[cols.lastPrice, lastRaw], [cols.currentValue, value]].some(([column, amount]) => column != null && invalidOptionalNumber(row[column], amount))) {
+      rejectRow(validation, index, 'Cost', 'Last price and current value must be valid non-negative INR numbers within the supported range. Correct malformed or foreign currency cells.')
       continue
     }
     const buyPrice = buyRaw ?? invested! / qtyRaw
@@ -526,8 +560,8 @@ function parseMfRows(rows: unknown[][], cols: Columns<MfField>, validation: RowV
     const { buy, invested } = cost
     const value = cols.currentValue != null ? parseNumber(row[cols.currentValue]) : null
     const last = cols.lastPrice != null ? parseNumber(row[cols.lastPrice]) : null
-    if ([last, value].some((amount) => amount != null && !safeAmount(amount))) {
-      rejectRow(validation, index, 'Cost', 'NAV and current value must be non-negative and no greater than 9,007,199,254,740,991.')
+    if ([[cols.lastPrice, last], [cols.currentValue, value]].some(([column, amount]) => column != null && invalidOptionalNumber(row[column], amount))) {
+      rejectRow(validation, index, 'Cost', 'NAV and current value must be valid non-negative INR numbers within the supported range. Correct malformed or foreign currency cells.')
       continue
     }
     const buyPrice = buy ?? invested! / units
@@ -544,8 +578,8 @@ function parseMfRows(rows: unknown[][], cols: Columns<MfField>, validation: RowV
     const source = cols.source != null ? String(row[cols.source] ?? '').trim() : ''
     const returns = cols.returns != null ? parseNumber(row[cols.returns]) : null
     const xirr = cols.xirr != null ? parseNumber(row[cols.xirr], true) : null
-    if ([returns, xirr].some((amount) => amount != null && !safeAmount(Math.abs(amount)))) {
-      rejectRow(validation, index, 'Cost', 'Reported returns and XIRR must be within the supported numeric range.')
+    if ([[cols.returns, returns], [cols.xirr, xirr]].some(([column, amount]) => column != null && invalidOptionalNumber(row[column], amount, true))) {
+      rejectRow(validation, index, 'Cost', 'Reported returns and XIRR must be valid numbers within the supported range. Correct malformed or foreign currency cells.')
       continue
     }
 
@@ -609,8 +643,8 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
       raw: true,
     })
     const sheet = wb.Sheets[sheetName]
-    if (sheet['!ref']) {
-      const range = XLSX.utils.decode_range(sheet['!ref'])
+    const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
+    if (range) {
       for (const [rowIndex, row] of rows.entries()) for (const [columnIndex, value] of row.entries()) {
         if (typeof value !== 'number') continue
         const cell = sheet[XLSX.utils.encode_cell({ r: range.s.r + rowIndex, c: range.s.c + columnIndex })]
@@ -622,24 +656,44 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
       throw new Error(`Each sheet must contain ${MAX_IMPORT_ROWS.toLocaleString()} rows or fewer.`)
     }
     const kite = rows.some(row => isKiteHoldingsHeader(row.map(headerCellText)))
-    return { sheetName, rows, kite, kiteCombined: kite && normalizeHeader(sheetName) === 'combined' }
+    return { sheetName, sheet, range, rows, kite, kiteCombined: kite && normalizeHeader(sheetName) === 'combined' }
   })
   // Kite repeats its category sheets in Combined. Import that view first and once.
   worksheets.sort((a, b) => Number(b.kiteCombined) - Number(a.kiteCombined))
   let importedKiteCombined = false
   let hasHoldingsHeader = false
-  for (const { sheetName, rows, kite, kiteCombined } of worksheets) {
+  for (const { sheetName, sheet, range, rows, kite, kiteCombined } of worksheets) {
     if (importedKiteCombined && kite && ['equity', 'mutualfunds'].includes(normalizeHeader(sheetName))) continue
     const sheetStart = positions.length
     const defaultType = kite ? normalizeHeader(sheetName) === 'mutualfunds' ? 'mutual-fund' : 'stock' : undefined
 
-    let active: { header: NonNullable<ReturnType<typeof detectHeader>>; dataStart: number } | null = null
+    let active: { header: NonNullable<ReturnType<typeof detectHeader>>; headings: string[]; dataStart: number } | null = null
     const appendRows = (end: number) => {
       if (!active) return
-      const data = rows.slice(active.dataStart, end)
-      const { header } = active
+      const { header, headings, dataStart } = active
       if (header.mode === 'activity') return
-      const validation = { sheet: sheetName, startRow: active.dataStart, result }
+      const moneyColumns = [header.cols.buyPrice, header.cols.investedValue, header.cols.lastPrice, header.cols.currentValue,
+        ...(header.mode === 'mf' ? [header.cols.returns, header.cols.xirr] : [])]
+      const aliases = Object.values(header.mode === 'mf' ? MF_ALIASES : FIELD_ALIASES).flat()
+      const foreignHeaderColumns = new Set(moneyColumns.filter((column): column is number => column != null &&
+        (hasForeignMoneyMarker(headings[column]) || hasForeignHeaderCurrencySuffix(headings[column], aliases))))
+      const data = rows.slice(dataStart, end).map((row, index) => {
+        const values = row.slice()
+        for (const column of moneyColumns) {
+          if (column == null) continue
+          if (foreignHeaderColumns.has(column) && !isUnavailableNumber(values[column])) {
+            values[column] = `${values[column]} ${headings[column]}`
+            continue
+          }
+          if (!range) continue
+          const cell = sheet[XLSX.utils.encode_cell({ r: range.s.r + dataStart + index, c: range.s.c + column })]
+          if (cell?.t !== 'n') continue
+          const formatted = XLSX.utils.format_cell(cell)
+          if (hasForeignMoneyMarker(formatted)) values[column] = formatted
+        }
+        return values
+      })
+      const validation = { sheet: sheetName, startRow: dataStart, result }
       const parsed = header.mode === 'mf'
         ? parseMfRows(data, header.cols, validation)
         : parseEquityRows(data, header.cols, validation, defaultType, header.nameOnly)
@@ -649,19 +703,22 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
       }
     }
     for (let i = 0; i < rows.length; i++) {
-      let header = detectHeader(rows[i].map(headerCellText))
+      let headings = rows[i].map(headerCellText)
+      let header = detectHeader(headings)
       let consumed = 1
       if (i + 1 < rows.length) {
-        const combined = detectHeader(combineHeaderRow(rows[i], rows[i + 1]))
+        const combinedHeadings = combineHeaderRow(rows[i], rows[i + 1])
+        const combined = detectHeader(combinedHeadings)
         if (combined && (!header || fieldCount(combined.cols) > fieldCount(header.cols))) {
           header = combined
+          headings = combinedHeadings
           consumed = 2
         }
       }
       if (!header) continue
       if (header.mode !== 'activity') hasHoldingsHeader = true
       appendRows(i)
-      active = { header, dataStart: i + consumed }
+      active = { header, headings, dataStart: i + consumed }
       i += consumed - 1
     }
     appendRows(rows.length)
@@ -677,4 +734,19 @@ export function parseSpreadsheetWithDiagnostics(file: ArrayBuffer): SpreadsheetP
   throw new Error(
     'No recognizable holdings header found. Use Ticker or Symbol with Quantity and Buy Price for equities, or Scheme Name with Units and Invested Value for mutual funds.',
   )
+}
+
+function hasForeignMoneyMarker(value: string): boolean {
+  return /\p{Sc}/u.test(value.replace(/₹/g, '')) ||
+    (value.match(/[a-z]+/gi) ?? []).some(code => code.toUpperCase() !== 'INR' && isCurrencyCode(code))
+}
+
+function hasForeignHeaderCurrencySuffix(value: string, aliases: string[]): boolean {
+  const normalized = normalizeHeader(value)
+  return aliases.some(alias => {
+    const candidate = normalizeHeader(alias)
+    if (!normalized.startsWith(candidate)) return false
+    const code = currencyCodeSuffix(normalized.slice(candidate.length))
+    return code != null && code !== 'INR'
+  })
 }

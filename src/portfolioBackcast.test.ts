@@ -19,12 +19,12 @@ describe('backcast coverage and cancellation', () => {
     expect(applyPortfolioQuoteOverlay(history, currentPositions, {}).coveragePct).toBe(75)
   })
 
-  it('excludes USD and unsupported native currencies from INR history values and cost', async () => {
+  it('excludes unsupported native currencies from INR history values and cost', async () => {
     const inr = { ...holding(0), currency: 'INR' as const }
-    const usd = { ...holding(1), ticker: 'AAPL', exchange: 'NASDAQ' as const, currency: 'USD' as const, lastPrice: 200, invested: 200 }
+    const foreign = { ...holding(1), ticker: 'AAPL', exchange: 'NSE' as const, currency: 'INR' as const, reportedCurrency: 'EUR', lastPrice: 200, invested: 200 }
     const unknown = { ...holding(2), reportedCurrency: 'EUR', lastPrice: 300, invested: 300 }
     const source = { history: vi.fn(async (_position: Position) => [{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 120 }]) }
-    const result = await buildPortfolioBackcast([inr, usd, unknown], source)
+    const result = await buildPortfolioBackcast([inr, foreign, unknown], source)
     expect(source.history).toHaveBeenCalledTimes(1)
     expect(source.history.mock.calls[0]?.[0]).toEqual(inr)
     expect(result).toMatchObject({ holdingsIncluded: 1, holdingsTotal: 3 })

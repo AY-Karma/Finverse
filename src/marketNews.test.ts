@@ -126,12 +126,13 @@ describe('dedupeItems', () => {
 
 describe('eligibleHoldings', () => {
   it('combines same-instrument lots while preserving equal tickers in different markets', () => {
-    const airline: Position = { ...positions[0], id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ', currency: 'USD' }
+    const airline: Position = { ...positions[0], id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ' }
     const miner: Position = { ...positions[0], id: 'miner', ticker: 'AAL', name: 'Anglo American plc', exchange: 'LSE' }
-    const holdings = eligibleHoldings([airline, { ...airline, id: 'second-lot' }, miner])
-    expect(holdings).toHaveLength(2)
+    const domestic: Position = { ...positions[0], currency: 'INR' }
+    const holdings = eligibleHoldings([domestic, { ...domestic, id: 'second-lot' }, airline, miner])
+    expect(holdings).toHaveLength(3)
     expect(holdings.map(({ identity, region }) => [identity, region])).toEqual([
-      [holdingIdentity(airline), 'US'], [holdingIdentity(miner), 'GB'],
+      [holdingIdentity(domestic), 'IN'], [holdingIdentity(airline), 'US'], [holdingIdentity(miner), 'GB'],
     ])
   })
   it('covers equities and ETFs plus legacy rows with provider symbols, never mutual funds', () => {
@@ -144,19 +145,19 @@ describe('eligibleHoldings', () => {
     expect(tickers).toEqual(['RELIANCE', 'TCS', 'KRN', 'NIFTYBEES'])
   })
 
-  it('selects the news market from the listing venue and uses currency when the venue is unknown', () => {
+  it('selects the news market from the listing venue and defaults unknown venues to India', () => {
     const base = positions[0]
     const holdings = eligibleHoldings([
-      { ...base, id: 'aapl', ticker: 'AAPL', exchange: 'NASDAQ', currency: 'USD', providerSymbol: 'AAPL' },
-      { ...base, id: 'ibm', ticker: 'IBM', exchange: 'NYSE', currency: 'USD', providerSymbol: 'IBM' },
+      { ...base, id: 'aapl', ticker: 'AAPL', exchange: 'NASDAQ', providerSymbol: 'AAPL' },
+      { ...base, id: 'ibm', ticker: 'IBM', exchange: 'NYSE', providerSymbol: 'IBM' },
       { ...base, id: 'shell', ticker: 'SHEL', exchange: 'LSE', currency: undefined, reportedCurrency: 'GBP', providerSymbol: 'SHEL.L' },
       { ...base, id: 'reliance', ticker: 'RELIANCE', exchange: 'NSE', currency: 'INR', providerSymbol: 'RELIANCE.NS' },
       { ...base, id: 'bse', ticker: '500325', exchange: 'BSE', currency: 'INR', providerSymbol: '500325.BO' },
-      { ...base, id: 'us-unknown', ticker: 'USUNKNOWN', exchange: 'OTHER', currency: 'USD' },
+      { ...base, id: 'us-unknown', ticker: 'USUNKNOWN', exchange: 'OTHER' },
       { ...base, id: 'unknown', ticker: 'UNKNOWN', exchange: undefined, currency: undefined },
     ])
     expect(holdings.map(({ ticker, region }) => [ticker, region])).toEqual([
-      ['AAPL', 'US'], ['IBM', 'US'], ['SHEL', 'GB'], ['RELIANCE', 'IN'], ['500325', 'IN'], ['USUNKNOWN', 'US'], ['UNKNOWN', 'IN'],
+      ['AAPL', 'US'], ['IBM', 'US'], ['SHEL', 'GB'], ['RELIANCE', 'IN'], ['500325', 'IN'], ['USUNKNOWN', 'IN'], ['UNKNOWN', 'IN'],
     ])
   })
 })

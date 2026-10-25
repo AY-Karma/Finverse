@@ -6,12 +6,38 @@ import { InstrumentReview } from './InstrumentReview'
 import type { Position } from '../types'
 
 const { initialPosition, state } = vi.hoisted(() => {
-  const initialPosition: Position = { id: 'holding', ticker: '500112', name: 'State Bank', type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 100, invested: 100, exchange: 'NSE', currency: 'INR', providerSymbol: '500112.NS', exchangeSource: 'inferred', identityIssue: 'Confirm the venue', reportedExchange: 'BSE', reportedCurrency: 'INR' }
+  const initialPosition: Position = { id: 'holding', ticker: '500112', name: 'State Bank', type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 100, invested: 100, exchange: 'NSE', currency: 'INR', providerSymbol: '500112.NS', exchangeSource: 'inferred', identityIssue: 'Confirm the venue', reportedExchange: 'BSE' }
   return { initialPosition, state: { positions: [initialPosition] as Position[], confirmInstrument: vi.fn(), settings: { hideValues: false } } }
 })
 vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { state.positions = [initialPosition]; state.settings.hideValues = false; vi.resetAllMocks() })
+
+it('allows reviewing a mistaken foreign venue when the amounts are explicitly INR', async () => {
+  state.positions = [{ ...initialPosition, exchange: 'LSE', currency: 'INR' }]
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<InstrumentReview />))
+    const review = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Review listing')!
+    expect(review.disabled).toBe(false)
+    await act(async () => review.click())
+    expect(container.querySelector('form')).not.toBeNull()
+  } finally { await act(async () => root.unmount()) }
+})
+
+it('explains that unsupported amounts need a corrected INR statement and disables listing edits', async () => {
+  state.positions = [{ ...initialPosition, currency: undefined, reportedCurrency: 'EUR' }]
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<InstrumentReview />))
+    const review = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Review listing')!
+    expect(review.disabled).toBe(true)
+    expect(container.textContent).toContain('Import a corrected INR statement')
+    expect(state.confirmInstrument).not.toHaveBeenCalled()
+  } finally { await act(async () => root.unmount()) }
+})
 
 it('hides listing identities and editing fields while masked, then restores them', async () => {
   const container = document.createElement('div')
@@ -47,7 +73,7 @@ it('previews an explicit listing correction and keeps the edits after a save fai
   try {
     await act(async () => root.render(<InstrumentReview />))
     expect(container.textContent).toContain('1 inferred or unresolved')
-    expect(container.textContent).toContain('Statement metadata: exchange BSE, currency INR')
+    expect(container.textContent).toContain('Statement metadata: exchange BSE')
     await act(async () => button('Review listing').click())
     await change('Exchange', 'BSE')
     expect((field('Provider symbol, required') as HTMLInputElement).required).toBe(true)
@@ -154,7 +180,7 @@ it('requires manual currency review before bulk approval can clear unresolved cu
     await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Approve all default listings')!.click())
     expect(state.confirmInstrument).not.toHaveBeenCalled()
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('2 listings still need review')
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Confirm the native currency in Review listing')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Import a corrected INR statement')
     expect(container.querySelector('[role="status"]')).toBeNull()
     expect(state.positions[0].currency).toBeUndefined()
     expect(state.positions[1].reportedCurrency).toBe('GBP')

@@ -10,7 +10,7 @@ import { ImportView } from './ImportView'
 
 const state = vi.hoisted(() => ({
   previewFile: vi.fn(), commitImport: vi.fn(), commitImports: vi.fn(),
-  folios: [] as Folio[], positions: [] as Position[], liveQuotes: {} as Record<string, LiveQuote>, fxRate: null,
+  folios: [] as Folio[], positions: [] as Position[], liveQuotes: {} as Record<string, LiveQuote>,
   settings: { currency: 'INR' as const, allowExternalData: false, hideValues: false },
   removeFolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null, exportPortfolio: vi.fn(),
 }))

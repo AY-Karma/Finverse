@@ -77,14 +77,18 @@ function parsePosition(value: unknown): Position {
     if (row[key] !== undefined) position[key] = optionalText(row[key], key)
   }
   if (row.exchange !== undefined) position.exchange = choice(row.exchange, ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER'], 'exchange')
-  if (row.currency !== undefined) position.currency = choice(row.currency, ['INR', 'USD'], 'currency')
+  if (row.currency !== undefined) {
+    const currency = text(row.currency, 'currency')
+    if (currency === 'INR') position.currency = currency
+    else position.reportedCurrency = currency
+  }
   if (row.identityVersion !== undefined) {
     if (row.identityVersion !== 2) return fail('instrument identity version')
     Object.assign(position, { identityVersion: 2 })
   }
   if (row.exchangeSource !== undefined) Object.assign(position, { exchangeSource: choice(row.exchangeSource, ['explicit', 'inferred'], 'exchange source') })
   for (const key of ['identityIssue', 'reportedExchange', 'reportedCurrency'] as const) {
-    if (row[key] !== undefined) Object.assign(position, { [key]: optionalText(row[key], key) })
+    if (row[key] !== undefined) Object.assign(position, { [key]: optionalText(row[key], key)?.trim() || position[key] })
   }
   if (row.returns !== undefined) position.returns = nullableNumber(row.returns, 'reported gain', -MAX_NUMBER)
   if (row.xirr !== undefined) position.xirr = nullableNumber(row.xirr, 'reported XIRR', -MAX_NUMBER)
@@ -95,7 +99,7 @@ function parsePosition(value: unknown): Position {
     const code = integer(mapping.code, 'fund scheme code')
     if (!code) return fail('fund scheme code')
     Object.assign(position, { mfScheme: { code, name: text(mapping.name, 'fund scheme name'), source: choice(mapping.source, ['exact', 'confirmed'], 'fund mapping source') } })
-    if (!hasCompatibleFundScheme(position)) return fail('fund mapping that conflicts with its plan, option or native currency')
+    if (!position.reportedCurrency && !hasCompatibleFundScheme(position)) return fail('fund mapping that conflicts with its plan, option or native currency')
   }
   return position
 }
@@ -137,7 +141,7 @@ function parseFolio(value: unknown): Folio {
 function parseSettings(value: unknown): Settings {
   const row = object(value, 'preferences')
   const settings: Settings = {
-    currency: choice(row.currency, ['INR', 'USD'], 'display currency'), allowExternalData: boolean(row.allowExternalData, 'external-data preference'),
+    currency: 'INR', allowExternalData: boolean(row.allowExternalData, 'external-data preference'),
     density: choice(row.density, ['comfortable', 'compact'], 'density'), accent: choice(row.accent, ['indigo', 'emerald', 'cobalt', 'amber', 'custom'], 'accent'),
     mode: choice(row.mode, ['dark', 'light'], 'theme'), hideValues: boolean(row.hideValues, 'hidden-values preference'),
   }
@@ -279,8 +283,7 @@ export function parseWorkspaceArchive(content: string): WorkspaceArchivePreview 
 }
 
 export async function restoreWorkspaceArchive(value: WorkspaceArchive, expectedRecords: WorkspaceRecords): Promise<void> {
-  const archive = validateWorkspaceArchive(value)
-  validateReferences(archive)
+  const { archive } = parseWorkspaceArchive(JSON.stringify(value))
   const records: WorkspaceRecords = {
     'finverse:folios': JSON.stringify(archive.folios), 'finverse:settings': JSON.stringify({ ...archive.settings, allowExternalData: false }),
     'finverse:portfolio-snapshots': JSON.stringify(archive.snapshots), 'finverse:monitor:v1': JSON.stringify({ version: 1, ...archive.monitor }), 'finverse:positions': null,

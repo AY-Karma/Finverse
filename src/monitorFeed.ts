@@ -43,7 +43,7 @@ export function pagedEvents(events: NewsItem[], page: number, pageSize: number):
 }
 
 export function titleParts(title: string): { text: string; sentiment: NewsSentiment; highlighted?: boolean }[] {
-  const amounts = /(?<!\w)[+−-]?(?:₹|Rs\.?|INR|USD|\$|£|€)\s*[+−-]?\d+(?:,\d+)*(?:\.\d+)?(?:\s*(?:crore|cr|lakh|million|billion|bn)\b)?|(?<!\w)[+−-]?\d+(?:,\d+)*(?:\.\d+)?%/gi
+  const amounts = /(?<!\w)[+−-]?(?:₹|Rs\.?|INR|\$|£|€)\s*[+−-]?\d+(?:,\d+)*(?:\.\d+)?(?:\s*(?:crore|cr|lakh|million|billion|bn)\b)?|(?<!\w)[+−-]?\d+(?:,\d+)*(?:\.\d+)?%/gi
   const shareMove = /\b(?:shares?|stock|share price|stock price)\s+(?:(?:is|are|was|were)\s+)?(?:(?:trades?|traded|trading)\s+)?(up|down|gains?|gained|rises?|rose|risen|jumps?|jumped|surges?|surged|rally|rallies|rallied|soars?|soared|falls?|fell|fallen|drops?|dropped|plunges?|plunged|declines?|declined|slumps?|slumped|tumbles?|tumbled)\s+(?:by\s+)?(?:(?:about|nearly|almost|over)\s+)?$/i
   const upwardMove = /^(up|gain|rise|rose|risen|jump|surge|rall|soar)/i
   const impactContext = /\b(?:impact|(?:(?:share|stock)\s+)?price change|day move)\s*[:=]?\s*$/i

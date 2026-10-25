@@ -41,7 +41,7 @@ describe('valuation coverage and merge identity', () => {
 
   it('does not combine conflicting canonical identity fields', () => {
     const holding = position({ ticker: 'SAME', exchange: 'NSE', providerSymbol: 'SAME.NS', currency: 'INR', isin: 'INE000000001' })
-    for (const conflict of [{ exchange: 'BSE' as const }, { currency: 'USD' as const }, { providerSymbol: 'DIFFERENT.NS' }, { isin: 'INE000000002' }]) {
+    for (const conflict of [{ exchange: 'BSE' as const }, { reportedCurrency: 'EUR' }, { providerSymbol: 'DIFFERENT.NS' }, { isin: 'INE000000002' }]) {
       expect(combinePositions([holding, { ...holding, id: 'second', ...conflict }])).toHaveLength(2)
     }
   })
@@ -54,15 +54,15 @@ describe('valuation coverage and merge identity', () => {
     expect(members.get(combined[1].id)?.map((row) => row.id)).toEqual(['bse-a', 'bse-b'])
   })
 
-  it('excludes native USD cost and value from INR totals rather than adding unlike currencies', () => {
+  it('excludes unsupported currency cost and value from INR totals rather than adding unlike currencies', () => {
     const inr = position({ ticker: 'INR', currency: 'INR', invested: 100, lastPrice: 120 })
-    const usd = position({ ticker: 'AAPL', exchange: 'NASDAQ', currency: 'USD', invested: 200, lastPrice: 240 })
-    const quotes = { [quoteKey(usd)]: { price: 300, at: 1, source: 'yahoo' as const } }
-    expect(computePortfolioStats([inr, usd], quotes)).toMatchObject({ invested: 100, currentValue: 120, pnl: 20, pricedCount: 1, unpricedCount: 1, valuationComplete: false })
-    expect(positionPnl(usd, quotes)).toBeNull()
-    expect(nativePrice(usd, quotes)).toBe(300)
-    expect(nativePrice(usd)).toBe(240)
-    expect(usd).toMatchObject({ invested: 200, lastPrice: 240 })
+    const foreign = position({ ticker: 'AAPL', exchange: 'NASDAQ', reportedCurrency: 'EUR', invested: 200, lastPrice: 240 })
+    const quotes = { [quoteKey(foreign)]: { price: 300, at: 1, source: 'yahoo' as const } }
+    expect(computePortfolioStats([inr, foreign], quotes)).toMatchObject({ invested: 100, currentValue: 120, pnl: 20, pricedCount: 1, unpricedCount: 1, valuationComplete: false })
+    expect(positionPnl(foreign, quotes)).toBeNull()
+    expect(nativePrice(foreign, quotes)).toBe(300)
+    expect(nativePrice(foreign)).toBe(240)
+    expect(foreign).toMatchObject({ invested: 200, lastPrice: 240 })
   })
 })
 

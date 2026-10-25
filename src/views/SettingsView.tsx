@@ -125,22 +125,6 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
               <span className="settings-status">{settingsSaved ? 'Auto-saved' : 'Save failed'}</span>
             </SettingsSectionHeader>
             <div className="settings-group">
-              <SettingRow
-                label="Display currency"
-                description="INR portfolio totals can be displayed in USD when external data supplies a conversion rate."
-              >
-                <select
-                  id="currency"
-                  className="select settings-control"
-                  aria-label="Display currency"
-                  value={settings.currency}
-                  onChange={(event) => update({ currency: event.target.value as typeof settings.currency })}
-                >
-                  <option value="INR">INR (₹)</option>
-                  <option value="USD">USD ($)</option>
-                </select>
-              </SettingRow>
-
               <SettingRow label="Interface density" description="Change spacing without changing the information shown.">
                 <select
                   id="density"

@@ -14,7 +14,148 @@ function workbook(sheets: unknown[][][], bookType: 'xlsx' | 'biff8' | 'csv' = 'x
   return XLSX.write(book, { type: 'array', bookType }) as ArrayBuffer
 }
 
+const optionalFinancialColumns = [
+  { kind: 'equity', header: ['Symbol', 'Quantity', 'Buy Price'], field: 'Last Price' },
+  { kind: 'equity', header: ['Symbol', 'Quantity', 'Buy Price'], field: 'Current Value' },
+  { kind: 'fund', header: ['Scheme Name', 'Units', 'Invested Value'], field: 'Current NAV' },
+  { kind: 'fund', header: ['Scheme Name', 'Units', 'Invested Value'], field: 'Current Value' },
+  { kind: 'fund', header: ['Scheme Name', 'Units', 'Invested Value'], field: 'Returns' },
+  { kind: 'fund', header: ['Scheme Name', 'Units', 'Invested Value'], field: 'XIRR' },
+]
+
 describe('holdings spreadsheet import', () => {
+  it.each([
+    { kind: 'equity', header: ['Symbol', 'Quantity', 'Buy Price'], format: '0 "shares"', invested: 200 },
+    { kind: 'fund', header: ['Scheme Name', 'Units', 'Invested Value'], format: '0.00 "units"', invested: 100 },
+  ])('keeps numeric $kind quantities despite Excel display labels', ({ header, format, invested }) => {
+    const sheet = XLSX.utils.aoa_to_sheet([header, ['Example', 2, 100]])
+    sheet.B2.z = format
+    const book = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(book, sheet, 'Holdings')
+    const result = parseSpreadsheetWithDiagnostics(XLSX.write(book, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer)
+    expect(result.positions[0]).toMatchObject({ quantity: 2, invested })
+    expect(result.issues).toEqual([])
+    expect(result.rejectedCount).toBe(0)
+  })
+
+  it.each(['EUR 100', '\u20ac100'])('rejects foreign purchase amounts formatted as %s', (amount) => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Symbol', 'Quantity', 'Buy Price'], ['TCS', 1, 100], ['EXAMPLE', 1, amount],
+    ]]))
+    expect(result.positions.map((position) => position.ticker)).toEqual(['TCS'])
+    expect(result.rejectedCount).toBe(1)
+  })
+
+  it.each([
+    { header: ['Symbol', 'Quantity', 'Buy Price', 'Last Price'], format: '0.00 "per share"' },
+    { header: ['Scheme Name', 'Units', 'Invested Value', 'Current NAV'], format: '0.00 "NAV"' },
+    { header: ['Symbol', 'Quantity', 'Buy Price', 'Last Price (INR)'], format: '0.00 "PER SHARE"' },
+    { header: ['Scheme Name', 'Units', 'Invested Value', 'Current NAV (INR)'], format: '"INR "0.00' },
+    { header: ['Symbol', 'Quantity', 'Buy Price', 'Last Price (Rs.)'], format: '"\u20b9"0.00' },
+  ])('retains raw numeric money with generic display labels: $format', ({ header, format }) => {
+    const sheet = XLSX.utils.aoa_to_sheet([header, ['Example', 2, 100, 120]])
+    sheet.D2.z = format
+    const book = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(book, sheet, 'Holdings')
+    const result = parseSpreadsheetWithDiagnostics(XLSX.write(book, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer)
+    expect(result.positions[0].lastPrice).toBe(120)
+    expect(result.issues).toEqual([])
+    expect(result.rejectedCount).toBe(0)
+  })
+
+  it.each(['Currency ($)', 'Currency (€)', 'Reported Currency (£)'])('preserves foreign identity metadata under %s', (currencyHeader) => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([
+      [['Symbol', 'Quantity', 'Buy Price', 'Last Price', currencyHeader], ['EXAMPLE', 2, 100, 120, 'EUR']],
+      [['Scheme Name', 'Units', 'Invested Value', 'Current Value', currencyHeader], ['Example Fund', 2, 200, 240, 'EUR']],
+    ]))
+    expect(result.positions).toHaveLength(2)
+    for (const position of result.positions) {
+      expect(position).toMatchObject({ reportedCurrency: 'EUR', quantity: 2, invested: 200, lastPrice: 120 })
+      expect(position.currency).toBeUndefined()
+    }
+    expect(result.issues).toEqual([])
+    expect(result.rejectedCount).toBe(0)
+  })
+
+  it('rejects foreign currency formatting on numeric Excel cells', () => {
+    const sheet = XLSX.utils.aoa_to_sheet([['Symbol', 'Quantity', 'Buy Price'], ['TCS', 1, 100], ['EXAMPLE', 1, 100]])
+    sheet.C3.z = '"\u20ac"#,##0.00'
+    const book = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(book, sheet, 'Holdings')
+    const result = parseSpreadsheetWithDiagnostics(XLSX.write(book, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer)
+    expect(result.positions.map((position) => position.ticker)).toEqual(['TCS'])
+    expect(result.rejectedCount).toBe(1)
+  })
+
+  it.each(optionalFinancialColumns)('reports populated unsupported or malformed $kind $field instead of dropping them', ({ header, field }) => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      [...header, field, 'Currency'],
+      ['VALID', 2, 100, '', 'INR'],
+      ['Foreign code', 2, 100, 'EUR 120', 'EUR'],
+      ['Foreign symbol', 2, 100, '€120', 'EUR'],
+      ['Malformed', 2, 100, '120abc', 'INR'],
+    ]]))
+    expect(result.positions.map((position) => position.ticker)).toEqual(['VALID'])
+    expect(result.rejectedCount).toBe(3)
+    expect(result.issues.map((issue) => [issue.row, issue.field])).toEqual([[3, 'Cost'], [4, 'Cost'], [5, 'Cost']])
+    expect(result.issues.every((issue) => issue.message.includes('malformed or foreign currency'))).toBe(true)
+  })
+
+  it.each(optionalFinancialColumns)('rejects numeric Excel foreign money formats in optional $kind $field', ({ header, field }) => {
+    for (const bookType of ['xlsx', 'biff8'] as const) {
+      const sheet = XLSX.utils.aoa_to_sheet([
+        [...header, field], ['VALID', 2, 100, ''], ['Foreign symbol', 2, 100, 120], ['Foreign code', 2, 100, 120],
+        ['Foreign percent', 2, 100, 1.2], ['Attached code', 2, 100, 120], ['Lowercase code', 2, 100, 120],
+      ])
+      sheet.D3.z = '"€"#,##0.00'
+      sheet.D4.z = '"EUR "0.00'
+      sheet.D5.z = '"€"0.00%'
+      sheet.D6.z = '"JPY"0.00'
+      sheet.D7.z = '0.00"gbp"'
+      const book = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(book, sheet, 'Holdings')
+      const result = parseSpreadsheetWithDiagnostics(XLSX.write(book, { type: 'array', bookType }) as ArrayBuffer)
+      expect(result.positions.map((position) => position.ticker)).toEqual(['VALID'])
+      expect(result.rejectedCount).toBe(5)
+      expect(result.issues.map((issue) => [issue.sheet, issue.row, issue.field])).toEqual([
+        ['Holdings', 3, 'Cost'], ['Holdings', 4, 'Cost'], ['Holdings', 5, 'Cost'], ['Holdings', 6, 'Cost'], ['Holdings', 7, 'Cost'],
+      ])
+    }
+  })
+
+  it.each(optionalFinancialColumns)('reports populated foreign-denominated $kind $field headers', ({ header, field }) => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      [...header, `${field} (€)`], ['VALID', 2, 100, ''], ['Foreign', 2, 100, 120],
+    ]]))
+    expect(result.positions.map((position) => position.ticker)).toEqual(['VALID'])
+    expect(result.rejectedCount).toBe(1)
+    expect(result.issues[0]).toMatchObject({ row: 3, field: 'Cost' })
+  })
+
+  it('rejects populated financial cells under headers with attached foreign currency codes', () => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Symbol', 'Quantity', 'Invested Value', 'BuyPriceJPY'],
+      ['VALID', 1, 100, ''],
+      ['FOREIGN', 1, 100, 120],
+    ]]))
+    expect(result.positions.map(position => position.ticker)).toEqual(['VALID'])
+    expect(result.rejectedCount).toBe(1)
+    expect(result.issues).toMatchObject([{ row: 3, field: 'Cost' }])
+  })
+
+  it.each(optionalFinancialColumns)('reports currency-code-decorated optional $kind $field headers', ({ header, field }) => {
+    for (const code of ['EUR', 'GBP', 'JPY']) {
+      const result = parseSpreadsheetWithDiagnostics(workbook([[
+        [...header, `${field} (${code})`],
+        ['VALID', 2, 100, ''], ['Placeholder', 2, 100, '-'],
+        ['Raw amount', 2, 100, 120], ['Explicit code', 2, 100, `${code} 120`],
+      ]]))
+      expect(result.positions).toHaveLength(2)
+      expect(result.rejectedCount).toBe(2)
+      expect(result.issues.map((issue) => [issue.row, issue.field])).toEqual([[4, 'Cost'], [5, 'Cost']])
+    }
+  })
+
   it.each(['csv', 'xlsx', 'biff8'] as const)('accepts header-only equity and fund %s statements with no rejected rows', (format) => {
     for (const header of [
       ['Ticker', 'Quantity', 'Buy Price', 'Last Price'],
@@ -191,6 +332,22 @@ describe('holdings spreadsheet import', () => {
     XLSX.utils.book_append_sheet(book, sheet, 'Funds')
     const positions = parsePositions(XLSX.write(book, { type: 'array', bookType }))
     expect(positions.map((position) => position.xirr)).toEqual([12.3456, -8, 12, 0.12, 12, 0.12])
+  })
+
+  it.each(['xlsx', 'biff8'] as const)('keeps fund holdings with percentage returns separate from monetary returns in %s', (bookType) => {
+    const result = parseSpreadsheetWithDiagnostics(workbook([[
+      ['Scheme Name', 'Units', 'Invested Value', 'Returns (%)'],
+      ['Text percent', 2, 100, '12%'],
+      ['Native percent', 2, 100, { t: 'n', v: 0.12, z: '0.00%' }],
+      ['Plain percent', 2, 100, 12],
+    ]], bookType))
+    expect(result.positions.map(({ ticker, quantity, invested, returns, xirr }) => ({ ticker, quantity, invested, returns, xirr }))).toEqual([
+      { ticker: 'Text percent', quantity: 2, invested: 100, returns: null, xirr: null },
+      { ticker: 'Native percent', quantity: 2, invested: 100, returns: null, xirr: null },
+      { ticker: 'Plain percent', quantity: 2, invested: 100, returns: null, xirr: null },
+    ])
+    expect(result.issues).toEqual([])
+    expect(result.rejectedCount).toBe(0)
   })
 
   it('reads Kite quantities without using discrepant, long-term or pledged quantity columns', () => {

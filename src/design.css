@@ -186,6 +186,13 @@ body {
   overflow-y: auto;
 }
 
+.sidebar-head { position: relative; padding-right: 44px; }
+.sidebar-head .brand { min-width: 0; gap: 8px; padding-inline: 4px; }
+.sidebar-head .brand > div { min-width: 0; }
+.sidebar-head .brand-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-privacy-toggle.icon-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; }
+.shell-privacy-toggle:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: 2px; }
+
 .brand {
   display: flex;
   align-items: center;
@@ -4023,6 +4030,9 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
     backdrop-filter: blur(12px);
   }
   .brand { padding: 0; }
+  .sidebar-head { padding-right: 48px; }
+  .sidebar-head .brand { padding: 0; }
+  .shell-privacy-toggle.icon-btn { width: 44px; height: 44px; }
   .brand--home { width: auto; align-self: flex-start; }
   .brand-sub { display: none; }
   .nav {

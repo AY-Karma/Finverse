@@ -14,6 +14,7 @@ import { InsightsView } from './InsightsView'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn(), chart: vi.fn() }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
+vi.mock('./HistoryPanel', () => ({ HistoryPanel: ({ scope }: { scope: string }) => <section data-history-scope={scope}>Holding Price History</section> }))
 vi.mock('../portfolioBackcast', async (original) => ({ ...await original<typeof import('../portfolioBackcast')>(), buildPortfolioBackcast: state.build }))
 vi.mock('../marketData', async (original) => ({ ...await original<typeof import('../marketData')>(), marketData: { benchmarkHistory: state.benchmark } }))
 vi.mock('./InteractiveTrendChart', () => ({ InteractiveTrendChart: (props: ComponentProps<typeof import('./InteractiveTrendChart').InteractiveTrendChart>) => {
@@ -25,10 +26,9 @@ vi.mock('./InteractiveTrendChart', () => ({ InteractiveTrendChart: (props: Compo
 let root: Root | undefined
 let container: HTMLDivElement
 
-async function renderInsights(backcast: PortfolioBackcastHistory['points'], history: PortfolioSnapshot[] = []) {
-  const positions: Position[] = [{ id: 'a', ticker: 'AAA', name: 'AAA', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
+async function renderInsights(backcast: PortfolioBackcastHistory['points'], history: PortfolioSnapshot[] = [], positions: Position[] = [{ id: 'a', ticker: 'AAA', name: 'AAA', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]) {
   const folios = [{ id: 'test', name: 'Test', importedAt: 0, positions }]
-  state.store = { snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null, history }), settings: { ...loadSettings(), allowExternalData: true } } as ReturnType<typeof useStore>
+  state.store = { snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, history }), settings: { ...loadSettings(), allowExternalData: true } } as ReturnType<typeof useStore>
   state.build.mockResolvedValue({ points: backcast, coveredPositions: positions, holdingsIncluded: 1, holdingsTotal: 1 })
   state.benchmark.mockResolvedValue([{ date: '2026-01-01', close: 100 }, { date: '2026-03-01', close: 100 }])
   container = document.createElement('div')
@@ -36,10 +36,45 @@ async function renderInsights(backcast: PortfolioBackcastHistory['points'], hist
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
 }
 
+const exposurePositions: Position[] = [
+  { ticker: 'ALPHA', type: 'stock', sector: 'Technology' },
+  { ticker: 'BETA', type: 'stock', sector: 'Technology' },
+  { ticker: 'BANK', type: 'stock', sector: 'Financials' },
+  { ticker: 'TECH-FUND', name: 'Technology Fund', type: 'mutual-fund', sector: 'Technology' },
+  { ticker: 'BROAD-FUND', name: 'Broad Fund', type: 'mutual-fund', category: 'Equity - Large Cap Fund' },
+  { ticker: 'DEBT-FUND', name: 'Debt Fund', type: 'mutual-fund', sector: 'Debt', category: 'Debt - Corporate Bond Fund' },
+  { ticker: 'SERVICES', type: 'stock', sector: 'Technology Services' },
+].map((position) => ({ id: position.ticker, name: position.ticker, quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100, ...position } as Position))
+
+function exposureControl(label: string, selector: '.expo-row' | '.expo-seg' = '.expo-row') {
+  const index = state.store.snapshot.sectors.findIndex((sector) => sector.label === label)
+  const control = container.querySelectorAll<HTMLElement>(selector)[index]
+  expect(control).toBeDefined()
+  return control
+}
+
+function expectExposureMatches(symbols: string[] = []) {
+  const tiles = [...container.querySelectorAll('.allocation-tile')]
+  expect(tiles).toHaveLength(exposurePositions.length)
+  for (const tile of tiles) {
+    const matches = symbols.includes(tile.querySelector('strong')!.textContent!)
+    expect(tile.classList.contains('allocation-tile--exposure-match')).toBe(matches)
+    expect(tile.classList.contains('allocation-tile--exposure-muted')).toBe(symbols.length > 0 && !matches)
+  }
+}
+
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
   root = undefined
   vi.clearAllMocks()
+})
+
+it('shows holding price history for all holdings at the bottom below the insights grid', async () => {
+  await renderInsights([])
+  const history = container.querySelector('[data-history-scope="all"]')
+  expect(history).not.toBeNull()
+  expect(container.querySelector('.insights-page')?.lastElementChild).toBe(history)
+  expect(history?.previousElementSibling?.classList.contains('insight-grid')).toBe(true)
 })
 
 it('rebases both comparison returns on the first shared date when the benchmark has a holiday', async () => {
@@ -186,6 +221,73 @@ it('hides exposure labels, counts and relative sizes while masked, then restores
   state.store.settings.hideValues = false
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(panel.querySelector('.expo-mix')).not.toBeNull()
+})
+
+it('highlights exact sector members on row hover without changing the selected holding', async () => {
+  await renderInsights([], [], exposurePositions)
+  expectExposureMatches()
+  const selected = container.querySelector<HTMLButtonElement>('.allocation-tile[aria-label^="BANK,"]')!
+  await act(async () => selected.click())
+  const detail = container.querySelector('.allocation-detail')!.textContent
+  const technology = exposureControl('Technology')
+
+  await act(async () => technology.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  expectExposureMatches(['ALPHA', 'BETA', 'Technology Fund'])
+  expect(selected.getAttribute('aria-pressed')).toBe('true')
+  expect(container.querySelector('.allocation-detail')!.textContent).toBe(detail)
+
+  await act(async () => technology.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+  expectExposureMatches()
+  expect(selected.getAttribute('aria-pressed')).toBe('true')
+  expect(container.querySelector('.allocation-detail')!.textContent).toBe(detail)
+})
+
+it('uses the workspace fund fallback sector when hovering a ribbon segment', async () => {
+  await renderInsights([], [], exposurePositions)
+  expect(state.store.snapshot.sectors.find((sector) => sector.label === 'Mutual fund')?.count).toBe(2)
+  const funds = exposureControl('Mutual fund', '.expo-seg')
+
+  await act(async () => funds.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  expectExposureMatches(['Broad Fund', 'Debt Fund'])
+  await act(async () => funds.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+  expectExposureMatches()
+})
+
+it('restores the focused sector after pointer leave and clears it on blur', async () => {
+  await renderInsights([], [], exposurePositions)
+  const technology = exposureControl('Technology')
+  const financials = exposureControl('Financials')
+
+  await act(async () => technology.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  expectExposureMatches(['ALPHA', 'BETA', 'Technology Fund'])
+  await act(async () => financials.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  expectExposureMatches(['BANK'])
+  await act(async () => financials.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+  expectExposureMatches(['ALPHA', 'BETA', 'Technology Fund'])
+  await act(async () => technology.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  expectExposureMatches()
+
+  await act(async () => financials.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  expectExposureMatches(['BANK'])
+  await act(async () => financials.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  expectExposureMatches()
+})
+
+it('clears hovered and focused exposure when values are masked', async () => {
+  await renderInsights([], [], exposurePositions)
+  await act(async () => exposureControl('Technology').dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  await act(async () => exposureControl('Financials', '.expo-seg').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  expectExposureMatches(['BANK'])
+
+  state.store.settings.hideValues = true
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(container.querySelector('.expo-mix')).toBeNull()
+  expect(container.querySelector('.allocation-map')).toBeNull()
+
+  state.store.settings.hideValues = false
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expectExposureMatches()
+  expect(container.querySelector('.expo-row.is-active, .expo-seg.is-active')).toBeNull()
 })
 
 it('hides the drawdown geometry and holding identities in all value dropdowns', async () => {

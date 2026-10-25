@@ -225,7 +225,7 @@ describe('portfolio news', () => {
   })
 
   it('uses the holding market for global news and keeps manual topic search on its existing default', async () => {
-    state.store.positions.push({ ...position('AAPL', 'Apple Inc'), exchange: 'NASDAQ', currency: 'USD' })
+    state.store.positions.push({ ...position('AAPL', 'Apple Inc'), exchange: 'NASDAQ' })
     await renderPanel()
     await selectHolding('AAPL')
     expect(loadFeed.mock.calls[1][1]).toEqual(expect.objectContaining({ query: 'Apple Inc', region: 'US' }))
@@ -242,7 +242,7 @@ describe('portfolio news', () => {
   })
 
   it.each([false, true])('searches equal tickers in their own markets regardless of import order: %s', async (reverseOrder) => {
-    const airline: Position = { ...position('AAL', 'American Airlines'), id: 'airline', exchange: 'NASDAQ', currency: 'USD' }
+    const airline: Position = { ...position('AAL', 'American Airlines'), id: 'airline', exchange: 'NASDAQ' }
     const miner: Position = { ...position('AAL', 'Anglo American plc'), id: 'miner', exchange: 'LSE' }
     state.store.positions = reverseOrder ? [miner, airline] : [airline, miner]
     await renderPanel({ selectedIdentity: holdingIdentity(airline), selectedRevision: 1 })

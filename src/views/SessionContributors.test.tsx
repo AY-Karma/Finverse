@@ -22,7 +22,6 @@ function snapshotFor(items: { symbol: string; quantity?: number; change?: number
     quotes: Object.fromEntries(positions.map((position, index) => [quoteKey(position), {
       price: 100, change: items[index].change, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo',
     }])),
-    fxRate: null,
   })
 }
 

@@ -67,7 +67,7 @@ it('requires explicit confirmation, blocks Growth for an IDCW holding and retain
   } finally { await act(async () => root.unmount()) }
 })
 
-it.each([{ currency: 'USD' as const }, { currency: 'INR' as const, reportedCurrency: 'EUR' }])('blocks scheme search and confirmation for an unsupported fund currency %j', async (metadata) => {
+it.each([{ reportedCurrency: 'EUR' }, { currency: 'INR' as const, reportedCurrency: 'EUR' }])('blocks scheme search and confirmation for an unsupported fund currency %j', async (metadata) => {
   state.positions = [{ ...state.positions[0], ...metadata }]
   const container = document.createElement('div')
   const root = createRoot(container)
@@ -92,7 +92,7 @@ it('closes a provider confirmation when the holding currency changes after the s
     await act(async () => root.render(<FundSchemeReview />))
     await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
     expect(container.querySelector('[aria-label="Review fund scheme"]')).not.toBeNull()
-    state.positions = [{ ...state.positions[0], currency: 'USD' }]
+    state.positions = [{ ...state.positions[0], reportedCurrency: 'EUR' }]
     await act(async () => root.render(<FundSchemeReview />))
     expect(container.querySelector('[aria-label="Review fund scheme"]')).toBeNull()
     expect(state.confirmFundScheme).not.toHaveBeenCalled()

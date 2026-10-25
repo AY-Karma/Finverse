@@ -255,7 +255,7 @@ export function RulesPanel({ controller }: PanelProps) {
           </select>
         </label>
         <label className="mp-field">
-          {condition === 'daily_move' ? 'Move threshold (%)' : `Price threshold (${selected?.currency === 'USD' ? '$' : '₹'})`}
+          {condition === 'daily_move' ? 'Move threshold (%)' : 'Price threshold (₹)'}
           <input type="number" required min="0.01" step="0.01" value={controller.hideValues ? '' : threshold} onChange={(event) => setThreshold(event.target.value)} />
         </label>
         <p className="mp-muted">{condition === 'daily_move' ? 'Checks the size of either an upward or downward daily move.' : controller.allowExternalData ? 'Uses a fresh provider quote only to suggest a starting level. Enter a value if no quote is available.' : 'External market data is off, so enter a price level manually.'} No background notification is sent.</p>

@@ -35,7 +35,7 @@ export default function App({ initialView }: { initialView: View }) {
   const [researchReturn, setResearchReturn] = useState(false)
   const researchUrl = useRef(initialView === 'research' ? window.location.pathname + window.location.search : '/app/research')
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
-  const { positions, settings } = useStore()
+  const { positions, settings, setSettings } = useStore()
 
   const navigate = useCallback((nextView: View, anchor?: string) => {
     if (window.location.pathname === '/app/research') researchUrl.current = window.location.pathname + window.location.search
@@ -87,13 +87,27 @@ export default function App({ initialView }: { initialView: View }) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand brand--home" type="button" onClick={() => navigate('overview')} aria-label="Go to Overview">
-          <img className="brand-mark" src="/favicon.svg?v=2" alt="" width={30} height={30} />
-          <div>
-            <div className="brand-name">Finverse</div>
-            <div className="brand-sub">Portfolio workspace</div>
-          </div>
-        </button>
+        <div className="sidebar-head">
+          <button className="brand brand--home" type="button" onClick={() => navigate('overview')} aria-label="Go to Overview">
+            <img className="brand-mark" src="/favicon.svg?v=2" alt="" width={30} height={30} />
+            <div>
+              <div className="brand-name">Finverse</div>
+              <div className="brand-sub">Portfolio workspace</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            className={`icon-btn shell-privacy-toggle${settings.hideValues ? ' icon-btn--active' : ''}`}
+            onClick={() => setSettings({ ...settings, hideValues: !settings.hideValues })}
+            title={settings.hideValues ? 'Reveal portfolio values' : 'Hide portfolio values'}
+            aria-label={settings.hideValues ? 'Reveal portfolio values' : 'Hide portfolio values'}
+            aria-pressed={settings.hideValues}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {settings.hideValues ? <><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M14.1 5.6A11.4 11.4 0 0 1 22 12c-.9 1.9-2.5 4.1-4.6 5.6M13.4 17A10.9 10.9 0 0 1 2 12c1.3-2.7 3.6-5.4 7.1-6.7" /><path d="M4 20 20 4" /></> : <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>}
+            </svg>
+          </button>
+        </div>
 
         <nav className="nav">
           <span className="nav-label">Workspace</span>

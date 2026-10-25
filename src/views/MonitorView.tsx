@@ -33,7 +33,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
       <MonitorNewsPanel initialQuery={initialQuery} selectedIdentity={newsSelection.identity} selectedRevision={newsSelection.revision} />
       <div className="mp-panel mp-watch-rules"><RulesPanel controller={controller} /></div>
     </div>
-    <p className="mp-source-note">Prices and NAVs use provider observation times. Estimated impact uses your current units and the reported price change, converted at the available FX rate. Headlines are related coverage, not an explanation of a price move.</p>
+    <p className="mp-source-note">Prices and NAVs use provider observation times. Estimated INR impact uses your current units and the reported price change. Headlines are related coverage, not an explanation of a price move.</p>
     <footer className="mp-status-footer"><MonitorToast message={controller.statusMessage} revision={controller.statusRevision} /></footer>
   </div>
 }

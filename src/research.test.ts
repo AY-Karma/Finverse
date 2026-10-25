@@ -30,7 +30,7 @@ describe('portfolio research links', () => {
     const bse = marketLinks({ ...holding, ticker: '500209', exchange: 'BSE' })
     expect(bse.some((link) => link.url.includes('nseindia'))).toBe(false)
     expect(bse.find((link) => link.label === 'Price chart')?.url).toContain('BSE%3A500209')
-    const global = marketLinks({ ...holding, ticker: 'AAPL', exchange: 'NASDAQ', currency: 'USD' })
+    const global = marketLinks({ ...holding, ticker: 'AAPL', exchange: 'NASDAQ' })
     expect(global.some((link) => link.url.includes('NSE') || link.url.includes('screener'))).toBe(false)
     expect(global.find((link) => link.label === 'Price chart')?.url).toContain('NASDAQ%3AAAPL')
     const fund = { ...holding, type: 'mutual-fund' as const }

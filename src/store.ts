@@ -54,6 +54,7 @@ function sanitizePosition(value: unknown): Position | null {
   const providerSymbol = optionalText('providerSymbol')
   const priceAsOf = persistedDate(value.priceAsOf)
   const exchange = value.exchange === 'NSE' || value.exchange === 'BSE' || value.exchange === 'NASDAQ' || value.exchange === 'NYSE' || value.exchange === 'LSE' || value.exchange === 'OTHER' ? value.exchange : undefined
+  const currency = optionalText('currency')
   return normalizePosition({
     id: persistedText(value.id),
     ticker: persistedText(value.ticker),
@@ -78,14 +79,14 @@ function sanitizePosition(value: unknown): Position | null {
     isin: optionalText('isin'),
     exchange,
     providerSymbol,
-    currency: value.currency === 'USD' ? 'USD' : value.currency === 'INR' ? 'INR' : undefined,
+    currency: value.currency === 'INR' ? 'INR' : undefined,
     sector: optionalText('sector'),
     industry: optionalText('industry'),
     identityVersion: value.identityVersion === 2 ? 2 : undefined,
     exchangeSource: value.exchangeSource === 'explicit' || value.exchangeSource === 'inferred' ? value.exchangeSource : undefined,
     identityIssue: optionalText('identityIssue'),
     reportedExchange: optionalText('reportedExchange'),
-    reportedCurrency: optionalText('reportedCurrency'),
+    reportedCurrency: optionalText('reportedCurrency') || (currency !== 'INR' ? currency : undefined),
   })
 }
 
@@ -132,7 +133,10 @@ export function sanitizeFolios(value: unknown): Folio[] {
 export function saveFolios(folios: Folio[]): boolean {
   if (workspaceWritesBlocked()) return false
   try {
-    localStorage.setItem(FOLIOS_KEY, JSON.stringify(folios.map((folio) => ({ ...folio, positions: folio.positions.map(normalizePosition) }))))
+    localStorage.setItem(FOLIOS_KEY, JSON.stringify(folios.map((folio) => ({
+      ...folio, positions: folio.positions.map(normalizePosition),
+      ...(folio.previousRevision ? { previousRevision: { ...folio.previousRevision, positions: folio.previousRevision.positions.map(normalizePosition) } } : {}),
+    }))))
     return true
   } catch {
     return false
@@ -163,9 +167,9 @@ export function loadFolios(): Folio[] {
 
 export function saveSettings(settings: Settings): boolean {
   if (workspaceWritesBlocked()) return false
-  const { currency, allowExternalData, density, accent, customAccent, mode, hideValues } = settings
+  const { allowExternalData, density, accent, customAccent, mode, hideValues } = settings
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency, allowExternalData, density, accent, customAccent, mode, hideValues }))
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency: 'INR', allowExternalData, density, accent, customAccent, mode, hideValues }))
     return true
   } catch {
     return false
@@ -203,7 +207,7 @@ export function loadSettings(): Settings {
   }
   const customAccent = typeof parsed.customAccent === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.customAccent) ? parsed.customAccent.toLowerCase() : undefined
   const settings: Settings = {
-    currency: parsed.currency === 'USD' ? 'USD' : defaults.currency,
+    currency: defaults.currency,
     allowExternalData: parsed.allowExternalData === true,
     density: parsed.density === 'compact' ? 'compact' : defaults.density,
     accent: parsed.accent === 'emerald' || parsed.accent === 'cobalt' || parsed.accent === 'amber' || parsed.accent === 'custom' ? parsed.accent : defaults.accent,

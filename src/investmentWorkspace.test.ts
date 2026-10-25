@@ -13,19 +13,19 @@ describe('quote coverage and session movement', () => {
   const at = Date.parse('2026-10-01T10:00:00Z')
   const quote = (patch: Partial<LiveQuote> = {}): LiveQuote => ({ price: 110, change: 10, at, source: 'yahoo', ...patch })
   const read = (quotes: Record<string, LiveQuote>) => investmentWorkspace.readSnapshot({
-    folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }], quotes, fxRate: null,
+    folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }], quotes,
   })
 
   it('reuses prepared holdings for new quotes and rejects preparation from a replaced account array', () => {
     const folios = [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }]
     const holdings = investmentWorkspace.prepareHoldings(folios)
-    const first = investmentWorkspace.readSnapshot({ folios, holdings, quotes: {}, fxRate: null })
-    const refreshed = investmentWorkspace.readSnapshot({ folios, holdings, quotes: { [aKey]: quote() }, fxRate: null })
+    const first = investmentWorkspace.readSnapshot({ folios, holdings, quotes: {} })
+    const refreshed = investmentWorkspace.readSnapshot({ folios, holdings, quotes: { [aKey]: quote() } })
     expect(refreshed.positions).toBe(first.positions)
     expect(refreshed.rawPositions).toBe(first.rawPositions)
     expect(refreshed.currentValue).toBe(420)
     const replacement = [{ ...folios[0], positions: [positions[1]] }]
-    const replaced = investmentWorkspace.readSnapshot({ folios: replacement, holdings, quotes: { [aKey]: quote() }, fxRate: null })
+    const replaced = investmentWorkspace.readSnapshot({ folios: replacement, holdings, quotes: { [aKey]: quote() } })
     expect(replaced.positions.map((position) => position.id)).toEqual(['B'])
     expect(replaced.currentValue).toBe(200)
     expect(replaced.quotes).toEqual({})
@@ -90,27 +90,27 @@ describe('quote coverage and session movement', () => {
     expect(snapshot.dailyChange).toBe(400)
     expect(snapshot.dailyChangePct).toBeNull()
   })
-  it('reports partial INR totals and excludes native USD movement even with a display conversion rate', () => {
-    const usd: Position = { id: 'usd', ticker: 'AAPL', name: 'Apple', type: 'stock', exchange: 'NASDAQ', currency: 'USD', providerSymbol: 'AAPL', quantity: 1, buyPrice: 200, invested: 200, lastPrice: 240 }
+  it('reports partial INR totals and excludes unsupported currency movement', () => {
+    const foreign: Position = { id: 'foreign', ticker: 'AAPL', name: 'Apple', type: 'stock', exchange: 'NASDAQ', reportedCurrency: 'EUR', providerSymbol: 'AAPL', quantity: 1, buyPrice: 200, invested: 200, lastPrice: 240 }
     const snapshot = investmentWorkspace.readSnapshot({
-      folios: [{ id: 'mixed', name: 'Mixed', importedAt: 1, positions: [...positions, usd] }],
-      quotes: { [quoteKey(usd)]: quote({ price: 300, change: 100 }) }, fxRate: { usdInr: 90, at: 1 },
+      folios: [{ id: 'mixed', name: 'Mixed', importedAt: 1, positions: [...positions, foreign] }],
+      quotes: { [quoteKey(foreign)]: quote({ price: 300, change: 100 }) },
     })
     expect(snapshot).toMatchObject({ invested: 400, currentValue: 400, unsupportedCurrencyCount: 1, valuationComplete: false, dailyChange: null })
     expect(snapshot.contributions.find((holding) => holding.symbol === 'AAPL')).toMatchObject({ value: 0, priced: false, dailyChange: null, pnl: null })
-    expect(usd).toMatchObject({ invested: 200, lastPrice: 240 })
+    expect(foreign).toMatchObject({ invested: 200, lastPrice: 240 })
   })
 
-  it('keeps the INR session move when an excluded USD quote has a newer IST date', () => {
+  it('keeps the INR session move when an excluded unsupported quote has a newer IST date', () => {
     const hdfc: Position = { id: 'hdfc', ticker: 'HDFCBANK', name: 'HDFC Bank', type: 'stock', exchange: 'NSE', currency: 'INR', quantity: 1, buyPrice: 200, invested: 200, lastPrice: 200 }
-    const apple: Position = { id: 'apple', ticker: 'AAPL', name: 'Apple', type: 'stock', exchange: 'NASDAQ', currency: 'USD', providerSymbol: 'AAPL', quantity: 1, buyPrice: 200, invested: 200, lastPrice: 200 }
+    const apple: Position = { id: 'apple', ticker: 'AAPL', name: 'Apple', type: 'stock', exchange: 'NASDAQ', reportedCurrency: 'EUR', providerSymbol: 'AAPL', quantity: 1, buyPrice: 200, invested: 200, lastPrice: 200 }
     const appleQuote = quote({ price: 240, change: 5, at: Date.parse('2026-10-13T16:00:00-04:00') })
     const snapshot = investmentWorkspace.readSnapshot({
       folios: [{ id: 'mixed', name: 'Mixed', importedAt: 1, positions: [hdfc, apple] }],
       quotes: {
         [quoteKey(hdfc)]: quote({ price: 220, change: 20, at: Date.parse('2026-10-13T15:30:00+05:30') }),
         [quoteKey(apple)]: appleQuote,
-      }, fxRate: null,
+      },
     })
     expect(snapshot).toMatchObject({ currentValue: 220, invested: 200, unsupportedCurrencyCount: 1, valuationComplete: false })
     expect(snapshot.dailyChangeDate).toBe('2026-10-13')
@@ -119,8 +119,8 @@ describe('quote coverage and session movement', () => {
     expect(snapshot.contributions.find((holding) => holding.symbol === 'AAPL')).toMatchObject({ value: 0, dailyChange: null })
     expect(portfolioDataLabels(snapshot)).toMatchObject({ sessionValue: 20, isPartialSession: false, coverageLabel: '1 of 1 INR holdings report changes' })
     const unsupportedOnly = investmentWorkspace.readSnapshot({
-      folios: [{ id: 'usd', name: 'USD', importedAt: 1, positions: [apple] }],
-      quotes: { [quoteKey(apple)]: appleQuote }, fxRate: null,
+      folios: [{ id: 'foreign', name: 'Unsupported currency', importedAt: 1, positions: [apple] }],
+      quotes: { [quoteKey(apple)]: appleQuote },
     })
     expect(unsupportedOnly).toMatchObject({ dailyChange: null, dailyChangeDate: null, reportedDailyChange: null, dailyChangeCount: 0 })
   })
@@ -136,7 +136,7 @@ describe('statement price projections', () => {
   it('derives raw statement-date copies and values all active accounts without changing stored positions', () => {
     const folios = accounts()
     const original = structuredClone(folios)
-    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null })
+    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {} })
     expect(snapshot).toMatchObject({ invested: 1800, currentValue: 2340, pnl: 540, pricedCount: 1 })
     expect(snapshot.positions[0]).toMatchObject({ quantity: 18, lastPrice: 130, priceAsOf: '2026-10-11' })
     expect(snapshot.rawPositions.map((row) => [row.quantity, row.lastPrice, row.priceAsOf])).toEqual([[10, 120, '2026-10-10'], [8, 130, '2026-10-11']])
@@ -149,7 +149,7 @@ describe('statement price projections', () => {
     const folios = accounts()
     folios.forEach((folio) => { folio.statement!.statementDate = null })
     folios[1].positions[0].priceAsOf = '2026-10-12'
-    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null })
+    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {} })
     expect(snapshot.currentValue).toBe(2160)
     expect(snapshot.positions[0]).toMatchObject({ lastPrice: 120, priceAsOf: null })
     expect(snapshot.rawPositions.every((row) => row.priceAsOf === null)).toBe(true)
@@ -178,7 +178,7 @@ describe('exposure buckets', () => {
     }])
     expect(folios).toHaveLength(1)
 
-    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: { usdInr: 90, at: 1 } })
+    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {} })
 
     const equity = snapshot.sectors.find((sector) => sector.label === 'Equity')
     const funds = snapshot.sectors.find((sector) => sector.label === 'Mutual fund')

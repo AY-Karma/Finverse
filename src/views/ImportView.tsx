@@ -22,7 +22,7 @@ interface ImportViewProps {
 const QUANTITY_FORMATTER = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 6 })
 
 export function ImportView({ compact = false, initialStep = 'dropzone', targetAccountId, onImported }: ImportViewProps) {
-  const { previewFile, commitImport, commitImports, folios, positions, settings, liveQuotes, fxRate, removeFolio, undoLastImport, undoImportFolioId, exportPortfolio } = useStore()
+  const { previewFile, commitImport, commitImports, folios, positions, settings, liveQuotes, removeFolio, undoLastImport, undoImportFolioId, exportPortfolio } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [parsing, setParsing] = useState(false)
@@ -120,13 +120,13 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
     }
   }, [previews, folios, operation, accountId, accountAlias, statementDate, complete, expectedStatementId, allowUndatedReplacement])
   const resultingSnapshot = review && !review.error
-    ? investmentWorkspace.readSnapshot({ folios: review.nextFolios, quotes: visibleQuotes(settings?.allowExternalData ?? false, liveQuotes ?? {}), fxRate: fxRate ?? null })
+    ? investmentWorkspace.readSnapshot({ folios: review.nextFolios, quotes: visibleQuotes(settings?.allowExternalData ?? false, liveQuotes ?? {}) })
     : null
   const hideValues = settings?.hideValues ?? false
-  const money = (amount: number) => privateValue(formatCurrency(amount, settings?.currency ?? 'INR', fxRate?.usdInr), hideValues)
+  const money = (amount: number) => privateValue(formatCurrency(amount), hideValues)
   const quantity = (amount: number) => privateValue(QUANTITY_FORMATTER.format(amount), hideValues)
   const nativeAmount = (amount: number | null, currency = 'INR') => privateValue(amount == null ? 'unpriced' : `${amount} ${currency}`, hideValues)
-  const holdingDetail = (position: Position) => `${position.ticker} · Quantity ${quantity(position.quantity)} · Cost ${nativeAmount(position.invested, position.currency)}`
+  const holdingDetail = (position: Position) => `${position.ticker} · Quantity ${quantity(position.quantity)} · Cost ${nativeAmount(position.invested, position.reportedCurrency || position.currency)}`
 
   async function confirmImport() {
     if (previews.length === 0 || busyRef.current || !review || review.error) return

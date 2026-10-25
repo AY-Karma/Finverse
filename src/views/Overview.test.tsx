@@ -15,7 +15,7 @@ vi.mock('../valuation', async (original) => {
   const actual = await original<typeof import('../valuation')>()
   return { ...actual, formatCurrency: (...args: Parameters<typeof actual.formatCurrency>) => { state.format(); return actual.formatCurrency(...args) } }
 })
-vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => null }))
+vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => <section data-history-panel>Holding Price History</section> }))
 vi.mock('./PortfolioPerformance', () => ({ PortfolioPerformance: ({ scope }: { scope: string }) => <section className="portfolio-performance" data-scope={scope}>Portfolio performance</section> }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -27,11 +27,12 @@ describe('overview valuation and visible work', () => {
       { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 80 },
     ]
     const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
-    state.store = { positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }), settings: { ...loadSettings(), hideValues: false }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    state.store = { positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: { ...loadSettings(), hideValues: false }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')
     const root = createRoot(container)
     try {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(container.querySelector('[data-history-panel], .history-panel-placeholder')).toBeNull()
       const panel = container.querySelector('.panel--portfolio')!
       expect(panel.firstElementChild?.className).toBe('portfolio-performance')
       expect(panel.lastElementChild?.getAttribute('aria-label')).toBe('Allocation mix')
@@ -56,7 +57,7 @@ describe('overview valuation and visible work', () => {
     vi.setSystemTime(now)
     const position: Position = { id: 'old', ticker: 'ABC', name: 'ABC', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchangeSource: 'inferred' }
     const folios = ['old-account', 'other-account'].map((id) => ({ id, name: 'Private account', importedAt: now - 21 * 86_400_000, positions: [{ ...position, id: `${id}-holding` }] }))
-    state.store = { positions: [position], rawPositions: [position], snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }), settings: { ...loadSettings(), hideValues: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    state.store = { positions: [position], rawPositions: [position], snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: { ...loadSettings(), hideValues: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
     const onGoTo = vi.fn()
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -70,10 +71,10 @@ describe('overview valuation and visible work', () => {
       expect(notice.textContent).not.toContain('Private account')
       await act(async () => notice.querySelector('button')!.click())
       expect(onGoTo).toHaveBeenCalledWith('settings', 'manage-holdings')
-      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios: [{ ...folios[0], reviewedAt: Date.now() }, folios[1]], quotes: {}, fxRate: null }) }
+      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios: [{ ...folios[0], reviewedAt: Date.now() }, folios[1]], quotes: {} }) }
       await render()
       expect(container.querySelector('.overview-review--folios')).not.toBeNull()
-      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios: folios.map((folio) => ({ ...folio, reviewedAt: Date.now() })), quotes: {}, fxRate: null }) }
+      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios: folios.map((folio) => ({ ...folio, reviewedAt: Date.now() })), quotes: {} }) }
       await render()
       expect(container.querySelector('.overview-review--folios')).toBeNull()
       expect(container.querySelector('.overview-review')?.textContent).toContain('Review listings')
@@ -89,14 +90,14 @@ describe('overview valuation and visible work', () => {
       { id: 'fund', ticker: 'Fund', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
     ]
     const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
-    state.store = { positions: [], rawPositions: [], snapshot: investmentWorkspace.readSnapshot({ folios: [], quotes: {}, fxRate: null }), settings: { ...loadSettings(), allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    state.store = { positions: [], rawPositions: [], snapshot: investmentWorkspace.readSnapshot({ folios: [], quotes: {} }), settings: { ...loadSettings(), allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')
     const root = createRoot(container)
     const render = () => act(async () => root.render(<Overview onGoTo={onGoTo} onRequestImport={vi.fn()} />))
     try {
       await render()
       expect(container.querySelector('.overview-review')).toBeNull()
-      state.store = { ...state.store, positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }) }
+      state.store = { ...state.store, positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }) }
       await render()
       const notice = container.querySelector('.page-head .overview-review')!
       const reviewButton = notice.querySelector('button')!
@@ -119,7 +120,7 @@ describe('overview valuation and visible work', () => {
   it('keeps imported fund XIRRs in the ledger without averaging a portfolio XIRR', async () => {
     const positions: Position[] = [12, 24].map((xirr, index) => ({ id: String(index), ticker: `Fund ${index}`, name: `Fund ${index}`, type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, xirr }))
     const folios = [{ id: 'funds', name: 'Funds', importedAt: Date.now(), positions }]
-    state.store = { positions, rawPositions: positions, folios, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }), liveQuotes: {}, fxRate: null, settings: { ...loadSettings(), allowExternalData: false }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    state.store = { positions, rawPositions: positions, folios, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), liveQuotes: {}, settings: { ...loadSettings(), allowExternalData: false }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')
     const root = createRoot(container)
     try {
@@ -133,7 +134,7 @@ describe('overview valuation and visible work', () => {
       expect(container.textContent).toContain('+24.00%')
       const mergedPositions = positions.map((position) => ({ ...position, ticker: 'Combined Fund', name: 'Combined Fund' }))
       const mergedFolios = [{ ...folios[0], positions: mergedPositions }]
-      const snapshot = investmentWorkspace.readSnapshot({ folios: mergedFolios, quotes: {}, fxRate: null })
+      const snapshot = investmentWorkspace.readSnapshot({ folios: mergedFolios, quotes: {} })
       state.store = { ...state.store, positions: snapshot.positions, rawPositions: mergedPositions, folios: mergedFolios, snapshot }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       expect(container.querySelector('.panel--ledger .table tbody tr td:nth-child(6)')?.textContent).toBe('—')
@@ -151,8 +152,8 @@ describe('overview valuation and visible work', () => {
     ]
     const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
     const liveQuotes = { [quoteKey(positions[0])]: { price: 120, at: Date.parse('2026-10-01T10:00:02Z'), source: 'yahoo' as const } }
-    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: liveQuotes, fxRate: null })
-    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes, fxRate: null, settings: { ...loadSettings(), allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
+    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: liveQuotes })
+    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes, settings: { ...loadSettings(), allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')
     const root = createRoot(container)
     try {
@@ -188,8 +189,8 @@ describe('overview valuation and visible work', () => {
   it('labels incomplete values, calculates covered P&L and formats only visible ledger/ticker data', async () => {
     const positions: Position[] = Array.from({ length: 5000 }, (_, i) => ({ id: String(i), ticker: `HOLD${i}`, name: `Holding ${i}`, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: i === 4999 ? null : 120 }))
     const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
-    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null })
-    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: {}, fxRate: null, settings: { ...loadSettings(), allowExternalData: false }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
+    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {} })
+    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: {}, settings: { ...loadSettings(), allowExternalData: false }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
     state.format.mockClear()
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -216,8 +217,8 @@ describe('overview valuation and visible work', () => {
       [quoteKey(positions[0])]: { price: 120, change: -8, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' as const },
       [quoteKey(positions[1])]: { price: 90, change: 1, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' as const },
     }
-    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes, fxRate: null })
-    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: quotes, fxRate: null, settings: { ...loadSettings(), currency: 'INR', hideValues: false, allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
+    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes })
+    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: quotes, settings: { ...loadSettings(), currency: 'INR', hideValues: false, allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')
     const root = createRoot(container)
     try {
@@ -234,13 +235,13 @@ describe('overview valuation and visible work', () => {
       expect(summary.textContent).not.toContain('on cost')
 
       const gainQuotes = { ...quotes, [quoteKey(positions[0])]: { ...quotes[quoteKey(positions[0])], change: 7 } }
-      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: gainQuotes, fxRate: null }) }
+      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: gainQuotes }) }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       expect(container.querySelector('.daily-brief-copy strong')?.textContent).toBe('Your portfolio gained ₹8.00 in this session.')
       expect(container.querySelector('.daily-brief-stat strong')?.textContent).toBe('+₹8.00')
 
       const flatQuotes = Object.fromEntries(Object.entries(quotes).map(([key, quote]) => [key, { ...quote, change: 0 }]))
-      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: flatQuotes, fxRate: null }) }
+      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: flatQuotes }) }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       expect(container.querySelector('.daily-brief-copy strong')?.textContent).toBe('Your portfolio is unchanged in this session.')
       expect(container.querySelector('.daily-brief-stat strong')?.textContent).toBe('+₹0.00')
@@ -266,8 +267,8 @@ describe('overview valuation and visible work', () => {
     positions[1] = { ...positions[1], type: 'mutual-fund', mfScheme: { code: 123, name: 'B', source: 'confirmed' } }
     const folios = [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }]
     const quotes = { [quoteKey(positions[0])]: { price: 110, change: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' as const } }
-    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes, fxRate: null })
-    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: quotes, fxRate: null, settings: { ...loadSettings(), hideValues: false, allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
+    const snapshot = investmentWorkspace.readSnapshot({ folios, quotes })
+    state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: quotes, settings: { ...loadSettings(), hideValues: false, allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')
     const root = createRoot(container)
     try {
