@@ -6,7 +6,7 @@ import { normalizePosition } from './instruments'
 import type { Folio, PortfolioSnapshot, Settings } from './types'
 import { captureWorkspaceRecords, createWorkspaceArchive, MAX_WORKSPACE_ARCHIVE_BYTES, parseWorkspaceArchive, restoreWorkspaceArchive } from './workspaceArchive'
 
-const settings: Settings = { currency: 'USD', allowExternalData: true, density: 'compact', accent: 'custom', customAccent: '#123abc', mode: 'light', hideValues: true }
+const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'custom', customAccent: '#123abc', mode: 'light', hideValues: true }
 const position = normalizePosition({ id: 'holding-1', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 2, buyPrice: 100, lastPrice: 120, invested: 200, exchange: 'NSE', currency: 'INR', providerSymbol: 'TCS.NS', identityVersion: 2, exchangeSource: 'explicit' })
 const folios: Folio[] = [{ id: 'account-1', name: 'Broker account', importedAt: 100, positions: [position] }]
 const snapshots: PortfolioSnapshot[] = [{ at: 100, value: 240, invested: 200, pnl: 40, holdingCount: 1 }]
@@ -19,6 +19,19 @@ const archive = () => createWorkspaceArchive(folios, settings, snapshots, monito
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear() })
 
 describe('workspace archives', () => {
+  it('preserves legacy native currency metadata when restoring an archive directly', async () => {
+    const original = JSON.parse(JSON.stringify(archive()))
+    original.settings.currency = 'EUR'
+    original.folios[0].positions[0].currency = 'EUR'
+    original.folios[0].positions[0].reportedCurrency = ' '
+    original.monitor = { rules: [], events: [], alerts: [] }
+    await restoreWorkspaceArchive(original, captureWorkspaceRecords())
+    const restored = JSON.parse(localStorage.getItem('finverse:folios')!)[0].positions[0]
+    expect(restored).toMatchObject({ reportedCurrency: 'EUR', invested: 200, lastPrice: 120 })
+    expect(restored.currency).toBeUndefined()
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!).currency).toBe('INR')
+  })
+
   it('rejects a restored fund mapping that contradicts its imported plan or option', () => {
     const archive = createWorkspaceArchive(folios, settings, snapshots, monitor)
     archive.folios[0].positions = [{ ...position, type: 'mutual-fund', name: 'Example Fund Direct IDCW', mfScheme: { code: 1, name: 'Example Fund Regular Growth', source: 'confirmed' } }]

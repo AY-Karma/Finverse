@@ -22,12 +22,9 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
   const latest = performanceHistory[performanceHistory.length - 1]
   const gap = latest ? latest.value - latest.invested : null
   const gapPct = latest?.invested > 0 && gap != null ? gap / latest.invested * 100 : null
-  const currency = settings.currency
-  const value = (amount: number) => formatCurrency(amount, currency, snapshot.fxRate?.usdInr)
-  const axisCurrency = new Intl.NumberFormat('en-IN', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 })
-  const axisValue = (amount: number) => currency === 'USD'
-    ? snapshot.fxRate?.usdInr ? axisCurrency.format(amount / snapshot.fxRate.usdInr) : '—'
-    : axisCurrency.format(amount)
+  const value = (amount: number) => formatCurrency(amount)
+  const axisCurrency = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', notation: 'compact', maximumFractionDigits: 1 })
+  const axisValue = (amount: number) => axisCurrency.format(amount)
 
   return (
     <section className="portfolio-performance chart-open" aria-label="Portfolio performance">

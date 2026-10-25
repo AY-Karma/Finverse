@@ -3,8 +3,9 @@ import { resolveYahooSymbol } from '../live'
 import type { HistoryPoint } from '../live'
 import { instrumentLabel } from '../instruments'
 import { marketData } from '../marketData'
-import type { Currency, Position } from '../types'
+import type { Position } from '../types'
 import { useStore } from '../useStore'
+import { quoteKey } from '../valuation'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { HiddenValuesState } from './HiddenValuesState'
 import './historyPanel.css'
@@ -21,10 +22,48 @@ const RANGES: { label: string; days: number }[] = [
 
 const LINE_COLOR = 'var(--holding-chart-line)'
 const COST_LINE_COLOR = 'var(--holding-chart-cost)'
+const DAY_MS = 24 * 60 * 60 * 1000
 
-function fmtY(v: number, currency: Currency = 'INR'): string {
+type HistoryChartRow = {
+  at: number
+  close: number | undefined
+}
+
+function hasMissingWeekday(previous: number, next: number): boolean {
+  if (next - previous >= 7 * DAY_MS) return true
+  for (let at = previous + DAY_MS; at < next; at += DAY_MS) {
+    const day = new Date(at).getUTCDay()
+    if (day !== 0 && day !== 6) return true
+  }
+  return false
+}
+
+function historyRows(points: HistoryPoint[]): HistoryChartRow[] {
+  let breakBefore = false
+  const dated = points.flatMap((point) => {
+    const at = Date.parse(point?.date)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(point?.date) || !Number.isFinite(at) || new Date(at).toISOString().slice(0, 10) !== point.date) {
+      breakBefore = true
+      return []
+    }
+    const row = { at, close: Number.isFinite(point.close) && point.close > 0 ? point.close : undefined, breakBefore }
+    breakBefore = false
+    return [row]
+  }).sort((a, b) => a.at - b.at)
+  const rows: HistoryChartRow[] = []
+  for (const point of new Map(dated.map((row) => [row.at, row])).values()) {
+    const previous = rows[rows.length - 1]
+    if (previous && previous.close !== undefined && (point.breakBefore || hasMissingWeekday(previous.at, point.at))) {
+      rows.push({ at: previous.at + (point.at - previous.at) / 2, close: undefined })
+    }
+    rows.push({ at: point.at, close: point.close })
+  }
+  return rows
+}
+
+function fmtY(v: number): string {
   return Math.abs(v) >= 1000
-    ? v.toLocaleString(currency === 'USD' ? 'en-US' : 'en-IN', { maximumFractionDigits: 0 })
+    ? v.toLocaleString('en-IN', { maximumFractionDigits: 0 })
     : v.toFixed(2)
 }
 
@@ -61,22 +100,20 @@ function historyOptions(positions: Position[]) {
   })
 }
 
-interface Query {
-  kind: 'equity' | 'mf'
-  label: string
-  position?: Position
-}
-
-interface FetchOutcome {
+interface HistoryResult {
+  key: string
   points: HistoryPoint[]
   usedLabel: string
+  loading: boolean
+  error: string | null
 }
 
-export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
+export function HistoryPanel({ scope, position, active = true }: { scope: ScopeFilter; position?: Position; active?: boolean }) {
   const { positions, settings } = useStore()
+  const boundToPosition = position !== undefined
   const all = useMemo(
-    () => positions.filter((p) => (p.ticker || '').trim() !== '' || (p.name || '').trim() !== ''),
-    [positions],
+    () => boundToPosition ? [] : positions.filter((p) => (p.ticker || '').trim() !== '' || (p.name || '').trim() !== ''),
+    [positions, boundToPosition],
   )
   // The dropdown mirrors the top All / Equity / Mutual Funds filter, so a
   // scoped board only offers scoped options.
@@ -91,17 +128,27 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
   const [committedId, setCommittedId] = useState<string | null>(null)
   const [rangeDays, setRangeDays] = useState(366)
   const [retryAttempt, setRetryAttempt] = useState(0)
-  const [points, setPoints] = useState<HistoryPoint[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [usedLabel, setUsedLabel] = useState('')
+  const [result, setResult] = useState<HistoryResult | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   // Until the user commits a pick, default to the first holding in scope so the
   // panel shows a chart immediately, and re-defaults when the scope changes.
   const selectedOption = options.find(({ position }) => position.id === committedId) ?? options[0]
-  const holding = selectedOption?.position
-  const holdingLabel = selectedOption?.label ?? ''
+  const holding = position ?? selectedOption?.position
+  const holdingLabel = position ? instrumentLabel(position) : selectedOption?.label ?? ''
+  const holdingRef = useRef(holding)
+  holdingRef.current = holding
+  const requestIdentity = holding ? JSON.stringify([
+    holding.id, quoteKey(holding), holding.type, holding.providerSymbol, holding.exchange,
+    holding.currency, holding.reportedCurrency, holding.isin, holding.identityIssue,
+    holding.type === 'mutual-fund' ? holding.name : holding.ticker, holding.mfScheme?.code,
+  ]) : null
+  const requestKey = JSON.stringify([requestIdentity, rangeDays, retryAttempt])
+  const currentResult = active && settings.allowExternalData && result?.key === requestKey ? result : null
+  const points = currentResult?.points ?? []
+  const loading = currentResult?.loading ?? false
+  const error = currentResult?.error ?? null
+  const usedLabel = currentResult?.usedLabel ?? ''
 
   useEffect(() => {
     if (committedId && !options.some(({ position }) => position.id === committedId)) setCommittedId(null)
@@ -111,63 +158,36 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     setText(holdingLabel)
   }, [holdingLabel])
 
-  const query = useMemo<Query | null>(() => {
-    if (holding) {
-      return holding.type === 'mutual-fund'
-        ? {
-            kind: 'mf',
-            label: holdingLabel,
-            position: holding,
-          }
-        : { kind: 'equity', label: holdingLabel, position: holding }
-    }
-    return null
-  }, [holdingLabel, holding?.id, holding?.name, holding?.providerSymbol, holding?.ticker, holding?.type, holding?.instrumentKey, holding?.mfScheme?.code, holding?.identityIssue, holding?.exchange, holding?.currency, holding?.isin])
-
-  const fetchOutcome = async (q: Query, from: Date, to: Date, signal: AbortSignal): Promise<FetchOutcome> => {
-    if (q.position) {
-      const pts = await marketData.history(q.position, from, to, signal)
-      if (pts.length > 0) return { points: pts, usedLabel: q.kind === 'mf' ? 'mfapi.in' : resolveYahooSymbol(q.position) ?? q.label }
-    }
-    return { points: [], usedLabel: q.kind === 'mf' ? 'mfapi.in' : resolveYahooSymbol(q.position!) ?? q.label }
-  }
-
   useEffect(() => {
-    if (!settings.allowExternalData || !query) {
-      setPoints([])
-      setError(null)
-      setLoading(false)
+    const requestedHolding = holdingRef.current
+    if (!active || !settings.allowExternalData || !requestedHolding) {
+      setResult(null)
       return
     }
     let alive = true
     const controller = new AbortController()
-    setLoading(true)
-    setPoints([])
-    setError(null)
+    const key = JSON.stringify([requestIdentity, rangeDays, retryAttempt])
+    const label = instrumentLabel(requestedHolding)
+    const isMf = requestedHolding.type === 'mutual-fund'
+    const usedLabel = isMf ? 'mfapi.in' : resolveYahooSymbol(requestedHolding) ?? label
+    setResult({ key, points: [], usedLabel, loading: true, error: null })
     const to = new Date()
     const from = new Date(to.getTime() - rangeDays * 24 * 60 * 60 * 1000)
     const run = async () => {
       try {
-        const out = await fetchOutcome(query, from, to, controller.signal)
+        const points = await marketData.history(requestedHolding, from, to, controller.signal)
         if (!alive) return
-        setPoints(out.points)
-        setUsedLabel(out.usedLabel)
-        if (out.points.length === 0) {
-          setError(
-            query.kind === 'mf'
-              ? `Couldn't find “${query.label}” on mfapi.in, or no NAVs exist for this range.`
-              : `No price data for “${query.label}”. Retry, or check the ticker, exchange, or provider symbol.`,
-          )
-        }
+        const error = points.length > 0 ? null : requestedHolding.type === 'other'
+          ? `Price history is unavailable for “${label}” from the current provider.`
+          : isMf
+            ? `Couldn't find “${label}” on mfapi.in, or no NAVs exist for this range.`
+            : `No price data for “${label}”. Retry, or check the ticker, exchange, or provider symbol.`
+        setResult({ key, points, usedLabel, loading: false, error })
       } catch {
         if (!alive) return
-        setError(
-          query.kind === 'mf'
-            ? `Couldn't load NAV history for “${query.label}”. Please try again.`
-            : `Couldn't load price history for “${query.label}”. Please try again.`,
-        )
-      } finally {
-        if (alive) setLoading(false)
+        setResult({ key, points: [], usedLabel, loading: false, error: isMf
+          ? `Couldn't load NAV history for “${label}”. Please try again.`
+          : `Couldn't load price history for “${label}”. Please try again.` })
       }
     }
     void run()
@@ -175,14 +195,10 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
       alive = false
       controller.abort()
     }
-  }, [query, rangeDays, retryAttempt, settings.allowExternalData])
+  }, [requestIdentity, rangeDays, retryAttempt, active, settings.allowExternalData])
 
   const chartData = useMemo(
-    () =>
-      points.map((p) => ({
-        at: +new Date(`${p.date}T00:00:00`),
-        close: p.close,
-      })),
+    () => historyRows(points),
     [points],
   )
 
@@ -207,10 +223,10 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
     }
   }, [holding, points])
 
-  const isMf = query?.kind === 'mf'
+  const isMf = holding?.type === 'mutual-fund'
   const nativeCurrency = holding?.currency ?? 'INR'
-  const currencySymbol = nativeCurrency === 'USD' ? '$' : '₹'
-  const formatPrice = (value: number) => `${currencySymbol}${fmtY(value, nativeCurrency)}`
+  const currencySymbol = '\u20b9'
+  const formatPrice = (value: number) => `${currencySymbol}${fmtY(value)}`
   const sourceLabel = isMf ? `NAV · ${usedLabel}` : usedLabel ? `daily close · ${usedLabel}` : 'daily close · Yahoo NSE'
   const rangeLabel = RANGES.find((r) => r.days === rangeDays)?.label.toLowerCase() ?? 'range'
 
@@ -230,10 +246,10 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
       <div className="panel-head">
         <div className="panel-head-titles">
           <span className="panel-title">Holding Price History</span>
-          <span className="section-index">04 · Trends</span>
+          {!position && <span className="section-index">06 · Trends</span>}
         </div>
         {!settings.hideValues && <div className="history-tools">
-          <div className="history-picker">
+          {!position && <div className="history-picker">
             <input
               ref={inputRef}
               className="input history-input"
@@ -254,7 +270,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
             <button className="btn btn--primary btn--small history-track" onClick={commit} disabled={!text.trim()}>
               {error && norm(text) === norm(holdingLabel) ? 'Retry' : 'Track'}
             </button>
-          </div>
+          </div>}
           <div className="history-range" role="group" aria-label="Date range">
             {RANGES.map((r) => (
               <button
@@ -276,7 +292,9 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
           <HiddenValuesState />
         ) : !settings.allowExternalData ? (
           <p className="hint muted">Enable external market data in Settings to fetch price history.</p>
-        ) : !query ? (
+        ) : !active ? (
+          <p className="hint muted">Open this view to load price history.</p>
+        ) : !holding ? (
           <p className="hint muted">Select a holding from your portfolio to plot its history.</p>
         ) : (
           <div className="history-stage">
@@ -284,9 +302,9 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
               <>
                 <div className="history-summary">
                   <div className="history-summary-main">
-                    <span className="history-name sym" title={query.label}>{query.label}</span>
+                    <span className="history-name sym" title={holdingLabel}>{holdingLabel}</span>
                     {rangeChange && <div className="history-quote">
-                      <span className="history-last"><small>{currencySymbol}</small>{fmtY(rangeChange.last, nativeCurrency)}</span>
+                      <span className="history-last"><small>{currencySymbol}</small>{fmtY(rangeChange.last)}</span>
                       <span className={`history-delta ${rangeChange.pct >= 0 ? 'up' : 'down'}`}>
                         {rangeChange.change >= 0 ? '+' : '-'}{formatPrice(Math.abs(rangeChange.change))}
                         <span>({rangeChange.pct >= 0 ? '+' : ''}{rangeChange.pct.toFixed(2)}%)</span>
@@ -301,7 +319,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                   <div className="history-chart" style={{ opacity: loading ? 0.4 : 1, transition: 'opacity 0.15s ease' }}>
                     {points.length >= 2 ? (
                       <InteractiveTrendChart
-                        key={`${holding?.id ?? query.label}-${rangeDays}`}
+                        key={`${requestIdentity}-${rangeDays}`}
                         rows={chartData}
                         lines={[{ key: 'close', label: isMf ? 'NAV' : 'Close', color: LINE_COLOR }]}
                         valueFormatter={formatPrice}
@@ -319,7 +337,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                   </div>
                   {loading && (
                     <div className="history-overlay">
-                      <span>Fetching {query.label}…</span>
+                      <span>Fetching {holdingLabel}…</span>
                     </div>
                   )}
                 </div>
@@ -332,7 +350,7 @@ export function HistoryPanel({ scope }: { scope: ScopeFilter }) {
                 )}
               </>
             )}
-            {error && <p className="hint history-error down" role="alert">{error}</p>}
+            {error && <div className="hint history-error down" role="alert">{error}{position && <button type="button" className="btn btn--ghost btn--small" onClick={() => setRetryAttempt((attempt) => attempt + 1)}>Retry</button>}</div>}
             {!loading && points.length < 2 && !error && <p className="hint muted history-empty">Not enough data in this range.</p>}
           </div>
         )}

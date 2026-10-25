@@ -1,4 +1,4 @@
-import type { Folio, FxRate, LiveQuote, PortfolioSnapshot, Position } from './types'
+import type { Folio, LiveQuote, PortfolioSnapshot, Position } from './types'
 import { assetTypeLabel, instrumentLabel, normalizePosition } from './instruments'
 import { combinePositions, computePortfolioStats, effectivePrice, hasSupportedValuationCurrency, positionPnl, positionsWithStatementDates, positionValue, quoteKey } from './valuation'
 
@@ -29,7 +29,6 @@ export interface InvestmentSnapshot {
   rawPositions: Position[]
   positions: Position[]
   quotes: Record<string, LiveQuote>
-  fxRate: FxRate | null
   invested: number
   pricedInvested: number
   pricedCount: number
@@ -58,7 +57,6 @@ export interface InvestmentSnapshot {
 interface WorkspaceInput {
   folios: Folio[]
   quotes: Record<string, LiveQuote>
-  fxRate: FxRate | null
   history?: PortfolioSnapshot[]
   holdings?: PreparedHoldings
 }
@@ -202,7 +200,6 @@ export const investmentWorkspace: InvestmentWorkspace = {
       rawPositions,
       positions,
       quotes,
-      fxRate: input.fxRate,
       invested: stats.invested,
       pricedInvested: stats.pricedInvested,
       pricedCount: stats.pricedCount,

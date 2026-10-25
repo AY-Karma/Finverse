@@ -40,12 +40,13 @@ describe('workspace settings', () => {
     await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     expect([...container.querySelectorAll('.settings-nav-copy strong')].map((item) => item.textContent)).toEqual(['Preferences', 'Data & privacy'])
     expect(container.querySelector('.settings-preferences > .settings-group')?.nextElementSibling?.getAttribute('aria-label')).toBe('Manage holdings')
-    const currency = container.querySelector<HTMLSelectElement>('#currency')!
+    expect(container.querySelector('#currency')).toBeNull()
+    const density = container.querySelector<HTMLSelectElement>('#density')!
     await act(async () => {
-      currency.value = 'USD'
-      currency.dispatchEvent(new Event('change', { bubbles: true }))
+      density.value = 'compact'
+      density.dispatchEvent(new Event('change', { bubbles: true }))
     })
-    expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, currency: 'USD' })
+    expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, density: 'compact' })
   })
 
   it('opens listing review beside preferences, provides a separate scroll region, and restores focus on close', async () => {

@@ -1,4 +1,4 @@
-import type { Currency, Folio, LiveQuote, Position } from './types'
+import type { Folio, LiveQuote, Position } from './types'
 import { instrumentKey, instrumentLabel } from './instruments'
 
 export interface Allocation {
@@ -19,10 +19,10 @@ export interface PortfolioStats {
   allocations: Allocation[]
 }
 
-/** Portfolio amounts are INR-denominated; native non-INR amounts need a separate conversion model. */
+/** Only supported rupee amounts contribute to portfolio totals. */
 export function hasSupportedValuationCurrency(position: Position): boolean {
-  return !position.reportedCurrency && position.currency !== 'USD'
-    && !(position.currency == null && (position.exchange === 'NASDAQ' || position.exchange === 'NYSE' || position.exchange === 'LSE'))
+  return !position.reportedCurrency && (position.currency == null || position.currency === 'INR')
+    && (position.exchange == null || position.exchange === 'NSE' || position.exchange === 'BSE' || position.exchange === 'OTHER')
 }
 
 /** Stable key shared by imports, quote fetching, and every valuation view. */
@@ -66,7 +66,7 @@ export function nativePrice(position: Position, quotes: Record<string, LiveQuote
   return usableImportedPrice(position) ? position.lastPrice : null
 }
 
-/** INR valuation prefers live quotes and excludes native currencies without a conversion model. */
+/** INR valuation prefers live quotes and excludes unsupported currencies. */
 export function effectivePrice(position: Position, quotes: Record<string, LiveQuote> = {}): number | null {
   return hasSupportedValuationCurrency(position) ? nativePrice(position, quotes) : null
 }
@@ -325,27 +325,17 @@ export function portfolioPulse(
 const MINUS_SIGN = '\u2212'
 const currencyFormatters = new Map<string, Intl.NumberFormat>()
 
-/** Format INR portfolio values in the selected display currency. */
-export function formatCurrency(
-  amountInInr: number,
-  currency: Currency = 'INR',
-  usdInrRate?: number | null,
-): string {
-  const displayValue = currency === 'USD'
-    ? usdInrRate != null && Number.isFinite(usdInrRate) && usdInrRate > 0
-      ? amountInInr / usdInrRate
-      : null
-    : amountInInr
-  if (displayValue == null) return '—'
-  const maximumFractionDigits = Math.abs(displayValue) >= 1000 ? 0 : 2
-  const key = `${currency}:${maximumFractionDigits}`
+/** Format rupee amounts using Indian digit grouping. */
+export function formatCurrency(amount: number): string {
+  const maximumFractionDigits = Math.abs(amount) >= 1000 ? 0 : 2
+  const key = String(maximumFractionDigits)
   let formatter = currencyFormatters.get(key)
   if (!formatter) {
-    formatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits })
+    formatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits })
     currencyFormatters.set(key, formatter)
   }
-  const formatted = formatter.format(displayValue)
-  return displayValue < 0 ? formatted.replace('-', MINUS_SIGN) : formatted
+  const formatted = formatter.format(amount)
+  return amount < 0 ? formatted.replace('-', MINUS_SIGN) : formatted
 }
 
 export function formatPercent(value: number): string {

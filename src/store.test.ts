@@ -9,9 +9,15 @@ afterEach(() => {
 })
 
 describe('settings persistence', () => {
+  it('normalizes legacy currency preferences to INR', () => {
+    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), currency: 'EUR' }))
+    expect(loadSettings().currency).toBe('INR')
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!).currency).toBe('INR')
+  })
+
   it('removes retired connection settings and browser data while preserving preferences and portfolios', () => {
     const preferences = {
-      currency: 'USD', allowExternalData: true, density: 'compact', accent: 'custom',
+      currency: 'INR', allowExternalData: true, density: 'compact', accent: 'custom',
       customAccent: '#7c6cff', mode: 'light', hideValues: true,
     }
     localStorage.setItem('finverse:settings', JSON.stringify({
@@ -84,6 +90,19 @@ describe('saveFolios', () => {
 })
 
 describe('sanitizeFolios', () => {
+  it.each(['stock', 'etf', 'mutual-fund', 'other'])('retains unsupported %s currency metadata in active and previous holdings', (type) => {
+    const position = { id: 'foreign', ticker: 'EXAMPLE', name: 'Example', type, quantity: 1, buyPrice: 100, lastPrice: 120, invested: 100, currency: 'EUR' }
+    const statement = { id: 'old', fileName: 'old.csv', statementDate: '2026-10-01', completeness: 'complete' }
+    const [folio] = sanitizeFolios([{ id: 'account', name: 'Broker', importedAt: 2, positions: [position], previousRevision: { statement, importedAt: 1, positions: [position] } }])
+    expect(saveFolios([folio])).toBe(true)
+    const restored = loadFolios()[0]
+    for (const holding of [restored.positions[0], restored.previousRevision!.positions[0]]) {
+      expect(holding).toMatchObject({ reportedCurrency: 'EUR', invested: 100, lastPrice: 120 })
+      expect(holding.currency).toBeUndefined()
+      expect(holding.identityIssue).toContain('unsupported')
+    }
+  })
+
   it('preserves reviewed scheme mappings on save/reload and rekeys legacy fund identities', () => {
     const mfScheme = { code: 2, name: 'Example Equity Fund Direct IDCW', source: 'confirmed' as const }
     const folios = [{ id: 'folio', name: 'Portfolio', importedAt: 1, positions: [{ id: 'fund', ticker: 'Fund', name: 'Fund', type: 'mutual-fund' as const, quantity: 1, buyPrice: 100, lastPrice: 120, invested: 100, instrumentKey: 'MF:fund', mfScheme }] }]

@@ -7,10 +7,11 @@ import { PRIVATE_VALUE_MASK } from '../privacy'
 import type { Position, Settings } from '../types'
 import { ResearchView } from './ResearchView'
 
-const state = vi.hoisted(() => ({ positions: [] as Position[], liveQuotes: {}, fxRate: null, settings: {} as Settings, resolvePath: vi.fn(), history: vi.fn() }))
+const state = vi.hoisted(() => ({ positions: [] as Position[], liveQuotes: {}, settings: {} as Settings, resolvePath: vi.fn(), history: vi.fn() }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
 vi.mock('../research', async (original) => ({ ...await original<typeof import('../research')>(), resolveScreenerCompanyPath: state.resolvePath }))
 vi.mock('../marketData', () => ({ marketData: { history: state.history } }))
+vi.mock('./HistoryPanel', () => ({ HistoryPanel: ({ position, active }: { position: Position; active: boolean }) => <div className="history-panel" data-history-holding={position.id} data-active={String(active)} /> }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const position: Position = { id: 'one', ticker: 'TCS', name: 'Tata Consultancy Services', type: 'stock', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120, exchange: 'NSE' }
 let container: HTMLDivElement
@@ -36,6 +37,25 @@ async function click(text: string) {
 }
 
 describe('research desk', () => {
+  it.each(['stock', 'etf', 'mutual-fund', 'other'] as const)('places the shared history directly below Your holding for %s', async (type) => {
+    state.positions = [{ ...position, type }]
+    await render()
+    const summary = [...container.querySelectorAll('.rd-section')].find((section) => section.querySelector('h3')?.textContent === 'Your holding')!
+    expect(summary.nextElementSibling?.classList.contains('rd-history')).toBe(true)
+    expect(summary.nextElementSibling?.querySelector('[data-history-holding="one"]')).not.toBeNull()
+    expect(container.querySelectorAll('.rd-history')).toHaveLength(1)
+  })
+
+  it('keeps shared history attached to the selected holding and passes activity state', async () => {
+    state.positions = [position, { ...position, id: 'two', ticker: 'INFY', name: 'Infosys' }]
+    await render()
+    const row = container.querySelector<HTMLButtonElement>('[data-holding-id="two"]')!
+    await act(async () => row.click())
+    expect(container.querySelector('.history-panel')?.getAttribute('data-history-holding')).toBe('two')
+    await render(false)
+    expect(container.querySelector('.history-panel')?.getAttribute('data-active')).toBe('false')
+  })
+
   it('renders a bounded list and resolves only the selected company, cancelling abandoned requests', async () => {
     state.settings.allowExternalData = true
     state.positions = Array.from({ length: 5000 }, (_, index) => ({ ...position, id: String(index), ticker: `HOLD${index}`, name: `Holding ${String(index).padStart(4, '0')}` }))

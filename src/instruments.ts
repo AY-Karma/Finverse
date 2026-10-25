@@ -1,4 +1,4 @@
-import type { AssetType, Currency, Exchange, Folio, Position } from './types'
+import type { AssetType, Exchange, Folio, Position } from './types'
 import { hasCompatibleFundScheme } from './fundSchemes'
 import { isMarketSymbol } from './marketDataProtocol'
 
@@ -37,10 +37,8 @@ function normalizeListing(position: Position): Position {
     : explicitExchange || reportedExchange ? 'OTHER'
       : symbolExchange(position.ticker) || symbolExchange(clean(position.providerSymbol)) || 'NSE'
   const exchangeSource = position.exchangeSource || (explicitExchange || reportedExchange ? 'explicit' : 'inferred')
-  const reportedCurrency = clean(position.reportedCurrency)
-  const currency: Currency | undefined = position.currency === 'USD' || position.currency === 'INR' ? position.currency
-    : exchange === 'NASDAQ' || exchange === 'NYSE' ? 'USD' : exchange === 'LSE' ? undefined : 'INR'
-  const expectedCurrency = exchange === 'NSE' || exchange === 'BSE' ? 'INR' : exchange === 'NASDAQ' || exchange === 'NYSE' ? 'USD' : undefined
+  const { reportedCurrency, currency } = position
+  const supportedExchange = exchange === 'NSE' || exchange === 'BSE'
   const providerSuffix = exchange === 'BSE' ? 'BO' : exchange === 'NSE' ? 'NS' : ''
   const providerSymbol = clean(position.providerSymbol).toUpperCase()
     || (providerSuffix ? `${ticker}.${providerSuffix}` : exchange === 'OTHER' ? '' : ticker)
@@ -48,7 +46,7 @@ function normalizeListing(position: Position): Position {
   let issue: string | undefined
   if (exchange === 'OTHER') issue = `The reported exchange ${reportedExchange || explicitExchange || 'is unknown'} needs review.`
   else if (reportedCurrency || !currency) issue = `The reported currency ${reportedCurrency || 'is unknown'} is unsupported. Imported amounts are retained for review.`
-  else if (expectedCurrency && currency !== expectedCurrency) issue = 'The currency conflicts with the listing venue. Confirm the native quote currency.'
+  else if (!supportedExchange) issue = 'Only NSE and BSE listings are supported.'
   else if (type !== 'stock' && type !== 'etf') issue = 'Confirm the supported holding type before using market data.'
   else if (isin && !ISIN_PATTERN.test(isin)) issue = 'The ISIN is invalid. Correct it before using market data.'
   else if (ISIN_PATTERN.test(ticker) && canonicalSymbol(providerSymbol) === ticker) issue = 'An ISIN alone does not identify a supported listing. Confirm the ticker and venue.'
@@ -77,27 +75,47 @@ function listingKey(position: Position): string {
 
 export function listingIdentity(position: Position): string {
   if (position.type === 'mutual-fund') {
+    if (unsupportedCurrency(position) || hasForeignExchange(position)) return `MF:unresolved:${position.id}`
     return hasCompatibleFundScheme(position) ? `MF:mfapi:${position.mfScheme!.code}` : `MF:${clean(position.name || position.ticker).toLowerCase()}`
   }
-  return listingKey(normalizeListing(position))
+  return listingKey(normalizePosition(position))
 }
 
 /** Recomputed, versioned listing identity shared by valuation, quotes and research. */
 export function instrumentKey(position: Position): string { return listingIdentity(position) }
 
 export function needsInstrumentReview(position: Position): boolean {
-  return position.type !== 'mutual-fund' && (!!position.identityIssue || position.exchangeSource !== 'explicit')
+  return !!position.identityIssue || (position.type !== 'mutual-fund' && position.exchangeSource !== 'explicit')
+}
+
+export function hasInrDenomination(position: Pick<Position, 'currency' | 'reportedCurrency'>): boolean {
+  return position.currency === 'INR' && !position.reportedCurrency
+}
+
+function hasForeignExchange(position: Position): boolean {
+  return !!position.exchange && !['NSE', 'BSE', 'OTHER'].includes(position.exchange)
+}
+
+function unsupportedCurrency(position: Position): string | undefined {
+  const reported = clean(position.reportedCurrency)
+    || (position.currency && position.currency !== 'INR' ? String(position.currency).trim() : '')
+  if (reported) return reported
+  if (hasForeignExchange(position) && !position.currency) return 'Unknown'
+  return undefined
 }
 
 export function normalizePosition(position: Position): Position {
+  const reportedCurrency = unsupportedCurrency(position)
+  position = { ...position, currency: reportedCurrency ? undefined : 'INR', reportedCurrency }
   if (position.type !== 'mutual-fund') {
     const normalized = normalizeListing(position)
     return { ...normalized, instrumentKey: listingKey(normalized) }
   }
   return {
     ...position, ticker: clean(position.ticker), instrumentKey: listingIdentity(position),
-    mfScheme: hasCompatibleFundScheme(position) ? position.mfScheme : undefined,
-    currency: position.currency || 'INR',
+    mfScheme: !hasForeignExchange(position) && hasCompatibleFundScheme(position) ? position.mfScheme : undefined,
+    identityIssue: reportedCurrency ? `The reported currency ${reportedCurrency} is unsupported. Imported amounts are retained for review.`
+      : hasForeignExchange(position) ? 'Only NSE and BSE listings are supported.' : position.identityIssue,
     sector: clean(position.sector || position.category) || undefined,
     industry: clean(position.industry || position.subCategory) || undefined,
   }

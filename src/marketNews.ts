@@ -182,7 +182,7 @@ function holdingNewsRegion(position: Position): NewsRegion {
   if (position.exchange === 'NASDAQ' || position.exchange === 'NYSE') return 'US'
   if (position.exchange === 'LSE') return 'GB'
   if (position.exchange === 'NSE' || position.exchange === 'BSE') return 'IN'
-  return position.currency === 'USD' ? 'US' : 'IN'
+  return 'IN'
 }
 
 export function eligibleHoldings(positions: Position[]): { identity: string; ticker: string; name: string; region: NewsRegion }[] {

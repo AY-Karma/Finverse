@@ -1,7 +1,7 @@
 import { instrumentLabel } from './instruments'
 import { freshQuote, holdingIdentity, usableQuote } from './monitor'
-import type { Currency, FxRate, LiveQuote, Position } from './types'
-import { combinePositions, nativePrice, quoteKey } from './valuation'
+import type { LiveQuote, Position } from './types'
+import { combinePositions, hasSupportedValuationCurrency, nativePrice, quoteKey } from './valuation'
 
 export type ActivityFreshness = 'recent' | 'stale' | 'imported' | 'unavailable'
 
@@ -12,8 +12,7 @@ export interface HoldingActivity {
   ticker: string
   name: string
   type: Position['type']
-  assetCurrency: Currency
-  /** Price in the asset's currency. Contribution is in the display currency. */
+  /** Price and contribution are in INR. */
   price: number | null
   source: string | null
   observedAt: number | null
@@ -29,7 +28,6 @@ export interface HoldingActivity {
 export interface PortfolioActivity {
   holdings: HoldingActivity[]
   movers: HoldingActivity[]
-  currency: Currency
   summary: {
     largestImpact: HoldingActivity | null
     latestObservedAt: number | null
@@ -47,7 +45,6 @@ export interface PortfolioActivity {
     unavailable: number
     movement: number
     impact: number
-    fxUnavailable: number
     gainers: number | null
     decliners: number | null
     flat: number | null
@@ -57,8 +54,6 @@ export interface PortfolioActivity {
 interface ActivityInput {
   positions: Position[]
   quotes: Record<string, LiveQuote>
-  fxRate?: FxRate | null
-  currency?: Currency
   hideValues?: boolean
   now?: number
 }
@@ -67,20 +62,6 @@ const SOURCE_LABELS: Record<LiveQuote['source'], string> = {
   yahoo: 'Yahoo Finance',
   'nse-close': 'NSE close',
   nav: 'Published NAV',
-}
-
-function marketTimeZone(position: Position): string {
-  if (position.type === 'mutual-fund' || position.exchange === 'NSE' || position.exchange === 'BSE') return 'Asia/Kolkata'
-  if (position.exchange === 'LSE') return 'Europe/London'
-  return position.currency === 'USD' || position.exchange === 'NASDAQ' || position.exchange === 'NYSE'
-    ? 'America/New_York' : 'Asia/Kolkata'
-}
-
-function conversionFactor(from: Currency, to: Currency, fxRate: FxRate | null | undefined): number | null {
-  if (from === to) return 1
-  const rate = fxRate?.usdInr
-  if (rate == null || !Number.isFinite(rate) || rate <= 0) return null
-  return from === 'USD' ? rate : 1 / rate
 }
 
 function finiteValue(value: number): number | null {
@@ -114,7 +95,7 @@ function moverOrder(left: HoldingActivity, right: HoldingActivity): number {
 
 /** Local projection of holdings, provider observations, and currency-safe impact estimates. */
 export function buildPortfolioActivity({
-  positions, quotes, fxRate, currency = 'INR', hideValues = false, now = Date.now(),
+  positions, quotes, hideValues = false, now = Date.now(),
 }: ActivityInput): PortfolioActivity {
   const combined = combinePositions(positions)
   const keyCounts = new Map<string, number>()
@@ -129,17 +110,14 @@ export function buildPortfolioActivity({
     const quote = usableQuote(candidate, now)
       && (position.type === 'mutual-fund' ? candidate.source === 'nav' : candidate.source !== 'nav')
       ? candidate : undefined
-    const assetCurrency = position.currency ?? (position.exchange === 'NASDAQ' || position.exchange === 'NYSE' ? 'USD' : 'INR')
-    const currencyKnown = !position.reportedCurrency && !(position.currency == null && position.exchange === 'LSE')
-    const factor = currencyKnown ? conversionFactor(assetCurrency, currency, fxRate) : null
-    const price = currencyKnown ? nativePrice(position, quote ? { [key]: quote } : {}) : null
-    const timeZone = marketTimeZone(position)
+    const supportedCurrency = hasSupportedValuationCurrency(position)
+    const price = supportedCurrency ? nativePrice(position, quote ? { [key]: quote } : {}) : null
     const recent = quote != null && freshQuote(quote, now)
     const change = recent ? reportedChange(quote) : null
     const changePct = recent ? reportedChangePct(quote, change) : null
     const validQuantity = Number.isFinite(position.quantity) && position.quantity >= 0
-    const value = price != null && factor != null && validQuantity ? finiteValue(price * position.quantity * factor) : null
-    const dayContribution = change != null && factor != null && validQuantity ? finiteValue(change * position.quantity * factor) : null
+    const value = price != null && validQuantity ? finiteValue(price * position.quantity) : null
+    const dayContribution = change != null && supportedCurrency && validQuantity ? finiteValue(change * position.quantity) : null
     const movement = changePct ?? change
     const holding: HoldingActivity = {
       id: position.id,
@@ -148,11 +126,10 @@ export function buildPortfolioActivity({
       ticker: instrumentLabel(position),
       name: position.name,
       type: position.type,
-      assetCurrency,
       price,
       source: quote ? SOURCE_LABELS[quote.source] : price != null ? 'Imported price' : null,
       observedAt: quote?.at ?? null,
-      marketTimeZone: timeZone,
+      marketTimeZone: 'Asia/Kolkata',
       freshness: quote ? recent ? 'recent' : 'stale' : price != null ? 'imported' : 'unavailable',
       changePct,
       dayContribution,
@@ -160,7 +137,7 @@ export function buildPortfolioActivity({
       trend: movement == null || movement === 0 ? 'neutral' : movement > 0 ? 'up' : 'down',
       movementLabel: position.type === 'mutual-fund' ? 'NAV move' : 'Day move',
     }
-    return { holding, value, hasMovement: movement != null, missingFx: factor == null }
+    return { holding, value, hasMovement: movement != null }
   })
 
   const totalValue = rows.reduce((sum, row) => sum + (row.value ?? 0), 0)
@@ -194,7 +171,6 @@ export function buildPortfolioActivity({
     unavailable: holdings.filter((row) => row.freshness === 'unavailable').length,
     movement: reported.length,
     impact: reported.filter((row) => row.dayContribution != null).length,
-    fxUnavailable: rows.filter((row) => row.missingFx).length,
     gainers: hideValues ? null : reported.filter((row) => row.trend === 'up').length,
     decliners: hideValues ? null : reported.filter((row) => row.trend === 'down').length,
     flat: hideValues ? null : reported.filter((row) => row.trend === 'neutral').length,
@@ -210,5 +186,5 @@ export function buildPortfolioActivity({
     }
     movers.sort(holdingOrder)
   }
-  return { holdings, movers, currency, summary, counts }
+  return { holdings, movers, summary, counts }
 }

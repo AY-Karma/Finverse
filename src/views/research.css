@@ -57,6 +57,7 @@
 .rd-tab-content:focus { outline: none; }
 .rd-section { padding: 24px 28px; border-bottom: 1px solid var(--hairline-strong); }
 .rd-section:last-child { border-bottom: 0; }
+.rd-history > .history-panel { padding: 0; border: 0; background: transparent; }
 .rd-section-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
 .rd-section-head h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.15px; }
 .rd-section-head p { margin: 6px 0 0; font-size: 12px; line-height: 1.65; color: var(--rd-muted); max-width: 55ch; }
@@ -91,9 +92,6 @@
 .research-desk .btn { min-height: 40px; font-size: 11px; }
 [data-mode='light'] .research-desk { --pct-up: #0b7634; --pct-down: #b92c06; }
 .rd-foot-actions .workspace-action { margin-left: auto; }
-.rd-range { display: flex; gap: 4px; margin-bottom: 12px; }
-.rd-range button { background: transparent; border: 1px solid var(--hairline-strong); border-radius: 6px; color: var(--rd-muted); padding: 8px 12px; min-height: 40px; cursor: pointer; font: 11px var(--font-body); }
-.rd-range button[aria-pressed='true'] { color: var(--ink); background: var(--surface-3); }
 .research-desk :is(button, select, input, a):focus-visible { outline: 2px solid var(--primary-focus); outline-offset: 3px; }
 .research-desk .rd-holding:focus-visible { outline-offset: -3px; }
 [data-density='compact'] .rd-holding { min-height: 78px; padding-block: 12px; }
@@ -125,7 +123,7 @@
   .rd-tabs { gap: 22px; }
   .rd-section-head { flex-direction: column; }
   .rd-metrics dd { font-size: 19px; }
-  .research-desk .btn, .research-desk .workspace-action, .rd-range button { min-height: 44px; }
+  .research-desk .btn, .research-desk .workspace-action, .research-desk .range-btn { min-height: 44px; }
   .rd-foot-actions { align-items: stretch; }
   .rd-foot-actions :is(.btn, .workspace-action) { flex: 1 1 150px; }
 }

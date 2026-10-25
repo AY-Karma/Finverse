@@ -20,7 +20,7 @@ it('hides allocation geometry and counts, then restores the original allocation 
   const container = document.createElement('div')
   const root = createRoot(container)
   const render = async (hideValues: boolean) => {
-    await act(async () => root.render(<AllocationCard allocations={allocations} pulse={pulse} currency="INR" hideValues={hideValues} />))
+    await act(async () => root.render(<AllocationCard allocations={allocations} pulse={pulse} hideValues={hideValues} />))
   }
   try {
     await render(false)

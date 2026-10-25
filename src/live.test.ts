@@ -8,7 +8,6 @@ import {
   fetchLiveQuotes,
   fetchHistory,
   fetchNavHistory,
-  fetchUsdInrRate,
   fetchYahooPrice,
   isMarketOpen,
   marketStatusText,
@@ -23,18 +22,15 @@ describe('market status text', () => {
   it('reports missing, loading, timestamped and disabled market data', () => {
     expect(marketStatusText(true)).toBe('Market Open - no provider prices yet')
     expect(marketStatusText(false)).toBe('Market Closed - no provider prices yet')
-    expect(marketStatusText(true, true, true, true)).toBe('Market Open - fetching latest available data')
+    expect(marketStatusText(true, true, true)).toBe('Market Open - fetching latest available data')
 
-    expect(marketStatusText(false, true, true, true)).toBe('Market Closed - fetching latest available data')
-
-    expect(marketStatusText(true, true, false, true)).toBe('Market Open - fetching latest available data')
+    expect(marketStatusText(false, true, true)).toBe('Market Closed - fetching latest available data')
 
     const timestamp = '01 Oct, 15:15:00 IST'
-    expect(marketStatusText(false, true, true, false, timestamp)).toBe(`Market Closed - showing prices as of ${timestamp}`)
-    expect(marketStatusText(true, true, true, false, timestamp)).toBe(`Market Open - showing prices as of ${timestamp}`)
-    expect(marketStatusText(false, true, true, true, timestamp)).toBe('Market Closed - fetching latest available data')
-    expect(marketStatusText(false, false, true, false, timestamp)).toBe('External market data off · showing imported prices')
-    expect(marketStatusText(false, true, false, false, timestamp)).toBe('Waiting for USD/INR rate…')
+    expect(marketStatusText(false, true, false, timestamp)).toBe(`Market Closed - showing prices as of ${timestamp}`)
+    expect(marketStatusText(true, true, false, timestamp)).toBe(`Market Open - showing prices as of ${timestamp}`)
+    expect(marketStatusText(false, true, true, timestamp)).toBe('Market Closed - fetching latest available data')
+    expect(marketStatusText(false, false, false, timestamp)).toBe('External market data off · showing imported prices')
   })
 
   it('continues polling on weekdays when a future holiday calendar is unavailable', () => {
@@ -113,7 +109,7 @@ describe('market data client', () => {
     const result = await fetchLiveQuotes([equity, fund], {})
     expect(result.quotes[quoteKey(fund)]).toMatchObject({ price: Number(nav), change: fundChange, source: 'nav' })
     expect(result.quotes[quoteKey(fund)].changePct).toBeCloseTo(fundChange / 110 * 100)
-    const snapshot = investmentWorkspace.readSnapshot({ folios: [{ id: 'f', name: 'Reviewed portfolio', importedAt: 1, positions: [equity, fund] }], quotes: result.quotes, fxRate: null })
+    const snapshot = investmentWorkspace.readSnapshot({ folios: [{ id: 'f', name: 'Reviewed portfolio', importedAt: 1, positions: [equity, fund] }], quotes: result.quotes })
     expect(snapshot).toMatchObject({ dailyChangeDate: '2026-09-25', dailyChangeCount: 2, dailyChange: total })
   })
 
@@ -258,16 +254,6 @@ describe('market data client', () => {
     )
   })
 
-  it('uses the Frankfurter publication date instead of the HTTP request time', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      Response.json({ date: '2026-08-24', rates: { INR: 87.42 } }),
-    ))
-
-    await expect(fetchUsdInrRate()).resolves.toEqual({
-      usdInr: 87.42,
-      at: Date.parse('2026-08-24T00:00:00Z'),
-    })
-  })
 
   it('batches equity holdings and retains a failed holding without hiding the partial failure', async () => {
     const positions: Position[] = [
@@ -356,8 +342,8 @@ describe('market data client', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
-  it('does not label an INR MFAPI NAV as a USD holding price', async () => {
-    const fund: Position = { ...position('Example Fund Direct Growth'), currency: 'USD', type: 'mutual-fund', mfScheme: { code: 1, name: 'Example Fund Direct Growth', source: 'confirmed' } }
+  it('does not label an INR MFAPI NAV as an unsupported currency holding price', async () => {
+    const fund: Position = { ...position('Example Fund Direct Growth'), reportedCurrency: 'EUR', type: 'mutual-fund', mfScheme: { code: 1, name: 'Example Fund Direct Growth', source: 'confirmed' } }
     const fetcher = vi.fn<typeof fetch>()
     vi.stubGlobal('fetch', fetcher)
     expect((await fetchLiveQuotes([fund], {})).quotes).toEqual({})
@@ -435,7 +421,7 @@ describe('market data client', () => {
     expect((await fetchLiveQuotes([holding], { [quoteKey(holding)]: { price: 999, at: 1, source: 'yahoo' } })).quotes).toEqual({})
     await expect(marketData.history(holding, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z'))).resolves.toEqual([])
     expect(fetcher).not.toHaveBeenCalled()
-    expect(investmentWorkspace.readSnapshot({ folios: [{ id: 'account', name: 'Account', importedAt: 1, positions: [holding] }], quotes: {}, fxRate: null })).toMatchObject({ currentValue: 120, quotedCount: 0 })
+    expect(investmentWorkspace.readSnapshot({ folios: [{ id: 'account', name: 'Account', importedAt: 1, positions: [holding] }], quotes: {} })).toMatchObject({ currentValue: 120, quotedCount: 0 })
   })
 
   it('isolates listing history from legacy symbol caches and conflicting ISIN metadata', async () => {

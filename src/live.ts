@@ -1,4 +1,4 @@
-import type { FxRate, LiveQuote, Position } from './types'
+import type { LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
 import { createSharedRequest } from './sharedRequest'
 import { isRegularMarketOpen } from './marketCalendar'
@@ -35,18 +35,14 @@ function istDate(date: Date = new Date()): string {
 export function marketStatusText(
   open: boolean,
   externalEnabled = true,
-  fxReady = true,
   isRefreshing = false,
   pricesAsOf?: string,
 ): string {
   if (!externalEnabled) {
-    return fxReady
-      ? 'External market data off · showing imported prices'
-      : 'External market data off · enable it for USD display'
+    return 'External market data off \u00b7 showing imported prices'
   }
   const marketLabel = open ? 'Market Open' : 'Market Closed'
   if (isRefreshing) return `${marketLabel} - fetching latest available data`
-  if (!fxReady) return 'Waiting for USD/INR rate…'
   return `${marketLabel} - ${pricesAsOf ? `showing prices as of ${pricesAsOf}` : 'no provider prices yet'}`
 }
 
@@ -151,27 +147,6 @@ async function fetchYahooPrices(symbols: string[], signal?: AbortSignal): Promis
 export async function fetchYahooPrice(symbol: string, signal?: AbortSignal): Promise<YahooResult | null> {
   const normalized = symbol.toUpperCase()
   return (await fetchYahooPrices([normalized], signal)).get(normalized) ?? null
-}
-
-// ---------------------------------------------------------------------------
-// USD/INR conversion (portfolio imports are INR-denominated)
-// ---------------------------------------------------------------------------
-
-/** Fetch a short-lived conversion rate used only for display conversion. */
-export async function fetchUsdInrRate(signal?: AbortSignal): Promise<FxRate | null> {
-  try {
-    const res = await fetch('https://api.frankfurter.app/latest?from=USD&to=INR', {
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
-    })
-    if (!res.ok) return null
-    const json = (await res.json()) as { date?: string; rates?: { INR?: number } }
-    const usdInr = json.rates?.INR
-    if (usdInr == null || !Number.isFinite(usdInr) || usdInr <= 0) return null
-    const publishedAt = json.date ? Date.parse(`${json.date}T00:00:00Z`) : Number.NaN
-    return { usdInr, at: Number.isFinite(publishedAt) ? publishedAt : Date.now() }
-  } catch {
-    return null
-  }
 }
 
 // ---------------------------------------------------------------------------

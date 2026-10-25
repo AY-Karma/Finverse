@@ -113,8 +113,8 @@ describe('monitor feed', () => {
   it('handles explicitly reported price movements and sign formats without coloring generic keywords', () => {
     expect(titleParts('Share price rose by nearly 2.5%')).toContainEqual({ text: '2.5%', sentiment: 'positive', highlighted: true })
     expect(titleParts('Stock is trading down 0.8%')).toContainEqual({ text: '0.8%', sentiment: 'negative', highlighted: true })
-    expect(titleParts('Impact USD -500, +₹250, and a Rs. 5 crore contract').filter((part) => part.highlighted)).toEqual([
-      { text: 'USD -500', sentiment: 'negative', highlighted: true },
+    expect(titleParts('Impact ₹-500, +₹250, and a Rs. 5 crore contract').filter((part) => part.highlighted)).toEqual([
+      { text: '₹-500', sentiment: 'negative', highlighted: true },
       { text: '+₹250', sentiment: 'neutral', highlighted: true },
       { text: 'Rs. 5 crore', sentiment: 'neutral', highlighted: true },
     ])

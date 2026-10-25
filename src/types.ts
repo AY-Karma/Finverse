@@ -1,6 +1,6 @@
 export type AssetType = 'stock' | 'etf' | 'mutual-fund' | 'other'
 
-export type Currency = 'INR' | 'USD'
+export type Currency = 'INR'
 
 export type Exchange = 'NSE' | 'BSE' | 'NASDAQ' | 'NYSE' | 'LSE' | 'OTHER'
 
@@ -85,11 +85,6 @@ export interface Settings {
   customAccent?: string
   mode: Mode
   hideValues: boolean
-}
-
-export interface FxRate {
-  usdInr: number
-  at: number
 }
 
 export interface LiveQuote {

@@ -19,39 +19,24 @@ function build(positions: Position[], observations: LiveQuote[], options: Partia
 }
 
 describe('portfolio activity', () => {
-  it('converts mixed-currency impact and weights with available FX without mixing native prices', () => {
-    const positions = [position('LOCAL'), position('US', { currency: 'USD', exchange: 'NASDAQ', quantity: 1 })]
-    const result = build(positions, [quote(), quote({ price: 20, change: -2, changePct: -100 / 11 })], { fxRate: { usdInr: 80, at: NOW } })
-    expect(result.movers.map((row) => row.ticker)).toEqual(['US', 'LOCAL'])
-    expect(result.holdings[1]).toMatchObject({ price: 20, assetCurrency: 'USD', dayContribution: -160 })
+  it('uses INR prices to estimate impact and whole-book weights', () => {
+    const positions = [position('LOCAL'), position('LOSS', { quantity: 5 })]
+    const result = build(positions, [quote(), quote({ price: 320, change: -40, changePct: -100 / 9 })])
+    expect(result.movers.map((row) => row.ticker)).toEqual(['LOSS', 'LOCAL'])
+    expect(result.holdings[1]).toMatchObject({ price: 320, dayContribution: -200 })
     expect(result.holdings[0].weightPct).toBeCloseTo(1100 / 2700 * 100)
     expect(result.holdings[1].weightPct).toBeCloseTo(1600 / 2700 * 100)
-    expect(result.counts).toMatchObject({ total: 2, impact: 2, fxUnavailable: 0, gainers: 1, decliners: 1 })
+    expect(result.counts).toMatchObject({ total: 2, impact: 2, gainers: 1, decliners: 1 })
   })
 
-  it('keeps native market movement while withholding unavailable converted impact and whole-book weights', () => {
-    const positions = [position('LOCAL'), position('US', { currency: 'USD', exchange: 'NASDAQ' })]
-    const result = build(positions, [quote(), quote({ changePct: 40 })])
-    expect(result.holdings[1]).toMatchObject({ price: 110, changePct: 40, dayContribution: null, weightPct: null })
-    expect(result.holdings[0]).toMatchObject({ dayContribution: 100, weightPct: null })
-    expect(result.movers.map((row) => row.ticker)).toEqual(['LOCAL', 'US'])
-    expect(result.counts).toMatchObject({ movement: 2, impact: 1, fxUnavailable: 1 })
-  })
-
-  it('withholds native prices and converted impact when the imported currency is unsupported', () => {
-    const positions = [position('LOCAL'), position('FOREIGN', { exchange: 'LSE', currency: undefined, reportedCurrency: 'GBP', providerSymbol: 'FOREIGN.L', lastPrice: 25 })]
-    const result = build(positions, [quote(), quote({ price: 30 })], { fxRate: { usdInr: 80, at: NOW } })
-    expect(result.holdings.find((row) => row.ticker === 'FOREIGN')).toMatchObject({ price: null, dayContribution: null, weightPct: null })
+  it('withholds unsupported-currency prices and impact and leaves whole-book weights unavailable', () => {
+    const positions = [position('LOCAL'), position('FOREIGN', { exchange: 'OTHER', currency: undefined, reportedCurrency: 'GBP', lastPrice: 25 })]
+    const result = build(positions, [quote(), quote({ price: 30, changePct: 40 })])
+    expect(result.holdings.find((row) => row.ticker === 'FOREIGN')).toMatchObject({ price: null, changePct: 40, dayContribution: null, weightPct: null })
     expect(result.holdings.find((row) => row.ticker === 'LOCAL')).toMatchObject({ price: 110, dayContribution: 100, weightPct: null })
-    expect(result.counts.fxUnavailable).toBe(1)
-  })
-
-  it('converts INR impact into USD only with a positive finite FX rate', () => {
-    const positions = [position('LOCAL')]
-    expect(build(positions, [quote()], { currency: 'USD', fxRate: { usdInr: 80, at: NOW } }).holdings[0].dayContribution).toBe(1.25)
-    for (const rate of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(build(positions, [quote()], { currency: 'USD', fxRate: { usdInr: rate, at: NOW } }).holdings[0].dayContribution).toBeNull()
-    }
+    expect(result.counts).toMatchObject({ movement: 2, impact: 1 })
+    const imported = buildPortfolioActivity({ positions, quotes: {}, now: NOW })
+    expect(imported.holdings.find((row) => row.ticker === 'FOREIGN')).toMatchObject({ price: null, dayContribution: null, weightPct: null, freshness: 'unavailable' })
   })
 
   it('keeps stale quote evidence and distinguishes imported prices from unavailable prices', () => {
@@ -71,12 +56,12 @@ describe('portfolio activity', () => {
     expect(build([fund], [quote({ source: 'nav', at: NOW - 5 * DAY })]).holdings[0].freshness).toBe('stale')
   })
 
-  it('preserves provider timestamps and market timezones rather than fetching dates', () => {
-    const positions = [position('LOCAL'), position('US', { currency: 'USD', exchange: 'NASDAQ' })]
+  it('preserves provider timestamps and uses the Indian market timezone', () => {
+    const positions = [position('LOCAL'), position('SECOND', { exchange: 'BSE' })]
     const previousSession = Date.parse('2026-10-08T01:00:00Z')
-    const result = build(positions, [quote(), quote({ at: previousSession, fetchedAt: NOW })], { fxRate: { usdInr: 80, at: NOW } })
+    const result = build(positions, [quote(), quote({ at: previousSession, fetchedAt: NOW })])
     expect(result.holdings[0]).toMatchObject({ observedAt: NOW - 60_000, marketTimeZone: 'Asia/Kolkata' })
-    expect(result.holdings[1]).toMatchObject({ observedAt: previousSession, marketTimeZone: 'America/New_York' })
+    expect(result.holdings[1]).toMatchObject({ observedAt: previousSession, marketTimeZone: 'Asia/Kolkata' })
     expect(result.counts.impact).toBe(2)
   })
 
@@ -88,10 +73,10 @@ describe('portfolio activity', () => {
     expect(tie.movers.map((row) => row.ticker)).toEqual(['B', 'A'])
   })
 
-  it('summarizes the largest recent converted impact without promoting percentages, stale prices or NAV', () => {
+  it('summarizes the largest recent INR impact without promoting percentages, stale prices or NAV', () => {
     const positions = [
       position('SMALL'), position('LOSS', { type: 'etf' }), position('PCT'), position('STALE'),
-      position('FUND', { type: 'mutual-fund' }), position('US', { currency: 'USD', exchange: 'NASDAQ' }),
+      position('FUND', { type: 'mutual-fund' }), position('UNSUPPORTED', { currency: undefined, reportedCurrency: 'GBP' }),
     ]
     const result = build(positions, [
       quote({ change: 1, changePct: 1 }), quote({ change: -20, changePct: -10 }),
@@ -103,7 +88,7 @@ describe('portfolio activity', () => {
     expect(result.summary).toMatchObject({ impactCount: 2, impactEligibleCount: 5 })
   })
 
-  it('leaves the impact leader empty when no recent nonzero converted contribution is known', () => {
+  it('leaves the impact leader empty when no recent nonzero contribution is known', () => {
     const positions = [position('PCT'), position('FLAT'), position('FUND', { type: 'mutual-fund' })]
     const result = build(positions, [quote({ change: null, changePct: 80 }), quote({ change: 0, changePct: 0 }), quote({ source: 'nav' })])
     expect(result.summary.largestImpact).toBeNull()
@@ -163,7 +148,7 @@ describe('portfolio activity', () => {
 
   it('ignores ambiguous legacy quotes while using separate quotes for distinct listing identities', () => {
     const first = position('SAME', { lastPrice: 50, providerSymbol: 'SAME.NS' })
-    const second = { ...first, id: 'second', exchange: 'NASDAQ' as const, currency: 'USD' as const, providerSymbol: 'SAME', lastPrice: 20 }
+    const second = { ...first, id: 'second', exchange: 'BSE' as const, providerSymbol: 'SAME.BO', lastPrice: 20 }
     expect(quoteKey(first)).not.toBe(quoteKey(second))
     const result = buildPortfolioActivity({ positions: [first, second], quotes: { 'EQ:SAME': quote() }, now: NOW })
     expect(result.counts).toMatchObject({ total: 2, quoted: 0, imported: 2, movement: 0 })

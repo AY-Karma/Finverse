@@ -320,7 +320,7 @@ describe('Portfolio Watch masking', () => {
   it('routes equal-ticker holdings to their own market identity', async () => {
     await renderWatch(false)
     const base = state.store.positions[0]
-    const airline = { ...base, id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ' as const, currency: 'USD' as const }
+    const airline = { ...base, id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ' as const }
     const miner = { ...base, id: 'miner', ticker: 'AAL', name: 'Anglo American plc', exchange: 'LSE' as const }
     state.store.positions = [airline, miner]
     await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })

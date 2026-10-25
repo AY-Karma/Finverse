@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PortfolioImportDialog } from './PortfolioImportDialog'
 
 const state = vi.hoisted(() => ({
-  folios: [], positions: [], liveQuotes: {}, fxRate: null,
+  folios: [], positions: [], liveQuotes: {},
   settings: { currency: 'INR', allowExternalData: false, hideValues: false },
   previewFile: vi.fn(), commitImport: vi.fn(), commitImports: vi.fn(),
 }))

@@ -33,7 +33,6 @@ describe('allocation card', () => {
           { symbol: 'KRN', value: 100_000, type: 'stock' },
         ]}
         hideValues={false}
-        currency="INR"
         pulse={pulse}
       />,
     )
@@ -54,7 +53,6 @@ describe('allocation card', () => {
       <AllocationCard
         allocations={[{ symbol: 'Private Fund', value: 100_000, type: 'mutual-fund' }]}
         hideValues
-        currency="INR"
         pulse={{ ...pulse, best: { symbol: 'Private Fund', pct: 50 } }}
       />,
     )

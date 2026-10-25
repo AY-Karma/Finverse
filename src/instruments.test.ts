@@ -40,7 +40,7 @@ describe('listing identity import', () => {
     expect(reimported).toMatchObject({ exchange: 'BSE', exchangeSource: 'explicit', providerSymbol: '500112.BO', sector: 'Financials', industry: 'Banking', isin: holding.isin, currency: 'INR' })
     expect(reimported.identityIssue).toContain('numeric BSE')
     expect(resolveYahooSymbol(reimported)).toBeNull()
-    expect(investmentWorkspace.readSnapshot({ folios, quotes: {}, fxRate: null }).sectors[0]).toMatchObject({ label: 'Financials', value: 1200 })
+    expect(investmentWorkspace.readSnapshot({ folios, quotes: {} }).sectors[0]).toMatchObject({ label: 'Financials', value: 1200 })
     const [mapped] = parseRows([
       ['Symbol', 'Quantity', 'Average Price', 'Exchange', 'Provider Symbol'],
       ['500112', 10, 100, 'BSE', 'SBIN.BO'],
@@ -89,17 +89,18 @@ describe('listing identity import', () => {
 
   it('does not use a provider symbol on another venue or quote currency', () => {
     expect(resolveYahooSymbol(position({ exchange: 'BSE', providerSymbol: 'SAME.NS' }))).toBeNull()
-    expect(resolveYahooSymbol(position({ exchange: 'NSE', currency: 'USD' }))).toBeNull()
+    expect(resolveYahooSymbol(position({ exchange: 'NSE', reportedCurrency: 'EUR' }))).toBeNull()
     expect(resolveYahooSymbol(position({ exchange: 'NSE', providerSymbol: 'SAME.PA' }))).toBeNull()
   })
 
   it('preserves saved MF mappings and unsupported currency amounts in CSV', () => {
     const holdings = [
-      normalizePosition(position({ id: 'usd', ticker: 'AAPL', exchange: 'NASDAQ', currency: 'USD', quantity: 1, invested: 100, providerSymbol: 'AAPL' })),
+      normalizePosition(position({ id: 'foreign', ticker: 'AAPL', exchange: 'NASDAQ', reportedCurrency: 'EUR', quantity: 1, invested: 100, providerSymbol: 'AAPL' })),
       normalizePosition(position({ id: 'fund', ticker: 'Imported alias', name: 'Imported alias', type: 'mutual-fund', mfScheme: { code: 2, name: 'Example Equity Fund Direct IDCW', source: 'confirmed' } })),
     ]
     const imported = parseSpreadsheetWithDiagnostics(new TextEncoder().encode(exportPortfolioCsv(holdings)).buffer as ArrayBuffer).positions
-    expect(imported[0]).toMatchObject({ currency: 'USD', invested: 100, exchange: 'NASDAQ', providerSymbol: 'AAPL' })
+    expect(imported[0]).toMatchObject({ reportedCurrency: 'EUR', invested: 100, exchange: 'NASDAQ', providerSymbol: 'AAPL' })
+    expect(imported[0].identityIssue).toBeTruthy()
     expect(imported[1]).toMatchObject({ mfScheme: holdings[1].mfScheme, instrumentKey: 'MF:mfapi:2', name: 'Imported alias' })
   })
 
