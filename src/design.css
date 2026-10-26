@@ -744,17 +744,28 @@ body {
   100% { opacity: 1; }
 }
 
-/* Ledger LTP arrows */
-.table--ledger .ltp {
+/* Ledger LTP and daily price movement */
+.last-trade {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+.last-trade-move {
+  font-size: 11px;
+  font-weight: 500;
+}
+.last-trade .ltp {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   white-space: nowrap;
   color: var(--ink);
 }
-.table--ledger .ltp--up .ltp-arrow { color: var(--semantic-success); }
-.table--ledger .ltp--down .ltp-arrow { color: var(--semantic-danger); }
-.table--ledger .ltp-arrow {
+.last-trade .ltp--up .ltp-arrow { color: var(--semantic-success); }
+.last-trade .ltp--down .ltp-arrow { color: var(--semantic-danger); }
+.last-trade .ltp-arrow {
   font-size: 8px;
   line-height: 1;
 }
@@ -1213,6 +1224,24 @@ body {
 .panel--ledger td.down { color: var(--semantic-danger); }
 .table--ledger .th-sort {
   padding: var(--sp-sm) 9px;
+}
+@media (min-width: 769px) {
+  .table--ledger {
+    table-layout: fixed;
+  }
+  .table--ledger > thead > tr > th:first-child { width: 26%; }
+  .table--ledger > thead > tr > th:nth-child(2) { width: 10%; }
+  .table--ledger > thead > tr > th:nth-child(n+3) { width: 16%; }
+  .table--ledger > thead > tr > th:nth-child(n+3):nth-child(-n+5) .th-sort {
+    justify-content: center;
+    text-align: center;
+  }
+  .table--ledger > tbody > tr > td:nth-child(n+3):nth-child(-n+5) {
+    text-align: center;
+  }
+  .table--ledger > tbody > tr > td:nth-child(4) > .last-trade {
+    align-items: center;
+  }
 }
 .table--ledger td.sym {
   max-width: 130px;
@@ -3907,7 +3936,7 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   .ledger-mobile-row[aria-expanded='true'] { background: var(--surface-2); }
   .ledger-mobile-row:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: -2px; }
   .ledger-mobile-primary { display: grid; min-width: 0; gap: 8px; }
-  .ledger-mobile-primary--right { text-align: right; }
+  .ledger-mobile-primary--right { position: relative; padding-right: 14px; text-align: right; }
   .ledger-mobile-name,
   .ledger-mobile-value {
     overflow: hidden;
@@ -3929,7 +3958,7 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   }
   .ledger-mobile-secondary.up { color: var(--semantic-success); }
   .ledger-mobile-secondary.down { color: var(--semantic-danger); }
-  .ledger-mobile-chevron { display: inline-block; margin-left: 7px; color: var(--ink-subtle); }
+  .ledger-mobile-chevron { position: absolute; right: 0; bottom: 0; width: 7px; color: var(--ink-subtle); }
   .ledger-mobile-row[aria-expanded='true'] .ledger-mobile-chevron { transform: rotate(180deg); }
   .ledger-mobile-detail {
     display: grid;
@@ -3939,9 +3968,10 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
     border-top: 1px solid var(--hairline);
     background: var(--surface-2);
   }
-  .ledger-mobile-detail > div:not(.ledger-members) { display: grid; gap: 5px; min-width: 0; }
+  .ledger-mobile-detail > div:not(.ledger-members) { display: grid; align-content: start; gap: 5px; min-width: 0; }
   .ledger-mobile-detail .ledger-mobile-detail-wide { grid-column: 1 / -1; }
   .ledger-mobile-detail > div:not(.ledger-members) > span { color: var(--ink-subtle); font-size: 11px; }
+  .ledger-mobile-detail .last-trade { align-items: flex-start; }
   .ledger-mobile-detail strong { overflow-wrap: anywhere; color: var(--ink); font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; }
   .ledger-mobile-detail .ledger-members { grid-column: 1 / -1; padding: 10px 0 0; border-top: 1px solid var(--hairline-strong); }
   .ledger-mobile-detail .table--nested thead { display: none; }

@@ -1,5 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse } from '../valuation'
+import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse, quoteKey } from '../valuation'
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { needsInstrumentReview } from '../instruments'
@@ -34,7 +34,7 @@ interface LedgerRow {
   buy: number
   costSupported: boolean
   ltp: number | null
-  isLive: boolean
+  dayMove: number | null
   value: number
   pnl: number | null
 }
@@ -141,7 +141,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
           buy: p.buyPrice,
           costSupported: hasSupportedValuationCurrency(p),
           ltp: price,
-          isLive: isLiveQuote(p, live),
+          dayMove: dailyPriceMove(p, live).delta,
           value,
           pnl,
         }
@@ -539,16 +539,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
                         <td>{mask(fmtUnits(r.qty))}</td>
                         <td>{mask(formatCost(r.buy, r.costSupported))}</td>
                         <td>
-                          {r.ltp != null && r.buy > 0 && r.ltp !== r.buy ? (
-                            <span className={`ltp ltp--${r.ltp > r.buy ? 'up' : 'down'}`}>
-                              <span className="ltp-arrow" aria-hidden="true">{r.ltp > r.buy ? '▲' : '▼'}</span>
-                              {mask(formatCurrency(r.ltp))}
-                            </span>
-                          ) : r.ltp != null ? (
-                            <span className="ltp ltp--flat">{mask(formatCurrency(r.ltp))}</span>
-                          ) : (
-                            '—'
-                          )}
+                          <LastTrade price={r.ltp} dayMove={r.dayMove} hideValues={hideValues} />
                         </td>
                         <td>{mask(r.ltp == null ? 'Unpriced' : formatCurrency(r.value))}</td>
                         <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
@@ -587,13 +578,13 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
                         <span className="ledger-mobile-value">{mask(row.ltp == null ? 'Unpriced' : formatCurrency(row.value))}</span>
                         <span className={`ledger-mobile-secondary ${row.pnl == null ? '' : pnlUp ? 'up' : 'down'}`}>
                           {row.pnl == null ? 'P&L unavailable' : mask(`${pnlUp ? '+' : ''}${formatCurrency(row.pnl)}`)}
-                          <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
                         </span>
+                        <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
                       </span>
                     </button>
                     {open && (
                       <div className="ledger-mobile-detail">
-                        <div><span>Last trade</span><strong>{row.ltp == null ? '—' : mask(formatCurrency(row.ltp))}</strong></div>
+                        <div><span>Last trade</span><strong><LastTrade price={row.ltp} dayMove={row.dayMove} hideValues={hideValues} /></strong></div>
                         <div><span>Buy price</span><strong>{mask(formatCost(row.buy, row.costSupported))}</strong></div>
                         <div><span>Quantity</span><strong>{mask(fmtUnits(row.qty))}</strong></div>
                         {members.length > 1 && <LedgerMembers members={members} live={live} hideValues={hideValues} />}
@@ -822,8 +813,8 @@ function MFLedger({
                 <span className="ledger-mobile-value">{mask(livePriceOf(fund, live) == null ? 'Unpriced' : formatCurrency(value))}</span>
                 <span className={`ledger-mobile-secondary ${returns == null ? '' : returns >= 0 ? 'up' : 'down'}`}>
                   {returns == null ? 'Return unavailable' : mask(formatPercent(returns))}
-                  <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
                 </span>
+                <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
               </span>
             </button>
             {open && (
@@ -955,22 +946,55 @@ function tickerItems(
   return positions
     .slice(0, 24)
     .map((p) => {
-      const value = positionValue(p, live)
-      const delta = positionPnl(p, live)
-      const pct = positionPnlPct(p, live)
-      return { sym: mask(p.ticker), val: mask(livePriceOf(p, live) == null ? 'Unpriced' : formatCurrency(value)), delta, pct }
+      const price = livePriceOf(p, live)
+      const { delta, pct } = dailyPriceMove(p, live)
+      return { sym: mask(p.ticker), val: mask(price == null ? 'Unpriced' : formatCurrency(price)), delta, pct }
     })
 }
 
 function TickerCell({ t, hideValues }: { t: TickerCellData; hideValues: boolean }) {
-  const up = t.delta != null && t.delta >= 0
+  const trend = hideValues ? 'muted' : moveTrend(t.delta ?? t.pct)
   return (
     <div className="ticker-item">
       <span className="ticker-sym">{t.sym}</span>
       <span className="ticker-val">{t.val}</span>
-      <span className={`ticker-delta ${up ? 'up' : 'down'}`}>
-        {hideValues ? '••••••' : t.pct != null ? `${up ? '+' : ''}${t.pct.toFixed(2)}%` : '—'}
+      <span className={`ticker-delta ${trend}`} title={hideValues ? undefined : 'Day move'}>
+        {hideValues ? '••••••' : `${t.delta == null ? '—' : signedPrice(t.delta)} (${t.pct == null ? '—' : formatPercent(t.pct)})`}
       </span>
     </div>
+  )
+}
+
+function dailyPriceMove(position: Position, live: Record<string, LiveQuote>): { delta: number | null; pct: number | null } {
+  const quote = isLiveQuote(position, live) ? live[quoteKey(position)] : undefined
+  if (!quote || !Number.isFinite(quote.price) || quote.price < 0) return { delta: null, pct: null }
+  const delta = quote.change != null && Number.isFinite(quote.change) ? quote.change : null
+  const previous = delta == null ? null : quote.price - delta
+  const pct = quote.changePct != null && Number.isFinite(quote.changePct)
+    ? quote.changePct
+    : delta != null && previous != null && previous > 0 ? delta / previous * 100 : null
+  return { delta, pct }
+}
+
+function moveTrend(move: number | null): string {
+  return move == null || move === 0 ? 'muted' : move > 0 ? 'up' : 'down'
+}
+
+function signedPrice(value: number): string {
+  return `${value > 0 ? '+' : ''}${formatCurrency(value)}`
+}
+
+function LastTrade({ price, dayMove, hideValues }: { price: number | null; dayMove: number | null; hideValues: boolean }) {
+  const trend = moveTrend(dayMove)
+  return (
+    <span className="last-trade">
+      <span className={`ltp ltp--${trend}`}>
+        {!hideValues && dayMove != null && dayMove !== 0 && <span className="ltp-arrow" aria-hidden="true">{dayMove > 0 ? '▲' : '▼'}</span>}
+        {hideValues ? '••••••' : price == null ? '—' : formatCurrency(price)}
+      </span>
+      <span className={`last-trade-move ${hideValues ? 'muted' : trend}`} aria-label={hideValues ? 'Day move hidden' : 'Day move'}>
+        {hideValues ? '••••••' : dayMove == null ? '—' : signedPrice(dayMove)}
+      </span>
+    </span>
   )
 }

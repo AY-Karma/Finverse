@@ -20,6 +20,58 @@ vi.mock('./PortfolioPerformance', () => ({ PortfolioPerformance: ({ scope }: { s
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
+  it('shows LTP and daily price moves in the ticker and ledger, with neutral missing data and privacy masking', async () => {
+    const positions: Position[] = ['DOWN', 'UP', 'FLAT', 'MISSING', 'INVALID', 'REVIEW'].map((ticker) => ({
+      id: ticker, ticker, name: ticker, type: 'stock', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120,
+      ...(ticker === 'REVIEW' ? { identityIssue: 'Confirm venue' } : {}),
+    }))
+    const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
+    const quote = { price: 120, at: Date.now(), source: 'yahoo' as const }
+    const quotes = {
+      [quoteKey(positions[0])]: { ...quote, change: -5 },
+      [quoteKey(positions[1])]: { ...quote, change: 2, changePct: 1.69 },
+      [quoteKey(positions[2])]: { ...quote, change: 0, changePct: 0 },
+      [quoteKey(positions[4])]: { ...quote, price: NaN, change: 5, changePct: 5 },
+      [quoteKey(positions[5])]: { ...quote, change: 5, changePct: 5 },
+    }
+    state.store = { positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes }), settings: { ...loadSettings(), hideValues: false, allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const render = () => act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+    try {
+      await render()
+      const cells = [...container.querySelectorAll('.ticker-item')]
+      expect(cells[0].querySelector('.ticker-val')?.textContent).toBe('₹120.00')
+      expect(cells[0].querySelector('.ticker-delta')?.textContent).toBe('−₹5.00 (−4.00%)')
+      expect(cells[0].querySelector('.ticker-delta')?.classList.contains('down')).toBe(true)
+      expect(cells[1].querySelector('.ticker-delta')?.textContent).toBe('+₹2.00 (+1.69%)')
+      expect(cells[2].querySelector('.ticker-delta')?.textContent).toBe('₹0.00 (+0.00%)')
+      for (const cell of cells.slice(3, 6)) {
+        expect(cell.querySelector('.ticker-delta')?.textContent).toBe('— (—)')
+        expect(cell.querySelector('.ticker-delta')?.classList.contains('muted')).toBe(true)
+      }
+      const rows = [...container.querySelectorAll('.table--ledger > tbody > tr')]
+      expect(rows[0].querySelector('.ltp-arrow')?.textContent).toBe('▼')
+      expect(rows[0].querySelector('.last-trade-move')?.textContent).toBe('−₹5.00')
+      expect(rows[1].querySelector('.last-trade-move')?.textContent).toBe('+₹2.00')
+      expect(rows[2].querySelector('.ltp-arrow')).toBeNull()
+      expect(rows[3].querySelector('.last-trade-move')?.textContent).toBe('—')
+      await act(async () => container.querySelector<HTMLButtonElement>('.ledger-mobile-row')!.click())
+      expect(container.querySelector('.ledger-mobile-detail .last-trade-move')?.textContent).toBe('−₹5.00')
+
+      state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
+      await render()
+      expect(container.querySelector('.ticker-item')?.textContent).not.toMatch(/₹|DOWN|4.00/)
+      expect(container.querySelector('.last-trade')?.textContent).toBe('••••••••••••')
+      expect(container.querySelector('.ltp-arrow')).toBeNull()
+
+      state.store = { ...state.store, settings: { ...state.store.settings, hideValues: false, allowExternalData: false } }
+      await render()
+      expect(container.querySelector('.ticker-delta')?.textContent).toBe('— (—)')
+      expect(container.querySelector('.last-trade-move')?.textContent).toBe('—')
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('groups performance above allocation and keeps their scope in sync with the composition summary', async () => {
     const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
     const positions: Position[] = [
