@@ -6,7 +6,7 @@ import { HiddenValuesState } from './HiddenValuesState'
 
 const SEGMENT_CAP = 7
 
-/** Allocation chart with a compact portfolio summary and optional detail. */
+/** Allocation chart with portfolio composition and holding details. */
 export function AllocationCard({
   allocations,
   hideValues,
@@ -48,7 +48,6 @@ export function AllocationCard({
   const eqShare = splitTotal > 0 ? (p.equityValue / splitTotal) * 100 : 0
   const leader = valued[0]
   const smallest = valued[valued.length - 1]
-  const heavyMembers = p.bandMembers.heavy.map(mask).join(', ')
 
   const hoverSlice = (index: number) => () => setActive(index)
   const clearSlice = () => setActive(null)
@@ -125,8 +124,7 @@ export function AllocationCard({
           </div>
         </div>
 
-        <details className="alloc-more">
-          <summary>More detail</summary>
+        <div className="alloc-more">
           <div className="alloc-more-content">
             <section className="alloc-more-section">
               <h3>Profit and loss</h3>
@@ -151,9 +149,9 @@ export function AllocationCard({
                 </span>
               </div>
               {(p.best || p.worst) && (
-                <div className="alloc-edge-notes">
+                <div className={`alloc-edge-notes${p.flat > 0 ? ' alloc-edge-notes--three' : ''}`}>
                   {p.best && <span className={p.best.pct >= 0 ? 'up' : 'down'}>Best <strong title={mask(p.best.symbol)}>{mask(p.best.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.best.pct >= 0 ? '+' : ''}${p.best.pct.toFixed(1)}%`)}</b></span>}
-                  {p.worst && <span className={p.worst.pct >= 0 ? 'up' : 'down'}>Worst <strong title={mask(p.worst.symbol)}>{mask(p.worst.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.worst.pct >= 0 ? '+' : ''}${p.worst.pct.toFixed(1)}%`)}</b></span>}
+                  {p.worst && <span className={`alloc-edge-note--last ${p.worst.pct >= 0 ? 'up' : 'down'}`}>Worst <strong title={mask(p.worst.symbol)}>{mask(p.worst.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.worst.pct >= 0 ? '+' : ''}${p.worst.pct.toFixed(1)}%`)}</b></span>}
                 </div>
               )}
             </section>
@@ -201,10 +199,9 @@ export function AllocationCard({
                   <small>{mask(`${p.bandWeight.light.toFixed(0)}%`)} of portfolio</small>
                 </span>
               </div>
-              <p className="alloc-member-note">{p.bands.heavy > 0 ? <><strong>Large positions</strong> {heavyMembers}.</> : 'No position accounts for 10% or more of the portfolio.'}</p>
             </section>
           </div>
-        </details>
+        </div>
       </section>
     </div>
   )

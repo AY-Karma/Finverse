@@ -25,7 +25,7 @@ const pulse: PortfolioPulse = {
 }
 
 describe('allocation card', () => {
-  it('shows three compact takeaways with supporting figures in one disclosure', () => {
+  it('shows three compact takeaways with supporting details always visible', () => {
     const markup = renderToStaticMarkup(
       <AllocationCard
         allocations={[
@@ -42,10 +42,12 @@ describe('allocation card', () => {
     expect(markup).toContain('46% equity')
     expect(markup).toContain('54% funds')
     expect(markup).toContain('3 hold')
-    expect(markup).toContain('<details class="alloc-more"><summary>More detail</summary>')
+    expect(markup).not.toMatch(/<details|<summary/)
+    expect(markup.match(/class="alloc-more-section"/g)).toHaveLength(3)
     expect(markup).toContain('Average gain')
     expect(markup).toContain('Weight bands')
-    expect(markup).toContain('Quant Mid Cap Fund Direct Growth')
+    expect(markup).not.toContain('Large positions')
+    expect(markup).not.toContain('Quant Mid Cap Fund Direct Growth')
   })
 
   it('replaces private allocation details with the hidden-values status', () => {
