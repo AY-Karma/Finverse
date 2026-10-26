@@ -238,25 +238,33 @@ export function InteractiveTrendChart({
     const domainRange = Math.max(domain.max - domain.min, 1)
     const xAtIndex = (index: number) => visiblePointCount <= 1 ? plotLeft + plotWidth / 2 : plotLeft + ((index - viewStart) / (visiblePointCount - 1)) * plotWidth
     const yAt = (value: number) => PLOT_TOP + (1 - (value - domain.min) / domainRange) * plotHeight
-    const pathFor = (line: TrendLine) => {
+    const pathFor = (line: TrendLine, fill = false) => {
       let started = false
-      return pathRows.flatMap((row, localIndex) => {
+      let firstX = ''
+      let lastX = ''
+      const commands: string[] = []
+      const closeSegment = () => {
+        if (fill && started) commands.push(`L${lastX},${(PLOT_TOP + plotHeight).toFixed(1)} L${firstX},${(PLOT_TOP + plotHeight).toFixed(1)} Z`)
+        started = false
+      }
+      pathRows.forEach((row, localIndex) => {
         const index = pathStartIndex + localIndex
         const value = row[line.key]
         if (typeof value !== 'number' || !Number.isFinite(value)) {
-          if (!line.connectGaps) started = false
-          return []
+          if (!line.connectGaps) closeSegment()
+          return
         }
+        lastX = xAtIndex(index).toFixed(1)
+        if (!started) firstX = lastX
         const command = started ? 'L' : 'M'
         started = true
-        return [`${command}${xAtIndex(index).toFixed(1)},${yAt(value).toFixed(1)}`]
-      }).join(' ')
+        commands.push(`${command}${lastX},${yAt(value).toFixed(1)}`)
+      })
+      closeSegment()
+      return commands.join(' ')
     }
-    const linePaths = lines.map(pathFor)
-    const primaryPoints = primaryLine ? pathRows.map((row, index) => ({ row, index: pathStartIndex + index })).filter(({ row }) => typeof row[primaryLine.key] === 'number') : []
-    const areaPath = showArea && primaryLine && primaryPoints.length > 1
-      ? `${linePaths[0]} L${xAtIndex(primaryPoints[primaryPoints.length - 1].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} L${xAtIndex(primaryPoints[0].index).toFixed(1)},${(PLOT_TOP + plotHeight).toFixed(1)} Z`
-      : ''
+    const linePaths = lines.map((line) => pathFor(line))
+    const areaPath = showArea && primaryLine ? pathFor(primaryLine, true) : ''
     const pairedPoints = primaryLine && secondaryLine
       ? pathRows.map((row, index) => ({ row, index: pathStartIndex + index })).filter(({ row }) => typeof row[primaryLine.key] === 'number' && typeof row[secondaryLine.key] === 'number')
       : []

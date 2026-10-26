@@ -3,6 +3,23 @@ import { describe, expect, it } from 'vitest'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 
 describe('interactive trend chart', () => {
+  it('closes each area segment under its own line instead of drawing diagonal fills across gaps', () => {
+    const markup = renderToStaticMarkup(<InteractiveTrendChart
+      rows={[{ at: 1, close: 30 }, { at: 2, close: 35 }, { at: 3 }, { at: 4, close: 32 }, { at: 5, close: 36 }]}
+      lines={[{ key: 'close', label: 'Close', color: '#5e6ad2' }]}
+      valueFormatter={String} yAxisLabel="Price" appearance="price"
+    />)
+    const line = markup.match(/<path d="([^"]+)" class="interactive-trend-line"/)![1]
+    const area = markup.match(/<path d="([^"]+)"[^>]*class="interactive-trend-area"/)![1]
+    const lineSegments = line.match(/M[^M]+/g)!
+    const areaSegments = area.match(/M[^Z]+Z/g)!
+    expect(areaSegments).toHaveLength(lineSegments.length)
+    for (const [index, segment] of lineSegments.entries()) {
+      const coordinates = [...segment.matchAll(/[ML]([\d.]+),[\d.]+/g)].map((match) => match[1])
+      expect(areaSegments[index]).toBe(`${segment.trim()} L${coordinates[coordinates.length - 1]},292.0 L${coordinates[0]},292.0 Z`)
+    }
+  })
+
   it('connects only opted-in series across missing observations without extending their endpoints', () => {
     const start = Date.parse('2026-09-01T00:00:00Z')
     const markup = renderToStaticMarkup(<InteractiveTrendChart

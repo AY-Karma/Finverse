@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { renderToStaticMarkup } from 'react-dom/server'
+import type { ComponentProps } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HistoryPoint } from '../live'
 import type { Position } from '../types'
@@ -10,7 +12,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 const { history, settings, store, chart } = vi.hoisted(() => ({
   history: vi.fn<(_position: unknown, _from: Date, _to: Date, _signal?: AbortSignal) => Promise<HistoryPoint[]>>(),
-  chart: { rows: [] as { at: number; close: number | undefined }[] },
+  chart: { rows: [] as { at: number; close: number | undefined }[], props: null as ComponentProps<typeof import('./InteractiveTrendChart').InteractiveTrendChart> | null },
   settings: { allowExternalData: true, hideValues: false, currency: 'INR' },
   store: { positions: [] as Position[] },
 }))
@@ -23,15 +25,17 @@ vi.mock('../useStore', () => ({
   }),
 }))
 vi.mock('./InteractiveTrendChart', () => ({
-  InteractiveTrendChart: ({ rows, referenceLines, valueFormatter, yAxisLabel }: { rows: typeof chart.rows; referenceLines?: unknown[]; valueFormatter: (value: number) => string; yAxisLabel: string }) => {
-    chart.rows = rows
+  InteractiveTrendChart: (props: ComponentProps<typeof import('./InteractiveTrendChart').InteractiveTrendChart>) => {
+    chart.props = props
+    const { rows, referenceLines, valueFormatter, yAxisLabel } = props
+    chart.rows = rows as typeof chart.rows
     return <div data-testid="history-chart" data-references={JSON.stringify(referenceLines ?? [])} data-formatted-value={valueFormatter(100)} data-axis-label={yAxisLabel} />
   },
 }))
 
 const defaultPosition: Position = { id: 'fund', ticker: 'FMCGIETF', name: 'FMCGIETF', type: 'etf', quantity: 1, buyPrice: 100, lastPrice: null, invested: 100 }
 
-beforeEach(() => { store.positions = [defaultPosition]; chart.rows = [] })
+beforeEach(() => { store.positions = [defaultPosition]; chart.rows = []; chart.props = null })
 
 let root: Root
 let container: HTMLDivElement
@@ -122,20 +126,41 @@ describe('Holding Price History', () => {
     expect(container.textContent).toContain('Enable external market data')
   })
 
-  it('breaks missing weekdays and connects ordinary weekend gaps', async () => {
+  it.each(['etf', 'mutual-fund'] as const)('keeps %s prices and their fill continuous across market holidays and weekends', async (type) => {
     history.mockResolvedValue([
       { date: '2026-10-19', close: 100 }, { date: '2026-10-22', close: 110 },
       { date: '2026-10-23', close: 112 }, { date: '2026-10-26', close: 115 },
     ])
-    await renderPanel(defaultPosition)
+    await renderPanel({ ...defaultPosition, type })
 
     expect(chart.rows).toEqual([
       { at: Date.parse('2026-10-19'), close: 100 },
-      { at: Date.parse('2026-10-19') + (Date.parse('2026-10-22') - Date.parse('2026-10-19')) / 2, close: undefined },
       { at: Date.parse('2026-10-22'), close: 110 },
       { at: Date.parse('2026-10-23'), close: 112 },
       { at: Date.parse('2026-10-26'), close: 115 },
     ])
+    const { InteractiveTrendChart } = await vi.importActual<typeof import('./InteractiveTrendChart')>('./InteractiveTrendChart')
+    const rendered = document.createElement('div')
+    rendered.innerHTML = renderToStaticMarkup(<InteractiveTrendChart {...chart.props!} />)
+    const line = rendered.querySelector('.interactive-trend-line')!.getAttribute('d')!
+    const area = rendered.querySelector('.interactive-trend-area')!.getAttribute('d')!
+    expect(line.match(/M/g)).toHaveLength(1)
+    expect(line.match(/L/g)).toHaveLength(3)
+    expect(area.startsWith(line)).toBe(true)
+  })
+
+  it('still breaks the price line at explicitly invalid observations', async () => {
+    history.mockResolvedValue([
+      { date: '2026-10-19', close: 100 }, { date: '2026-10-20', close: 0 },
+      { date: '2026-10-21', close: 110 }, { date: '2026-10-22', close: 112 },
+    ])
+    await renderPanel(defaultPosition)
+    expect(chart.rows[1].close).toBeUndefined()
+    const { InteractiveTrendChart } = await vi.importActual<typeof import('./InteractiveTrendChart')>('./InteractiveTrendChart')
+    const rendered = document.createElement('div')
+    rendered.innerHTML = renderToStaticMarkup(<InteractiveTrendChart {...chart.props!} />)
+    expect(rendered.querySelector('.interactive-trend-line')!.getAttribute('d')!.match(/M/g)).toHaveLength(2)
+    expect(rendered.querySelector('.interactive-trend-area')!.getAttribute('d')!.match(/Z/g)).toHaveLength(2)
   })
 
   it('clears a previous holding series and ignores its late request after selection changes', async () => {

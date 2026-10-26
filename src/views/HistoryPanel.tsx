@@ -22,20 +22,10 @@ const RANGES: { label: string; days: number }[] = [
 
 const LINE_COLOR = 'var(--holding-chart-line)'
 const COST_LINE_COLOR = 'var(--holding-chart-cost)'
-const DAY_MS = 24 * 60 * 60 * 1000
 
 type HistoryChartRow = {
   at: number
   close: number | undefined
-}
-
-function hasMissingWeekday(previous: number, next: number): boolean {
-  if (next - previous >= 7 * DAY_MS) return true
-  for (let at = previous + DAY_MS; at < next; at += DAY_MS) {
-    const day = new Date(at).getUTCDay()
-    if (day !== 0 && day !== 6) return true
-  }
-  return false
 }
 
 function historyRows(points: HistoryPoint[]): HistoryChartRow[] {
@@ -53,7 +43,7 @@ function historyRows(points: HistoryPoint[]): HistoryChartRow[] {
   const rows: HistoryChartRow[] = []
   for (const point of new Map(dated.map((row) => [row.at, row])).values()) {
     const previous = rows[rows.length - 1]
-    if (previous && previous.close !== undefined && (point.breakBefore || hasMissingWeekday(previous.at, point.at))) {
+    if (previous && previous.close !== undefined && point.breakBefore) {
       rows.push({ at: previous.at + (point.at - previous.at) / 2, close: undefined })
     }
     rows.push({ at: point.at, close: point.close })
