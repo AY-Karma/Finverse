@@ -14,8 +14,8 @@ details update in the same pointer event. No additional runtime dependencies are
 
 Overview's donut adapter and styles live in `src/views/overview/`. The shared
 `src/views/DitherBar.tsx` uses the kit's `paintColumn` renderer for Overview's
-composition bars, Insights' treemap, exposure mix, price movers and risk gauges,
-and Monitor's activity summary bars. Hover highlights keep values readable
+composition bars, Insights' treemap, exposure mix, price movers and risk gauges.
+Hover highlights keep values readable
 without bloom. Holding price history uses a subdued blue `DitherAreaFill` inside
 `InteractiveTrendChart`, with a horizontal average-cost reference and opaque
 price readouts. Its fill stays unchanged on hover.

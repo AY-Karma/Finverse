@@ -16,6 +16,8 @@ const ICON_PATHS = {
   device: 'M3 4h18v13H3V4Zm5 17h8m-4-4v4',
   import: 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',
   external: 'M14 3h7v7m0-7L10 14M10 3H3v18h18v-7',
+  calendar: 'M5 5h14a2 2 0 0 1 2 2v13H3V7a2 2 0 0 1 2-2Zm2-3v6m10-6v6M3 11h18m-13 4h2m4 0h2',
+  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-11 12a2 2 0 0 0 4 0',
 } as const
 
 export type ActionIconName = keyof typeof ICON_PATHS

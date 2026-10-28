@@ -6,6 +6,9 @@ import { holdingIdentity, MONITOR_STORAGE_KEY } from '../monitor'
 import { loadSettings } from '../store'
 import type { useStore } from '../useStore'
 import { MonitorView } from './MonitorView'
+import { useMonitor } from '../useMonitor'
+import { quoteKey } from '../valuation'
+import { ReminderAction, RulesPanel, type ReminderRequest, type RuleRequest } from './monitorPanels'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true } })
@@ -39,6 +42,59 @@ afterEach(async () => {
 })
 
 describe('mobile watch rule actions', () => {
+  it('shows waiting until a recent compatible observation exists and hides capacity noise', async () => {
+    await renderMonitor()
+    expect(container.querySelector('.mp-rule-state')?.textContent).toBe('Waiting')
+    expect(container.querySelector('.mp-rule-capacity')).toBeNull()
+    state.store.settings = { ...state.store.settings, allowExternalData: true }
+    const position = state.store.positions[0]
+    state.store.liveQuotes = { [quoteKey(position)]: { price: 100, source: 'nav', at: Date.now() } }
+    await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
+    expect(container.querySelector('.mp-rule-state')?.textContent).toBe('Active')
+    expect(container.querySelector('.mp-rule-observation')?.textContent).toContain('10.00% to level')
+    expect(container.querySelector('.mp-rule-observation')?.textContent).toContain('Published NAV')
+    state.store.liveQuotes = { [quoteKey(position)]: { price: 100, source: 'nav', at: Date.now() - 5 * 86_400_000 } }
+    await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
+    expect(container.querySelector('.mp-rule-state')?.textContent).toBe('Waiting')
+    expect(container.querySelector('.mp-rule-observation')?.textContent).not.toContain('10.00%')
+  })
+
+  it('opens a contextual watch form for the requested holding and supports repeating the action', async () => {
+    await renderMonitor()
+    let request: RuleRequest = { holdingId: 'missing', revision: 1 }
+    const Context = () => <RulesPanel controller={useMonitor()} request={request} />
+    await act(async () => root.render(<Context />))
+    const dialog = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-rule-title"]')!
+    expect(dialog.open).toBe(false)
+    request = { holdingId: 'NIPPON', revision: 2 }
+    await act(async () => root.render(<Context />))
+    expect(dialog.open).toBe(true)
+    expect(dialog.querySelector('select')?.value).toBe('NIPPON')
+    expect(dialog.querySelector('h2')?.textContent).toBe('Create a watch rule')
+    await act(async () => dialog.close())
+    request = { ...request, revision: 3 }
+    await act(async () => root.render(<Context />))
+    expect(dialog.open).toBe(true)
+  })
+
+  it('prefills a contextual reminder without persisting it until submitted', async () => {
+    await renderMonitor()
+    const saved = localStorage.getItem(MONITOR_STORAGE_KEY)
+    const request: ReminderRequest = { holdingId: 'NIPPON', title: 'Read the fund notice', date: '2035-01-20', revision: 1 }
+    const Context = () => <ReminderAction controller={useMonitor()} request={request} />
+    await act(async () => root.render(<Context />))
+    const dialog = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-reminder-title"]')!
+    expect(dialog.open).toBe(true)
+    expect(dialog.querySelector('select')?.value).toBe('NIPPON')
+    expect(dialog.querySelector<HTMLInputElement>('input[maxlength]')?.value).toBe('Read the fund notice')
+    expect(dialog.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2035-01-20')
+    expect(localStorage.getItem(MONITOR_STORAGE_KEY)).toBe(saved)
+    state.store.settings = { ...state.store.settings, hideValues: true }
+    await act(async () => root.render(<Context />))
+    expect(dialog.open).toBe(false)
+    expect(dialog.querySelector<HTMLInputElement>('input[maxlength]')?.value).toBe('')
+  })
+
   it('closes a private rule form and blocks editing when masking is enabled', async () => {
     await renderMonitor()
     const edit = [...container.querySelectorAll<HTMLButtonElement>('.mp-rule-menu button')].find(button => button.textContent === 'Edit')!
@@ -50,7 +106,7 @@ describe('mobile watch rule actions', () => {
     expect(dialog.open).toBe(false)
     expect(edit.disabled).toBe(true)
     expect(container.textContent).not.toContain('Nippon India')
-    const actions = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === '+ New rule' || button.textContent === '+ Reminder')
+    const actions = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === '+ New rule' || button.getAttribute('aria-label') === 'Add reminder')
     expect(actions).toHaveLength(2)
     expect(actions.every(button => button.disabled)).toBe(true)
   })

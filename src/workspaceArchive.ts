@@ -1,6 +1,7 @@
 import type { AccountStatement, Folio, PortfolioSnapshot, Position, Settings } from './types'
 import type { MonitorAlert, MonitorEvent, MonitorMetric, MonitorRule, MonitorState } from './monitor'
 import { holdingIdentity } from './monitor'
+import { parseMonitorReadingState } from './monitorReading'
 import { combinePositions } from './valuation'
 import { migrateFolioIdentities } from './instruments'
 import { hasCompatibleFundScheme } from './fundSchemes'
@@ -199,6 +200,7 @@ function parseAlert(value: unknown): MonitorAlert {
     kind: choice(row.kind, ['price'], 'alert kind'), state: choice(row.state, ['open', 'reviewed', 'snoozed'], 'alert review state'),
     observationKey: text(row.observationKey, 'alert observation key', false, 2000), time: text(row.time, 'alert display time', true, 80),
     at: number(row.at, 'alert timestamp', 1, Math.min(MAX_DATE, Date.now() + 300_000)), metrics: list(row.metrics, 6, 'alert metrics', parseMetric),
+    ...(row.snoozedUntil !== undefined ? { snoozedUntil: number(row.snoozedUntil, 'snooze deadline', 1, MAX_DATE) } : {}),
   }
 }
 function parseMonitor(value: unknown): MonitorState {
@@ -207,6 +209,7 @@ function parseMonitor(value: unknown): MonitorState {
     rules: unique(list(row.rules, 200, 'watch rules', parseRule), 'watch rule'),
     events: unique(list(row.events, 200, 'reminders', parseEvent), 'reminder'),
     alerts: unique(list(row.alerts, 200, 'historical alerts', parseAlert), 'alert'),
+    ...(row.reading !== undefined ? { reading: parseMonitorReadingState(row.reading) } : {}),
   }
 }
 

@@ -58,6 +58,7 @@ export function remapMonitorReferences(state: MonitorState, beforeRawPositions: 
   }
 
   return {
+    ...state,
     rules: state.rules.map((rule) => {
       const position = resolve(rule.holdingId, rule.instrumentIdentity)
       if (!position) return { ...rule, unresolved: true }

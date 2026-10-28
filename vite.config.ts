@@ -4,12 +4,14 @@ import type { Plugin } from 'vite'
 import { handleHistoryRequest } from './api/history'
 import { handleQuoteRequest } from './api/quotes'
 import { handleNewsRequest } from './api/news'
+import { handleEventsRequest } from './api/events'
 
 function localMarketDataApi(): Plugin {
   const handlers = new Map([
     ['/api/quotes', handleQuoteRequest],
     ['/api/history', handleHistoryRequest],
     ['/api/news', handleNewsRequest],
+    ['/api/events', handleEventsRequest],
   ])
   return {
     name: 'finverse-local-market-data-api',

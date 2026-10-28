@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { emptyMonitorState, evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, reconcileMonitorRules, sanitizeMonitorState, type MonitorRule } from './monitor'
+import { emptyMonitorState, evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, monitorRuleObservation, monitorRuleObservations, reconcileMonitorRules, sanitizeMonitorState, type MonitorAlert, type MonitorRule } from './monitor'
 import type { Position } from './types'
 import * as valuation from './valuation'
 
@@ -31,6 +31,80 @@ describe('watch rule uniqueness', () => {
   it('allows saving an unchanged rule but prevents editing it into another existing rule', () => {
     expect(hasDuplicateMonitorRule([rule], rule, rule.id)).toBe(false)
     expect(hasDuplicateMonitorRule([rule, { ...rule, id: 'other', threshold: 50 }], { ...rule, threshold: 50 }, rule.id)).toBe(true)
+  })
+})
+
+describe('watch observations', () => {
+  const now = Date.now()
+  const quotes = { [valuation.quoteKey(position)]: { price: 45, at: now, source: 'yahoo' as const } }
+
+  it('shares listing verification across a batch of rules without changing their states', () => {
+    const positions = Array.from({ length: 200 }, (_, index) => ({ ...position, id: `holding-${index}`, ticker: `STOCK${index}`, providerSymbol: `STOCK${index}.NS` }))
+    const rules = positions.slice(0, 20).map((holding, index) => ({ ...rule, id: String(index), holdingId: holding.id, instrumentIdentity: holdingIdentity(holding), active: index !== 0 }))
+    const keys = vi.spyOn(valuation, 'quoteKey')
+    try {
+      const observations = monitorRuleObservations(rules, positions, {}, now, true)
+      expect(observations.size).toBe(rules.length)
+      expect(observations.get('0')).toEqual({ state: 'Paused' })
+      expect(observations.get('1')).toEqual({ state: 'Waiting' })
+      expect(keys.mock.calls.length).toBeLessThanOrEqual(positions.length * 2 + rules.length * 4)
+    } finally { keys.mockRestore() }
+  })
+
+  it('keeps conflicting quote identities unavailable in batch observations', () => {
+    const otherVenue = { ...position, id: 'other', exchange: 'BSE' as const, providerSymbol: 'FMCGIETF.BO' }
+    const keys = vi.spyOn(valuation, 'quoteKey').mockReturnValue('legacy-shared-key')
+    try {
+      const watch = { ...rule, instrumentIdentity: holdingIdentity(position) }
+      const observations = monitorRuleObservations([watch], [position, otherVenue], { 'legacy-shared-key': { price: 45, at: now, source: 'yahoo' } }, now, true)
+      expect(observations.get(watch.id)).toEqual({ state: 'Unavailable' })
+    } finally { keys.mockRestore() }
+  })
+
+  it('shows distance only for a recent, compatible observation', () => {
+    expect(monitorRuleObservation(rule, [position], quotes, now, true)).toMatchObject({ state: 'Active', matched: false, distance: (47.05 - 45) / 45 * 100 })
+    expect(monitorRuleObservation(rule, [position], quotes, now, false)).toEqual({ state: 'Waiting' })
+    expect(monitorRuleObservation(rule, [position], quotes, now + 2 * 86_400_000, true)).toEqual({ state: 'Waiting' })
+    expect(monitorRuleObservation(rule, [position], { [valuation.quoteKey(position)]: { ...quotes[valuation.quoteKey(position)], source: 'nav' } }, now, true)).toEqual({ state: 'Waiting' })
+  })
+
+  it('distinguishes paused rules, unavailable listings and missing daily changes', () => {
+    expect(monitorRuleObservation({ ...rule, active: false }, [position], quotes, now, true)).toEqual({ state: 'Paused' })
+    expect(monitorRuleObservation({ ...rule, unresolved: true }, [position], quotes, now, true)).toEqual({ state: 'Unavailable' })
+    expect(monitorRuleObservation({ ...rule, condition: 'daily_move' }, [position], quotes, now, true)).toEqual({ state: 'Waiting' })
+    const foreign = { ...position, exchange: 'NASDAQ' as const }
+    expect(monitorRuleObservation({ ...rule, instrumentIdentity: holdingIdentity(foreign) }, [foreign], quotes, now, true)).toEqual({ state: 'Unavailable' })
+  })
+
+  it('expresses daily-move distance in percentage points and recognizes a negative match', () => {
+    const daily = { ...rule, condition: 'daily_move' as const, threshold: 3 }
+    const key = valuation.quoteKey(position)
+    expect(monitorRuleObservation(daily, [position], { [key]: { ...quotes[key], changePct: -2 } }, now, true)).toMatchObject({ distance: 1, matched: false })
+    expect(monitorRuleObservation(daily, [position], { [key]: { ...quotes[key], changePct: -4 } }, now, true)).toMatchObject({ matched: true })
+  })
+})
+
+describe('snoozed alert persistence', () => {
+  const now = Date.now()
+  const alert: MonitorAlert = { id: 'alert', holdingId: position.id, holding: position.name, kind: 'price', state: 'snoozed', observationKey: 'observation', at: now, time: '', title: '', reason: '', evidence: '', metrics: [], snoozedUntil: now + 60_000 }
+
+  it('reopens a due snooze with external data off and preserves reading preferences', () => {
+    const state = { ...emptyMonitorState(), alerts: [alert], reading: { articles: [], follows: [{ id: 'banks', query: 'Banks', region: 'IN' as const }] } }
+    expect(evaluateMonitorRules(state, [], {}, now, false)).toBe(state)
+    const resumed = evaluateMonitorRules(state, [], {}, now + 60_000, false)
+    expect(resumed.alerts[0].state).toBe('open')
+    expect(resumed.alerts[0].snoozedUntil).toBeUndefined()
+    expect(resumed.reading).toBe(state.reading)
+  })
+
+  it('preserves deadlines and reading in version-one storage while keeping legacy snoozes manual', () => {
+    const reading = { articles: [], follows: [{ id: 'banks', query: 'Banks', region: 'IN' as const }] }
+    const loaded = sanitizeMonitorState({ version: 1, alerts: [alert], rules: [], events: [], reading })
+    expect(loaded.alerts[0].snoozedUntil).toBe(alert.snoozedUntil)
+    expect(loaded.reading).toEqual(reading)
+    const { snoozedUntil: _deadline, ...legacy } = alert
+    const legacyState = { ...emptyMonitorState(), alerts: [legacy] }
+    expect(evaluateMonitorRules(legacyState, [], {}, now + 86_400_000, false)).toBe(legacyState)
   })
 })
 

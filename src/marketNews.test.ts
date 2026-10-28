@@ -218,6 +218,20 @@ describe('market news adapter · wire', () => {
     expect(calls).toBe(2)
   })
 
+  it('refreshes wire and company results on an explicit refresh while keeping normal loads cached', async () => {
+    const fetcher = vi.fn(async () => ET_FEED)
+    const adapter = createMarketNewsAdapter(fetcher)
+    await adapter.fetchWire({})
+    await adapter.fetchCompanyNews('Company', {})
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    await adapter.fetchWire({})
+    await adapter.fetchCompanyNews('Company', {})
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    await adapter.fetchWire({ forceRefresh: true })
+    await adapter.fetchCompanyNews('Company', { forceRefresh: true })
+    expect(fetcher).toHaveBeenCalledTimes(6)
+  })
+
   it('surfaces a named issue when one wire feed dies but still shows the other', async () => {
     const adapter = createMarketNewsAdapter(async (url) => {
       if (url.includes('wire-et')) throw new Error('HTTP 403')
@@ -401,6 +415,65 @@ describe('market news adapter · company search', () => {
 })
 
 describe('loadMarketFeed', () => {
+  it('keeps a fast search result eligible when the same article arrives later on the wire', async () => {
+    let finishWire!: (feed: { items: NewsItem[]; issues: [] }) => void
+    let publishWire!: (feed: { items: NewsItem[]; issues: [] }) => void
+    const searched: NewsItem = { id: 'searched', title: 'Company results', source: 'Search', sourceUrl: 'https://example.test/results', matches: [], origin: 'search' }
+    const wire: NewsItem = { ...searched, id: 'wire', origin: 'wire' }
+    const visible: string[][] = []
+    const pending = loadMarketFeed([], { query: 'Company', onPartial: (feed) => visible.push(feed.items.filter((item) => item.origin === 'search').map((item) => item.title)) }, {
+      fetchWire: (options) => { publishWire = options.onPartial!; return new Promise((resolve) => { finishWire = resolve }) },
+      fetchCompanyNews: async () => ({ items: [searched], issues: [] }),
+    })
+    await Promise.resolve()
+    publishWire({ items: [wire], issues: [] })
+    finishWire({ items: [wire], issues: [] })
+    const result = await pending
+    expect(visible).toEqual([['Company results'], ['Company results']])
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]).toMatchObject({ id: 'wire', origin: 'search' })
+  })
+
+  it('delivers fast searches before the wire and retains them through later wire snapshots', async () => {
+    let finishWire!: (feed: { items: NewsItem[]; issues: [] }) => void
+    let publishWire!: (feed: { items: NewsItem[]; issues: [] }) => void
+    const searched: NewsItem = { id: 'searched', title: 'Reliance Industries results', source: 'Search', sourceUrl: 'https://example.test/search', matches: [], origin: 'search' }
+    const wire: NewsItem = { ...searched, id: 'wire', title: 'Market update', sourceUrl: 'https://example.test/wire', origin: 'wire' }
+    const partials: NewsItem[][] = []
+    const adapter: MarketNewsAdapter = {
+      fetchWire: (options) => {
+        publishWire = options.onPartial!
+        return new Promise((resolve) => { finishWire = resolve })
+      },
+      fetchCompanyNews: async () => ({ items: [searched], issues: [] }),
+    }
+    const pending = loadMarketFeed(positions, { query: 'Reliance', onPartial: (feed) => partials.push(feed.items) }, adapter)
+    await Promise.resolve()
+    expect(partials[0]?.map((item) => item.id)).toEqual(['searched'])
+    expect(partials[0][0].matches).toContain('RELIANCE')
+
+    publishWire({ items: [wire], issues: [] })
+    expect(partials.at(-1)?.map((item) => item.id)).toEqual(['wire', 'searched'])
+    finishWire({ items: [wire], issues: [] })
+    expect((await pending).items.map((item) => item.id)).toEqual(['wire', 'searched'])
+  })
+
+  it('does not publish late partials after a caller cancels a search', async () => {
+    const controller = new AbortController()
+    let finishSearch!: (feed: { items: NewsItem[]; issues: [] }) => void
+    const onPartial = vi.fn()
+    const pending = loadMarketFeed([], { query: 'Company', signal: controller.signal, onPartial }, {
+      fetchWire: async () => ({ items: [], issues: [] }),
+      fetchCompanyNews: () => new Promise((resolve) => { finishSearch = resolve }),
+    })
+    await Promise.resolve()
+    controller.abort()
+    onPartial.mockClear()
+    finishSearch({ items: [], issues: [] })
+    await pending
+    expect(onPartial).not.toHaveBeenCalled()
+  })
+
   const makeStub = () => ({
     fetchWire: vi.fn(async (_options: { signal?: AbortSignal }) => ({
       items: [{ id: 'wire:1', title: 'Reliance Industries Q1 profit up 12%', source: 'Economic Times Markets', sourceUrl: 'https://economictimes.test/ril-q1', publishedAt: NOW, matches: [], origin: 'wire' as const }],
@@ -414,7 +487,7 @@ describe('loadMarketFeed', () => {
     })),
   })
 
-  it('layers the active search over the wire, tags owned stories and origins, dedupes wire originals first', async () => {
+  it('keeps wire originals while preserving search eligibility for overlapping search results', async () => {
     const adapter = makeStub()
     adapter.fetchCompanyNews.mockResolvedValueOnce({
       items: [
@@ -427,7 +500,7 @@ describe('loadMarketFeed', () => {
 
     expect(adapter.fetchCompanyNews).toHaveBeenCalledWith('"Reliance Industries"', expect.objectContaining({ query: '"Reliance Industries"' }))
     expect(feed.items.map((item) => item.id)).toEqual(['wire:1', 'search:1'])
-    expect(feed.items.find((item) => item.id === 'wire:1')?.origin).toBe('wire')
+    expect(feed.items.find((item) => item.id === 'wire:1')?.origin).toBe('search')
     expect(feed.items.find((item) => item.id === 'search:1')?.origin).toBe('search')
     expect(feed.items.every((item) => item.matches.includes('RELIANCE'))).toBe(true)
     expect(feed.fetchedAt).toBe(NOW)

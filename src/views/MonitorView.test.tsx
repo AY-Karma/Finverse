@@ -1,14 +1,19 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { holdingIdentity, MONITOR_STORAGE_KEY } from '../monitor'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { holdingIdentity, MONITOR_STORAGE_KEY, type MonitorState } from '../monitor'
 import { loadSettings } from '../store'
 import { quoteKey } from '../valuation'
 import type { useStore } from '../useStore'
 import { MonitorView } from './MonitorView'
+import { loadMarketEvents, type MarketEvent } from '../marketEvents'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true } })
+Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.open = false; this.dispatchEvent(new Event('close')) } })
+vi.mock('../marketEvents', () => ({ loadMarketEvents: vi.fn() }))
+beforeEach(() => { vi.mocked(loadMarketEvents).mockReset().mockResolvedValue({ events: [], issues: [], fetchedAt: Date.now() }) })
 const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore> }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
 vi.mock('./MonitorNewsPanel', () => ({ MonitorNewsPanel: ({ selectedIdentity, selectedRevision }: { selectedIdentity: string; selectedRevision: number }) => <section data-news-identity={selectedIdentity} data-news-revision={selectedRevision} /> }))
@@ -16,7 +21,7 @@ vi.mock('./MonitorNewsPanel', () => ({ MonitorNewsPanel: ({ selectedIdentity, se
 let root: Root
 let container: HTMLDivElement
 
-async function renderWatch(hideValues: boolean) {
+async function renderWatch(hideValues = false) {
   const positions = ['UP', 'DOWN'].map((ticker) => ({
     id: ticker, ticker, name: ticker, type: 'stock' as const, quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100,
   }))
@@ -36,318 +41,320 @@ async function renderWatch(hideValues: boolean) {
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
+  await rerender()
+}
+
+async function rerender() {
   await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
 }
 
-function expectNeutralWatch() {
-  expect(container.querySelector('[data-tone="up"], [data-tone="down"], [data-trend="up"], [data-trend="down"]')).toBeNull()
-  expect(container.querySelector('.mp-rule-condition svg')).toBeNull()
-  expect(container.querySelector('.pa-panel')?.textContent).not.toMatch(/Daily move up|Daily move down|Price is above|Price is below|10\.00%|120\.00|80\.00/)
-  expect(container.querySelector('.mp-rule-list')?.innerHTML).not.toMatch(/Price above|Price below|Daily move exceeds/)
-  expect([...container.querySelectorAll('.pa-record-detail dd')].every((element) => element.textContent === '••••••')).toBe(true)
-}
-
 async function clickButton(label: string) {
-  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label || item.getAttribute('aria-label') === label)!
+  const button = [...container.querySelectorAll<HTMLElement>('button, summary')].find((item) => item.textContent === label || item.getAttribute('aria-label') === label)!
   expect(button).toBeDefined()
   await act(async () => { button.click() })
+}
+
+async function restoreSaved(change: (saved: MonitorState & { version: number }) => void) {
+  const saved = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!)
+  change(saved)
+  localStorage.setItem(MONITOR_STORAGE_KEY, JSON.stringify(saved))
+  await act(async () => { window.dispatchEvent(new Event('finverse:monitor-restored')) })
+}
+
+function expectPrivateWatch() {
+  expect(container.textContent).not.toMatch(/\bUP\b|\bDOWN\b|Daily move up|Daily move down|Price is above|Price is below|10\.00%|120\.00|80\.00/)
+  const labels = [...container.querySelectorAll('[aria-label], [title]')].map(element => `${element.getAttribute('aria-label') || ''} ${element.getAttribute('title') || ''}`).join(' ')
+  expect(labels).not.toMatch(/\bUP\b|\bDOWN\b/)
+  expect(container.querySelector('[data-tone="up"], [data-tone="down"], [data-trend="up"], [data-trend="down"]')).toBeNull()
+  expect(container.querySelector('.mp-rule-condition svg, .pa-news-button')).toBeNull()
+  expect(container.querySelector('.mp-rule-list')?.innerHTML).not.toMatch(/Price above|Price below|Daily move exceeds/)
+  const values = [...container.querySelectorAll('.pa-record-detail dd')]
+  expect(values.length).toBeGreaterThan(0)
+  expect(values.every(element => element.textContent === '\u2022'.repeat(6))).toBe(true)
 }
 
 afterEach(async () => {
   if (root) await act(async () => { root.unmount() })
   container?.remove()
   localStorage.clear()
+  vi.restoreAllMocks()
 })
 
-describe('Portfolio Watch masking', () => {
-  it('masks observation coverage, counts and freshness geometry', async () => {
-    await renderWatch(true)
-    const observations = container.querySelectorAll('.pa-summary-card')[2]
-    expect(observations.querySelector('.pa-summary-value')?.textContent).toBe('••••••')
-    expect(observations.querySelector('canvas, time')).toBeNull()
-    expect(observations.textContent).not.toMatch(/\d/)
-  })
-
-  it('hides holding names across activity, rules and form options without changing saved records', async () => {
-    await renderWatch(false)
-    const saved = localStorage.getItem(MONITOR_STORAGE_KEY)
-    state.store.settings = { ...state.store.settings, hideValues: true }
-    await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
-    for (const view of ['Brief', 'Holdings', 'Activity']) {
-      await clickButton(view)
-      expect(container.textContent).not.toMatch(/\bUP\b|\bDOWN\b/)
-      const labels = [...container.querySelectorAll('[aria-label], [title]')].map(element => `${element.getAttribute('aria-label') || ''} ${element.getAttribute('title') || ''}`).join(' ')
-      expect(labels).not.toMatch(/\bUP\b|\bDOWN\b/)
-      expect(container.querySelector('.pa-news-button')).toBeNull()
-    }
-    expect(localStorage.getItem(MONITOR_STORAGE_KEY)).toBe(saved)
-    state.store.settings = { ...state.store.settings, hideValues: false }
-    await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
-    expect(container.textContent).toContain('UP')
-  })
-
-  it('neutralizes quote and alert indicators, titles, and rule labels, then restores them', async () => {
-    await renderWatch(false)
-    expect(container.querySelector('[data-tone="up"]')).not.toBeNull()
-    expect(container.querySelector('[data-tone="down"]')).not.toBeNull()
-    expect(container.textContent).toContain('Daily move up 10.00%')
-    const saved = localStorage.getItem(MONITOR_STORAGE_KEY)
-
-    state.store.settings = { ...state.store.settings, hideValues: true }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expectNeutralWatch()
-    expect(localStorage.getItem(MONITOR_STORAGE_KEY)).toBe(saved)
-
-    state.store.settings = { ...state.store.settings, hideValues: false }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('[data-trend="up"]')).not.toBeNull()
-    expect(container.querySelector('[data-trend="down"]')).not.toBeNull()
-    expect(container.querySelector('.mp-rule-condition svg')).not.toBeNull()
-    expect(container.textContent).toContain('Daily move up 10.00%')
-  })
-
-  it('starts neutral when masking is already enabled', async () => {
-    await renderWatch(true)
-    expectNeutralWatch()
-    const review = container.querySelector<HTMLButtonElement>('.pa-review-actions button')!
-    expect(review.textContent).toContain('Mark reviewed')
-    await act(async () => { review.click() })
-    expect(container.querySelector('.pa-pulse')?.textContent).toContain('2 alerts')
-    expectNeutralWatch()
-  })
-
-  it('keeps values and trends hidden across all three views and restores holding observations', async () => {
-    await renderWatch(true)
-    for (const view of ['Holdings', 'Activity', 'Brief']) {
-      await clickButton(view)
-      expectNeutralWatch()
-    }
-    await clickButton('Holdings')
-    state.store.settings = { ...state.store.settings, hideValues: false }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('.pa-table')?.textContent).toContain('120.00')
-    expect(container.querySelector('.pa-table')?.textContent).toContain('80.00')
-    expect(container.querySelectorAll('.pa-table-row')).toHaveLength(2)
-    expect(container.querySelector('.pa-table-row[data-tone="down"]')).not.toBeNull()
-  })
-
-  it('keeps review history accessible after an alert leaves Brief', async () => {
-    await renderWatch(false)
-    await clickButton('Mark reviewed: UP')
-    await clickButton('Activity')
-    await clickButton('History')
-    expect(container.querySelectorAll('.pa-record')).toHaveLength(1)
-    expect(container.querySelector('.pa-record')?.textContent).toContain('Reviewed')
-    await clickButton('Reopen item')
-    expect(container.querySelector('.pa-record')).toBeNull()
-    await clickButton('To review')
-    expect(container.querySelectorAll('.pa-record')).toHaveLength(3)
-  })
-
-  it('opens only the alerts to review from the briefing summary', async () => {
-    await renderWatch(false)
-    await clickButton('Review 3 open watch alerts')
-    expect(container.querySelector('.pa-ledger')).not.toBeNull()
-    expect(container.querySelector('.pa-filters button[aria-pressed="true"]')?.textContent).toBe('To review')
-    expect(container.querySelectorAll('.pa-record')).toHaveLength(3)
-    expect(container.querySelector('.pa-record[data-tone="neutral"]')).toBeNull()
-  })
-
-  it.each([true, false])('toggles summary details and activity back to Brief with open alerts: %s', async (hasOpenAlerts) => {
-    await renderWatch(false)
-    if (!hasOpenAlerts) {
-      for (let index = 0; index < 3; index += 1) {
-        const review = container.querySelector<HTMLButtonElement>('button[aria-label^="Mark reviewed:"]')!
-        await act(async () => { review.click() })
-      }
-    }
-    const details = container.querySelector<HTMLButtonElement>('.pa-summary-footer button')!
-    const activity = container.querySelector<HTMLButtonElement>('.pa-summary-review')!
-    expect(activity.textContent).toContain(hasOpenAlerts ? 'Review alerts' : 'Open activity')
-
-    await act(async () => { details.click() })
-    expect(container.querySelector('.pa-holdings')).not.toBeNull()
-    expect(details.getAttribute('aria-expanded')).toBe('true')
-    expect(details.textContent).toContain('Hide details')
-    await act(async () => { details.click() })
-    expect(container.querySelector('.pa-holdings')).toBeNull()
-    expect(container.querySelector('.pa-brief')).not.toBeNull()
-    expect(details.getAttribute('aria-expanded')).toBe('false')
-
-    await act(async () => { activity.click() })
-    expect(container.querySelector('.pa-ledger')).not.toBeNull()
-    expect(activity.getAttribute('aria-expanded')).toBe('true')
-    expect(activity.textContent).toContain('Close activity')
-    await act(async () => { activity.click() })
-    expect(container.querySelector('.pa-ledger')).toBeNull()
-    expect(container.querySelector('.pa-brief')).not.toBeNull()
-    expect(activity.getAttribute('aria-expanded')).toBe('false')
-    expect(container.querySelector('.pa-views button[aria-pressed="true"]')?.textContent).toBe('Brief')
-
-    await clickButton('Holdings')
-    expect(details.getAttribute('aria-expanded')).toBe('true')
-    await act(async () => { details.click() })
-    expect(container.querySelector('.pa-brief')).not.toBeNull()
-    await clickButton('Activity')
-    await act(async () => { activity.click() })
-    expect(container.querySelector('.pa-brief')).not.toBeNull()
-  })
-
-  it('shows a dated largest impact and masks its identity and breadth geometry', async () => {
-    await renderWatch(false)
-    state.store.liveQuotes = {
-      ...state.store.liveQuotes,
-      [quoteKey(state.store.positions[0])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[0])], change: 20 },
-      [quoteKey(state.store.positions[1])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[1])], change: -30 },
-    }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    const lead = container.querySelector('.pa-summary-lead')!
-    expect(lead.querySelector('.pa-summary-value')?.textContent).toBe('−₹30.00')
-    expect(lead.querySelector('.pa-summary-context')?.textContent).toContain('DOWN')
-    expect(lead.querySelector('.pa-summary-time')?.textContent).toContain('IST')
-    expect(lead.textContent).toContain('2 of 2 quote estimates')
-    await clickButton('Details')
-    expect(container.querySelector('.pa-table')).not.toBeNull()
-    state.store.settings = { ...state.store.settings, hideValues: true }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('.pa-summary-lead')?.textContent).not.toContain('DOWN')
-    expect(container.querySelector('.pa-summary-value')?.textContent).toBe('••••••')
-    expect(container.querySelector('.pa-summary-breadth + .pa-summary-rail')?.children).toHaveLength(0)
-    expectNeutralWatch()
-  })
-
-  it('separates missing changes from flat moves and does not invent a monetary estimate', async () => {
-    await renderWatch(false)
-    state.store.liveQuotes = {
-      ...state.store.liveQuotes,
-      [quoteKey(state.store.positions[1])]: { price: 80, at: Date.now(), source: 'yahoo' },
-    }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('.pa-summary-lead .pa-summary-value')?.textContent).toBe('Not reported')
-    expect(container.querySelector('.pa-summary-legend')?.textContent).toContain('0 flat')
-    expect(container.querySelector('.pa-summary-legend')?.textContent).toContain('1 not reported')
-    expect(container.querySelector('.pa-pulse')?.textContent).toContain('2 quotes · 0 daily NAVs')
-  })
-
-  it('shows a true zero impact separately from an unavailable fund NAV', async () => {
-    await renderWatch(false)
-    state.store.liveQuotes = Object.fromEntries(Object.entries(state.store.liveQuotes).map(([key, quote]) => [key, { ...quote, change: 0, changePct: 0 }]))
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('.pa-summary-lead .pa-summary-value')?.textContent).toBe('₹0.00')
-    expect(container.querySelector('.pa-summary-lead')?.textContent).toContain('Available impact estimates are zero')
-
-    state.store.positions = [{ ...state.store.positions[0], ticker: 'FUND', name: 'Example Fund', type: 'mutual-fund' }]
+describe('single-page Monitor', () => {
+  it('keeps market news available before importing holdings', async () => {
+    await renderWatch()
+    state.store.positions = []
     state.store.liveQuotes = {}
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('.pa-summary-lead .pa-summary-value')?.textContent).toBe('Unavailable')
-    expect(container.querySelector('.pa-summary-lead')?.textContent).toContain('No recent fund NAV is available')
-    expect(container.querySelector('.pa-summary-lead')?.textContent).not.toContain('price change')
+    await restoreSaved(saved => { saved.alerts = []; saved.rules = []; saved.events = [] })
+    const importHoldings = vi.fn()
+    await act(async () => root.render(<MonitorView onRequestImport={importHoldings} />))
+    expect(container.querySelector('[data-news-identity]')).not.toBeNull()
+    expect(container.querySelector('.mp-monitor-sidebar')).toBeNull()
+    await clickButton('Import holdings')
+    expect(importHoldings).toHaveBeenCalledOnce()
   })
 
-  it('keeps large summary amounts compact while exposing the complete signed amount', async () => {
-    await renderWatch(false)
-    state.store.positions = state.store.positions.map((position) => ({ ...position, quantity: 10000 }))
-    state.store.liveQuotes = { ...state.store.liveQuotes, [quoteKey(state.store.positions[0])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[0])], change: 20 } }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    const value = container.querySelector('.pa-summary-lead .pa-summary-value')!
-    expect(value.textContent).toBe('+₹2L')
-    expect(value.getAttribute('aria-label')).toBe('+₹2,00,000.00')
-    expect(value.getAttribute('title')).toBe('+₹2,00,000.00')
+  it('prefills watch and reminder forms from a selected company', async () => {
+    await renderWatch()
+    await clickButton('Open company: UP')
+    expect(container.querySelector<HTMLDialogElement>('.mp-company-dialog')?.open).toBe(true)
+    await clickButton('Create watch')
+    const ruleForm = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-rule-title"]')!
+    expect(ruleForm.open).toBe(true)
+    expect(ruleForm.querySelector('select')?.value).toBe('UP')
+    await clickButton('Close rule form')
+    await clickButton('Open company: DOWN')
+    await clickButton('Remind me')
+    const reminderForm = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-reminder-title"]')!
+    expect(reminderForm.open).toBe(true)
+    expect(reminderForm.querySelector('select')?.value).toBe('DOWN')
   })
 
-  it('uses imported prices and suppresses cached market movements when external data is disabled', async () => {
-    await renderWatch(false)
-    state.store.settings = { ...state.store.settings, allowExternalData: false }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('.pa-movers')).toBeNull()
-    await clickButton('Holdings')
-    expect(container.querySelector('.pa-table')?.textContent).toContain('Imported price')
-    expect(container.querySelector('.pa-table')?.textContent).not.toContain('120.00')
-    expect(container.querySelectorAll('.pa-direction')).toHaveLength(4)
-    expect([...container.querySelectorAll('.pa-direction')].every((item) => item.textContent === 'Unavailable')).toBe(true)
+  it('makes every company filing available in a focusable feed without expansion', async () => {
+    const filings: MarketEvent[] = Array.from({ length: 8 }, (_, index) => ({
+      id: `filing-${index}`, symbol: 'UP', title: `Filing ${index}`, kind: 'filing', date: '2026-10-27', dateLabel: 'Published', publishedAt: Date.now() - index * 1000,
+      source: 'NSE', sourceUrl: `https://nsearchives.nseindia.com/corporate/UP-${index}.pdf`, holdingId: 'UP', instrumentIdentity: '', holdingName: 'UP',
+    }))
+    vi.mocked(loadMarketEvents).mockResolvedValue({ events: filings, issues: [], fetchedAt: Date.now() })
+    await renderWatch()
+    const region = container.querySelector('[role="region"][aria-label="Company updates feed"]')!
+    expect(region.getAttribute('tabindex')).toBe('0')
+    expect(region.querySelectorAll('article')).toHaveLength(8)
+    expect(container.textContent).not.toContain('Show more updates')
   })
 
-  it('highlights each reported impact by its own sign and keeps missing or masked impacts neutral', async () => {
-    await renderWatch(false)
-    expect([...container.querySelectorAll('.pa-impact')].every((item) => item.getAttribute('data-trend') === 'neutral')).toBe(true)
-    state.store.liveQuotes = {
-      ...state.store.liveQuotes,
-      [quoteKey(state.store.positions[0])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[0])], change: 20 },
-      [quoteKey(state.store.positions[1])]: { ...state.store.liveQuotes[quoteKey(state.store.positions[1])], change: -20 },
+  it('uses confirmed event dates for reminders and links filings to their original document', async () => {
+    const result: MarketEvent = {
+      id: 'announced-result', symbol: 'UP', title: 'Quarterly results', kind: 'results', date: '2099-11-02', dateLabel: 'Meeting date',
+      source: 'NSE', sourceUrl: 'https://www.nseindia.com/companies-listing/corporate-filings-board-meetings',
+      holdingId: 'UP', instrumentIdentity: '', holdingName: 'UP',
     }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.querySelector('.pa-impact[data-trend="up"]')?.textContent).toBe('+₹20.00')
-    expect(container.querySelector('.pa-impact[data-trend="down"]')?.textContent).toBe('−₹20.00')
-    expect(container.querySelector('.pa-mover[data-tone="down"] .pa-impact-line')?.textContent).toBe('Impact:−₹20.00')
-    expect(container.querySelector('.pa-record summary [aria-label="Day move: +10.00%"]')).not.toBeNull()
-    await clickButton('Holdings')
-    expect(container.querySelector('.pa-impact[data-trend="up"]')?.textContent).toBe('+₹20.00')
-    expect(container.querySelector('.pa-impact[data-trend="down"]')?.textContent).toBe('−₹20.00')
+    const filing: MarketEvent = { ...result, id: 'filing', kind: 'filing', date: '2026-10-27', dateLabel: 'Published', publishedAt: Date.now(), title: 'Investor presentation', sourceUrl: 'https://nsearchives.nseindia.com/corporate/UP_27102026.pdf' }
+    vi.mocked(loadMarketEvents).mockResolvedValue({ events: [result, filing], issues: [], fetchedAt: Date.now() })
+    await renderWatch()
+    expect(container.querySelector('.mp-agenda-event time')?.getAttribute('datetime')).toBe(result.date)
+    expect(container.querySelector('.mp-developments article > a')?.getAttribute('href')).toBe(filing.sourceUrl)
+    await clickButton('Remind me: UP Quarterly results')
+    const form = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-reminder-title"]')!
+    expect(form.open).toBe(true)
+    expect(form.querySelector('select')?.value).toBe('UP')
+    expect(form.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe(result.date)
+    expect(form.querySelector<HTMLInputElement>('input:not([type])')?.value).toBe(result.title)
+  })
+
+  it('clears company context and aborts its event request when masking is enabled', async () => {
+    vi.mocked(loadMarketEvents).mockImplementation(() => new Promise(() => {}))
+    await renderWatch()
+    const signal = vi.mocked(loadMarketEvents).mock.calls[0][1]?.signal
+    await clickButton('Open company: UP')
     state.store.settings = { ...state.store.settings, hideValues: true }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expectNeutralWatch()
-    expect([...container.querySelectorAll('.pa-impact')].every((item) => item.textContent === '••••••')).toBe(true)
+    await rerender()
+    expect(signal?.aborted).toBe(true)
+    expect(container.querySelector('.mp-company-dialog, .mp-developments')).toBeNull()
+    expectPrivateWatch()
   })
 
-  it('starts with a bounded holding list and reveals additional holdings on demand', async () => {
-    await renderWatch(false)
-    state.store.positions = Array.from({ length: 9 }, (_, index) => ({ ...state.store.positions[0], id: `holding-${index}`, ticker: `SYMBOL${index}`, name: `Holding ${index}` }))
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    await clickButton('Holdings')
-    expect(container.querySelectorAll('.pa-table-row')).toHaveLength(6)
-    await clickButton('Show more holdings · 3 remaining')
-    expect(container.querySelectorAll('.pa-table-row')).toHaveLength(9)
+  it('leads with news on quiet days and keeps setup controls together', async () => {
+    await renderWatch()
+    state.store.liveQuotes = {}
+    await restoreSaved(saved => { saved.alerts = []; saved.rules = []; saved.events = [] })
+    await rerender()
+    const content = container.querySelector('.mp-monitor-content')!
+    expect(content.firstElementChild?.hasAttribute('data-news-identity')).toBe(true)
+    expect(container.querySelector('.pa-attention, .pa-history, .mp-check-status')).toBeNull()
+    const sidebar = container.querySelector('.mp-monitor-sidebar')!
+    expect(sidebar.querySelector('.mp-rule-list')).not.toBeNull()
+    expect(sidebar.querySelector('.pa-reminders')).not.toBeNull()
+    expect([...sidebar.querySelectorAll('button')].some(button => button.textContent === '+ New rule')).toBe(true)
+    expect(sidebar.querySelector('button[aria-label="Add reminder"]')).not.toBeNull()
   })
 
-  it('repeats the holding news action even when the ticker has not changed', async () => {
-    await renderWatch(false)
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 1 })
-    const action = container.querySelector<HTMLButtonElement>('.pa-news-button[aria-label="View news for UP"]')!
-    expect(action.textContent).toBe('View news')
-    expect(action.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
-    expect(action.textContent).not.toContain('↗')
-    await clickButton('View news for UP')
-    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-identity')).toBe(holdingIdentity(state.store.positions[0]))
-    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-revision')).toBe('1')
-    await clickButton('View news for UP')
-    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-revision')).toBe('2')
-    await clickButton('Holdings')
-    await clickButton('View news for UP')
-    expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-revision')).toBe('3')
-    vi.restoreAllMocks()
+  it('keeps the initial mobile alert queue short and expands it on request', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    try {
+      await renderWatch()
+      expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(1)
+      expect(container.querySelector('.pa-attention .mp-badge')?.textContent).toBe('3 open')
+      await clickButton('Show more alerts')
+      expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
-  it('routes equal-ticker holdings to their own market identity', async () => {
-    await renderWatch(false)
+  it('shows actionable alerts, reminders and rules together without duplicate portfolio views', async () => {
+    await renderWatch()
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
+    expect(container.querySelector('.pa-reminders')?.textContent).toContain('Upcoming')
+    expect(container.querySelector('.mp-rule-list')?.textContent).toContain('UP')
+    expect(container.querySelector('.pa-views, .pa-table, .pa-movers, .pa-pulse, [role="tablist"]')).toBeNull()
+    const viewButtons = [...container.querySelectorAll('button')].filter(button => ['Brief', 'Holdings', 'Activity'].includes(button.textContent || ''))
+    expect(viewButtons).toHaveLength(0)
+  })
+
+  it('moves reviewed alerts into history and reopens them without changing the page view', async () => {
+    await renderWatch()
+    await clickButton('Mark reviewed: UP')
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(2)
+    const history = container.querySelector<HTMLDetailsElement>('.pa-history')!
+    expect(history.querySelector('summary')?.textContent).toContain('Reviewed & snoozed')
+    await act(async () => { history.querySelector('summary')!.click() })
+    expect(history.open).toBe(true)
+    expect(history.querySelectorAll('.pa-record')).toHaveLength(1)
+    expect(history.querySelector('.pa-record')?.textContent).toContain('Reviewed')
+    await clickButton('Reopen item')
+    expect(container.querySelector('.pa-history')).toBeNull()
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
+    const saved = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!)
+    expect(saved.alerts.every((alert: { state: string }) => alert.state === 'open')).toBe(true)
+  })
+
+  it('keeps snoozed records accessible without treating them as open alerts', async () => {
+    await renderWatch()
+    const earliestDeadline = Date.now() + 24 * 3_600_000
+    await clickButton('Snooze: UP')
+    await clickButton('24 hours')
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(2)
+    expect(container.querySelector('.pa-history .pa-record')?.textContent).toContain('Snoozed')
+    expect(container.querySelector('.pa-history button')?.textContent).toContain('Reopen item')
+    const saved = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!) as MonitorState
+    expect(saved.alerts.find(alert => alert.state === 'snoozed')?.snoozedUntil).toBeGreaterThanOrEqual(earliestDeadline)
+  })
+
+  it('expands a bounded alert queue inline', async () => {
+    await renderWatch()
+    await restoreSaved(saved => {
+      const alert = saved.alerts[0]
+      saved.alerts = Array.from({ length: 8 }, (_, index) => ({ ...alert, id: `alert-${index}`, observationKey: `observation-${index}` }))
+    })
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
+    const more = [...container.querySelectorAll<HTMLElement>('button, summary')].find(button => button.textContent?.startsWith('Show more alerts'))!
+    expect(more).toBeDefined()
+    await act(async () => { more.click() })
+    expect(container.querySelectorAll('.pa-attention > .pa-record').length).toBeGreaterThan(3)
+  })
+
+  it('does not imply all-clear when observations are unavailable', async () => {
+    await renderWatch()
+    state.store.liveQuotes = {}
+    await restoreSaved(saved => { saved.alerts = [] })
+    await rerender()
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(0)
+    expect(container.textContent).not.toMatch(/all clear/i)
+    expect(container.querySelector('.mp-check-status, .pa-attention')).toBeNull()
+    expect(container.querySelector('.mp-rule-list')?.textContent).toContain('UP')
+  })
+
+  it('keeps local rules and reminders accessible while external data is off', async () => {
+    await renderWatch()
+    state.store.settings = { ...state.store.settings, allowExternalData: false }
+    await rerender()
+    expect(container.querySelector('.mp-hero')?.textContent).toContain('External data off')
+    expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh prices')?.disabled).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Add reminder"]')?.disabled).toBe(false)
+    expect(container.querySelector('.mp-rule-list')?.textContent).toContain('UP')
+    expect(container.querySelector('.pa-table, .pa-movers')).toBeNull()
+  })
+
+  it('keeps overdue personal reminders actionable and restores a turned-off reminder', async () => {
+    await renderWatch()
+    await restoreSaved(saved => {
+      saved.events = [
+        { id: 'overdue', holding: 'UP', holdingId: 'UP', title: 'Review old watch level', date: '2000-01-01', kind: 'Reminder', reminder: true },
+        { id: 'future', holding: 'DOWN', holdingId: 'DOWN', title: 'Review future watch level', date: '2099-01-01', kind: 'Reminder', reminder: true },
+      ]
+    })
+    const reminders = container.querySelector('.pa-reminders')!
+    expect(reminders.textContent).toContain('Overdue')
+    expect(reminders.textContent).toContain('Review future watch level')
+    await clickButton('Turn off reminder: Review old watch level')
+    const inactive = reminders.querySelector<HTMLDetailsElement>('.pa-inactive-reminders')!
+    expect(inactive.textContent).toContain('Review old watch level')
+    expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).events.find((event: { id: string }) => event.id === 'overdue').reminder).toBe(false)
+    await act(async () => { inactive.querySelector('summary')!.click() })
+    await clickButton('Restore')
+    expect(reminders.querySelector('.pa-inactive-reminders')).toBeNull()
+    expect(reminders.textContent).toContain('Overdue')
+    expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).events.find((event: { id: string }) => event.id === 'overdue').reminder).toBe(true)
+  })
+
+  it('does not recreate fund NAV summaries, price moves or constituent news', async () => {
+    await renderWatch()
+    const fund = { ...state.store.positions[0], id: 'fund', ticker: 'FUND', name: 'Example Flexi Cap Fund', type: 'mutual-fund' as const }
+    state.store.positions = [fund]
+    state.store.liveQuotes = { [quoteKey(fund)]: { price: 83.14, source: 'nav', at: Date.now() } }
+    await restoreSaved(saved => { saved.alerts = []; saved.rules = [] })
+    await rerender()
+    expect(container.querySelector('.mp-check-status')).toBeNull()
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(0)
+    expect(container.querySelector('.pa-news-button, .pa-table, .pa-movers')).toBeNull()
+    expect(container.textContent).not.toContain('83.14')
+  })
+
+  it('repeats holding news selection with the same identity and a new revision', async () => {
+    await renderWatch()
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 1 })
+    for (const revision of [1, 2]) {
+      await clickButton('Open company: UP')
+      await clickButton('Related news')
+      expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-identity')).toBe(holdingIdentity(state.store.positions[0]))
+      expect(container.querySelector('[data-news-revision]')?.getAttribute('data-news-revision')).toBe(String(revision))
+    }
+  })
+
+  it('routes same-symbol alerts by the holding listing rather than ticker alone', async () => {
+    await renderWatch()
     const base = state.store.positions[0]
     const airline = { ...base, id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ' as const }
     const miner = { ...base, id: 'miner', ticker: 'AAL', name: 'Anglo American plc', exchange: 'LSE' as const }
     state.store.positions = [airline, miner]
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    await clickButton('Holdings')
+    state.store.liveQuotes = {}
+    await restoreSaved(saved => {
+      const template = saved.alerts[0]
+      saved.rules = []
+      saved.alerts = [airline, miner].map(holding => ({ ...template, id: holding.id, holdingId: holding.id, holding: holding.name, observationKey: holding.id }))
+    })
+    await rerender()
     for (const holding of [airline, miner]) {
-      await clickButton(`View news for ${holding.name}`)
+      await clickButton(`Open company: ${holding.name}`)
+      await clickButton('Related news')
       expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-identity')).toBe(holdingIdentity(holding))
     }
   })
+})
 
-  it('shows published NAV updates without inventing fund moves or constituent news', async () => {
-    await renderWatch(false)
-    const fund = { ...state.store.positions[0], id: 'fund', ticker: 'FUND', name: 'Example Flexi Cap Fund', type: 'mutual-fund' as const }
-    state.store.positions = [fund]
-    state.store.liveQuotes = { [quoteKey(fund)]: { price: 83.14, source: 'nav', at: Date.now() } }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    const nav = container.querySelector('[aria-label="Latest published fund NAVs"]')!
-    expect(nav.textContent).toContain('83.14')
-    expect(nav.textContent).toContain('Published NAV')
-    expect(nav.querySelector('button')).toBeNull()
-    expect(container.querySelector('.pa-summary-lead')?.textContent).toContain('Latest published NAV')
-    expect(container.querySelector('.pa-summary-lead .pa-summary-value')?.textContent).toBe('₹83.14')
-    expect(container.querySelector('.pa-pulse')?.textContent).toContain('0 quotes · 1 daily NAV')
-    expect(container.querySelector('.pa-movers[aria-label="Largest reported holding moves"]')).toBeNull()
+describe('Monitor privacy', () => {
+  it('omits the observation strip in masked mode too', async () => {
+    await renderWatch(true)
+    expect(container.querySelector('.mp-check-status')).toBeNull()
+  })
+
+  it('redacts alerts, history, reminders and rule labels without changing saved records', async () => {
+    await renderWatch()
+    await clickButton('Mark reviewed: UP')
+    await restoreSaved(saved => { saved.events = [{ id: 'reminder', holding: 'UP', holdingId: 'UP', title: 'Review UP tomorrow', date: '2099-01-01', kind: 'Reminder', reminder: true }] })
+    const saved = localStorage.getItem(MONITOR_STORAGE_KEY)
     state.store.settings = { ...state.store.settings, hideValues: true }
-    await act(async () => { root.render(<MonitorView onRequestImport={() => {}} />) })
-    expect(container.textContent).not.toContain('83.14')
-    expectNeutralWatch()
+    await rerender()
+    expectPrivateWatch()
+    expect(container.textContent).not.toContain('Review UP tomorrow')
+    expect(localStorage.getItem(MONITOR_STORAGE_KEY)).toBe(saved)
+    state.store.settings = { ...state.store.settings, hideValues: false }
+    await rerender()
+    expect(container.textContent).toContain('Review UP tomorrow')
+    expect(container.querySelector('[data-trend="up"]')).not.toBeNull()
+    expect(container.querySelector('[data-trend="down"]')).not.toBeNull()
+    expect(container.querySelector('.mp-rule-condition svg')).not.toBeNull()
+  })
+
+  it('starts neutral while masked and preserves review actions', async () => {
+    await renderWatch(true)
+    expectPrivateWatch()
+    const review = container.querySelector<HTMLButtonElement>('.pa-attention .pa-review-actions button')!
+    expect(review.textContent).toContain('Mark reviewed')
+    await act(async () => { review.click() })
+    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(2)
+    expect(container.querySelectorAll('.pa-history .pa-record')).toHaveLength(1)
+    expectPrivateWatch()
   })
 })
