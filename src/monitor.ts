@@ -1,26 +1,25 @@
 import type { LiveQuote, Position } from './types'
-import { quoteKey } from './valuation'
+import { hasSupportedValuationCurrency, quoteKey } from './valuation'
 import { workspaceWritesBlocked } from './workspaceStorage'
+import { parseMonitorReadingState, type MonitorReadingState } from './monitorReading'
 
 export type RuleCondition = 'price_above' | 'price_below' | 'daily_move'
 export type AlertState = 'open' | 'reviewed' | 'snoozed'
 export interface MonitorMetric { label: string; value: string; trend?: 'up' | 'down' | 'neutral' }
-export interface MonitorRecord {
+export interface MonitorAlert {
   id: string
   holding: string
   holdingId: string
   title: string
   reason: string
   evidence: string
-  kind: 'quote'
+  kind: 'price'
   time: string
   at: number
   metrics: MonitorMetric[]
-}
-export interface MonitorAlert extends Omit<MonitorRecord, 'kind'> {
-  kind: 'price'
   state: AlertState
   observationKey: string
+  snoozedUntil?: number
 }
 export interface MonitorRule {
   id: string
@@ -42,7 +41,7 @@ export interface MonitorEvent {
   reminder: boolean
   unresolved?: boolean
 }
-export interface MonitorState { rules: MonitorRule[]; events: MonitorEvent[]; alerts: MonitorAlert[] }
+export interface MonitorState { rules: MonitorRule[]; events: MonitorEvent[]; alerts: MonitorAlert[]; reading?: MonitorReadingState }
 
 export const MONITOR_STORAGE_KEY = 'finverse:monitor:v1'
 export const emptyMonitorState = (): MonitorState => ({ rules: [], events: [], alerts: [] })
@@ -91,9 +90,14 @@ export function sanitizeMonitorState(value: unknown): MonitorState {
     for (const metric of Array.isArray(item.metrics) ? item.metrics.slice(0, 6) : []) {
       if (record(metric) && text(metric.label) && text(metric.value)) metrics.push({ label: text(metric.label, 80), value: text(metric.value, 100), ...(['up', 'down', 'neutral'].includes(String(metric.trend)) ? { trend: metric.trend as MonitorMetric['trend'] } : {}) })
     }
-    alerts.push({ id: text(item.id), holding: text(item.holding), holdingId: text(item.holdingId), title: text(item.title), reason: text(item.reason), evidence: text(item.evidence, 2000), kind: 'price', state: item.state as AlertState, observationKey: text(item.observationKey, 2000), time: text(item.time, 80), at: item.at, metrics })
+    const snoozedUntil = item.state === 'snoozed' && finite(item.snoozedUntil) && item.snoozedUntil > 0 && item.snoozedUntil <= 8_640_000_000_000_000 ? item.snoozedUntil : undefined
+    alerts.push({ id: text(item.id), holding: text(item.holding), holdingId: text(item.holdingId), title: text(item.title), reason: text(item.reason), evidence: text(item.evidence, 2000), kind: 'price', state: item.state as AlertState, observationKey: text(item.observationKey, 2000), time: text(item.time, 80), at: item.at, metrics, ...(snoozedUntil !== undefined ? { snoozedUntil } : {}) })
   }
-  return { rules: unique(rules), events: unique(events), alerts: unique(alerts) }
+  let reading: MonitorReadingState | undefined
+  if (value.reading !== undefined) {
+    try { reading = parseMonitorReadingState(value.reading) } catch { /* Keep valid rules and alerts when reading preferences are malformed. */ }
+  }
+  return { rules: unique(rules), events: unique(events), alerts: unique(alerts), ...(reading ? { reading } : {}) }
 }
 
 export function loadMonitorState(): { state: MonitorState; error: string } {
@@ -103,7 +107,8 @@ export function loadMonitorState(): { state: MonitorState; error: string } {
     if (!raw) return { state: emptyMonitorState(), error: '' }
     const parsed: unknown = JSON.parse(raw)
     if (!record(parsed) || parsed.version !== 1) return { state: emptyMonitorState(), error: 'Saved Monitor data could not be read. Add your watch rules again.' }
-    return { state: sanitizeMonitorState(parsed), error: '' }
+    const state = sanitizeMonitorState(parsed)
+    return { state, error: parsed.reading !== undefined && !state.reading ? 'Saved reading preferences could not be read. Your watch rules and alerts were retained.' : '' }
   } catch {
     return { state: emptyMonitorState(), error: 'Monitor storage is unavailable. Changes will only last in this session.' }
   }
@@ -171,16 +176,57 @@ export function reconcileMonitorRules(rules: MonitorRule[], positions: Position[
   })
 }
 
+type RuleObservation = {
+  state: 'Active' | 'Waiting' | 'Paused' | 'Unavailable'; quote?: LiveQuote; distance?: number; matched?: boolean
+}
+
+export function monitorRuleObservation(rule: MonitorRule, positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean): RuleObservation {
+  return observeRule(rule, positions, quotes, now, allowed, quoteIdentities(positions))
+}
+
+export function monitorRuleObservations(rules: MonitorRule[], positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean): Map<string, RuleObservation> {
+  if (!rules.length) return new Map()
+  const identities = quoteIdentities(positions)
+  return new Map(rules.map((rule) => [rule.id, observeRule(rule, positions, quotes, now, allowed, identities)]))
+}
+
+function observeRule(rule: MonitorRule, positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean, identities: Map<string, Set<string>>): RuleObservation {
+  const position = findRulePosition(rule, positions, identities)
+  if (rule.unresolved || !position || position.identityIssue || !hasSupportedValuationCurrency(position)) return { state: 'Unavailable' }
+  if (!rule.active) return { state: 'Paused' }
+  const quote = quotes[quoteKey(position)]
+  if (!allowed || !usableQuote(quote, now) || !freshQuote(quote, now)
+    || (position.type === 'mutual-fund' ? quote.source !== 'nav' : quote.source === 'nav')
+    || (rule.condition === 'daily_move' && !finite(quote.changePct))) return { state: 'Waiting' }
+  const distance = rule.condition === 'daily_move'
+    ? Math.abs(rule.threshold - Math.abs(quote.changePct!))
+    : Math.abs(rule.threshold - quote.price) / quote.price * 100
+  return { state: 'Active', quote, matched: ruleMatches(rule, quote), ...(Number.isFinite(distance) ? { distance } : {}) }
+}
+
+export function resumeSnoozedAlerts(state: MonitorState, now: number): MonitorState {
+  let changed = false
+  const alerts = state.alerts.map((alert) => {
+    if (alert.state !== 'snoozed' || alert.snoozedUntil === undefined || alert.snoozedUntil > now) return alert
+    changed = true
+    const { snoozedUntil: _deadline, ...rest } = alert
+    return { ...rest, state: 'open' as const }
+  })
+  return changed ? { ...state, alerts } : state
+}
+
 export function evaluateMonitorRules(state: MonitorState, positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean): MonitorState {
+  state = resumeSnoozedAlerts(state, now)
   if (!allowed) return state
   const seen = new Set(state.alerts.map((alert) => alert.observationKey))
   const added: MonitorAlert[] = []
   const identities = quoteIdentities(positions)
   for (const rule of state.rules) {
     const position = findRulePosition(rule, positions, identities)
-    if (!position) continue
+    if (!position || position.identityIssue || !hasSupportedValuationCurrency(position)) continue
     const quote = quotes[quoteKey(position)]
-    if (!usableQuote(quote, now) || !freshQuote(quote, now) || !ruleMatches(rule, quote)) continue
+    if (!usableQuote(quote, now) || !freshQuote(quote, now) || !ruleMatches(rule, quote)
+      || (position.type === 'mutual-fund' ? quote.source !== 'nav' : quote.source === 'nav')) continue
     const providerDay = new Date(quote.at).toISOString().slice(0, 10)
     const observationKey = [rule.id, rule.instrumentIdentity, rule.condition, rule.threshold, providerDay].join('|')
     if (seen.has(observationKey)) continue
@@ -197,15 +243,4 @@ export function evaluateMonitorRules(state: MonitorState, positions: Position[],
     added.push({ id: crypto.randomUUID(), holding: label(position), holdingId: position.id, title, reason: `The latest provider observation meets your ${level} watch condition.`, evidence, kind: 'price', state: 'open', observationKey, time: time(quote.at), at: quote.at, metrics: [...quoteMetrics(position, quote), { label: 'Watch level', value: level }] })
   }
   return added.length ? { ...state, alerts: [...added.reverse(), ...state.alerts].slice(0, MAX_ITEMS) } : state
-}
-
-export function latestQuoteRecords(positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean): MonitorRecord[] {
-  if (!allowed) return []
-  const identities = quoteIdentities(positions)
-  return positions.flatMap((position): MonitorRecord[] => {
-    const quote = quotes[quoteKey(position)]
-    if (identities.get(quoteKey(position))?.size !== 1 || !usableQuote(quote, now)) return []
-    const fresh = freshQuote(quote, now)
-    return [{ id: `quote:${position.id}`, holding: label(position), holdingId: position.id, title: quote.source === 'nav' ? 'Latest published NAV' : 'Latest available quote', reason: `${sourceLabels[quote.source]}${fresh ? '' : ' · older observation; watch rules are waiting for fresh data'}`, evidence: `Provider observation: ${new Date(quote.at).toLocaleString('en-IN')}. ${sourceLabels[quote.source]}. This card shows the latest available observation, not a new event or price history.`, kind: 'quote', at: quote.at, time: time(quote.at), metrics: quoteMetrics(position, quote) }]
-  }).sort((a, b) => b.at - a.at)
 }

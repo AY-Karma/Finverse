@@ -4,6 +4,27 @@ import { createRequestBudget, readBoundedText } from '../api/requestBudget'
 afterEach(() => vi.useRealTimers())
 
 describe('public API budgets', () => {
+  it('chooses the successful cache lifetime after the provider result is loaded', async () => {
+    let now = 0, ttl = 300_000, partial = true
+    const budget = createRequestBudget(() => now)
+    const lifetime = vi.fn(() => ttl)
+    const load = vi.fn(async () => {
+      ttl = partial ? 15_000 : 300_000
+      return Response.json({ partial })
+    })
+    expect(await (await budget('events', lifetime, load)).json()).toEqual({ partial: true })
+    now = 14_999
+    await budget('events', lifetime, load)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(lifetime).toHaveBeenCalledTimes(1)
+    now = 15_000; partial = false
+    expect(await (await budget('events', lifetime, load)).json()).toEqual({ partial: false })
+    now += 20_000
+    await budget('events', lifetime, load)
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(lifetime).toHaveBeenCalledTimes(2)
+  })
+
   it('returns a bounded deadline response even if a provider ignores cancellation', async () => {
     vi.useFakeTimers()
     const budget = createRequestBudget()

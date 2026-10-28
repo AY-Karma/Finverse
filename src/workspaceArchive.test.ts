@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { holdingIdentity, type MonitorState } from './monitor'
 import { combinePositions } from './valuation'
 import { normalizePosition } from './instruments'
+import { newsReadingKey, type MonitorReadingState } from './monitorReading'
 import type { Folio, PortfolioSnapshot, Settings } from './types'
 import { captureWorkspaceRecords, createWorkspaceArchive, MAX_WORKSPACE_ARCHIVE_BYTES, parseWorkspaceArchive, restoreWorkspaceArchive } from './workspaceArchive'
 
@@ -16,9 +17,35 @@ const monitor: MonitorState = {
   alerts: [{ id: 'alert-1', holding: 'Sold holding', holdingId: 'removed', title: 'Watch condition', reason: 'Matched', evidence: 'Past observation', kind: 'price', state: 'reviewed', observationKey: 'past-1', time: '12:00', at: 100, metrics: [] }],
 }
 const archive = () => createWorkspaceArchive(folios, settings, snapshots, monitor)
+const savedArticle = { id: 'story-1', title: 'Company announces results', source: 'Publisher', sourceUrl: 'https://example.com/results', publishedAt: 100, origin: 'wire' as const, matches: ['TCS'] }
+const reading: MonitorReadingState = { articles: [{ key: newsReadingKey(savedArticle), seenAt: 100, openedAt: 101, savedAt: 102, dismissedAt: 103, item: savedArticle }], follows: [{ id: 'banks', query: 'Banking', region: 'IN' }] }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear() })
 
 describe('workspace archives', () => {
+  it('round-trips saved news, reading preferences and timed snoozes in the existing Monitor record', async () => {
+    const state: MonitorState = { ...monitor, reading, alerts: [{ ...monitor.alerts[0], state: 'snoozed', snoozedUntil: Date.now() + 3_600_000 }] }
+    const original = createWorkspaceArchive(folios, settings, snapshots, state)
+    const parsed = parseWorkspaceArchive(JSON.stringify(original))
+    expect(parsed.archive.monitor).toEqual(state)
+    await restoreWorkspaceArchive(parsed.archive, captureWorkspaceRecords())
+    expect(JSON.parse(localStorage.getItem('finverse:monitor:v1')!)).toEqual({ version: 1, ...state })
+    expect(Object.keys(captureWorkspaceRecords()).filter(key => key.includes('monitor'))).toEqual(['finverse:monitor:v1'])
+  })
+
+  it('rejects unsafe saved article links without changing the current workspace', () => {
+    const unsafeReading = { ...reading, articles: [{ ...reading.articles[0], item: { ...savedArticle, sourceUrl: 'javascript:alert(1)' } }] }
+    localStorage.setItem('finverse:monitor:v1', JSON.stringify({ version: 1, ...monitor, reading }))
+    const before = captureWorkspaceRecords()
+    expect(() => parseWorkspaceArchive(JSON.stringify({ ...archive(), monitor: { ...monitor, reading: unsafeReading } }))).toThrow('news preferences')
+    expect(captureWorkspaceRecords()).toEqual(before)
+  })
+
+  it('replaces saved news and follows when restoring an older backup without them', async () => {
+    localStorage.setItem('finverse:monitor:v1', JSON.stringify({ version: 1, ...monitor, reading }))
+    await restoreWorkspaceArchive(archive(), captureWorkspaceRecords())
+    expect(JSON.parse(localStorage.getItem('finverse:monitor:v1')!).reading).toBeUndefined()
+  })
+
   it('preserves legacy native currency metadata when restoring an archive directly', async () => {
     const original = JSON.parse(JSON.stringify(archive()))
     original.settings.currency = 'EUR'

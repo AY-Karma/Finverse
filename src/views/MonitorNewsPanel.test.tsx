@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { loadMarketFeed, type LoadedMarketFeed, type NewsItem } from '../marketNews'
 import { holdingIdentity } from '../monitor'
+import { emptyMonitorReadingState, newsReadingKey, updateArticleReading } from '../monitorReading'
+import * as readingOperations from '../monitorReading'
+import * as headlineTone from '../headlineTone'
 import type { Position } from '../types'
 import type { useStore } from '../useStore'
 import { MonitorNewsPanel } from './MonitorNewsPanel'
@@ -19,6 +22,19 @@ vi.mock('../marketNews', async (importOriginal) => ({
 const loadFeed = vi.mocked(loadMarketFeed)
 let root: Root | undefined
 let container: HTMLDivElement
+let savedReading = emptyMonitorReadingState()
+let saveSucceeds = true
+type RenderProps = { initialQuery?: string; selectedIdentity?: string; selectedRevision?: number; readOnly?: boolean; onOpenHolding?: (identity: string) => void }
+
+function TestPanel(props: RenderProps) {
+  const [reading, setReading] = useState(savedReading)
+  return <MonitorNewsPanel {...props} reading={reading} onReadingChange={(next) => {
+    if (!saveSucceeds) return false
+    savedReading = next
+    setReading(next)
+    return true
+  }} />
+}
 
 function position(ticker: string, name: string, type: Position['type'] = 'stock'): Position {
   return { id: ticker, ticker, name, type, quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }
@@ -32,13 +48,13 @@ function feed(items: NewsItem[]): LoadedMarketFeed {
   return { items, issues: [], fetchedAt: 1000 }
 }
 
-async function renderPanel(props: { initialQuery?: string; selectedIdentity?: string; selectedRevision?: number } = {}) {
+async function renderPanel(props: RenderProps = {}) {
   if (!root) {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
   }
-  await act(async () => { root!.render(<MonitorNewsPanel {...props} />) })
+  await act(async () => { root!.render(<TestPanel {...props} />) })
 }
 
 async function clickButton(name: string) {
@@ -60,6 +76,8 @@ async function selectHolding(holding: string | Position) {
 }
 
 beforeEach(() => {
+  savedReading = emptyMonitorReadingState()
+  saveSucceeds = true
   loadFeed.mockReset()
   state.store = {
     positions: [position('HDFCBANK', 'HDFC Bank Ltd'), position('TCS', 'Tata Consultancy Services Ltd'), position('FUND', 'Small Cap Fund', 'mutual-fund')],
@@ -75,103 +93,226 @@ afterEach(async () => {
 })
 
 describe('portfolio news', () => {
-  it('blocks Holdings news while masked and keeps Market news independent of the portfolio', async () => {
+  it('restores a dismissed headline with Undo after leaving and remounting Monitor', async () => {
+    await renderPanel()
+    await clickButton('Dismiss Headline holding')
+    await act(async () => root!.unmount())
+    root = undefined
+    container.remove()
+    await renderPanel()
+    expect(container.querySelector('.mn-stories')?.textContent).not.toContain('Headline holding')
+    await clickButton('Undo')
+    expect(container.querySelector('.mn-stories')?.textContent).toContain('Headline holding')
+    expect(savedReading.articles.find((article) => article.key === newsReadingKey(story('holding', [])))?.dismissedAt).toBeUndefined()
+  })
+
+  it('does not regroup or reassess unchanged headlines while typing with a queued refresh', async () => {
+    const items = Array.from({ length: 150 }, (_,index) => story(String(index), []))
+    loadFeed.mockResolvedValueOnce(feed(items))
+    await renderPanel()
+    await clickButton('Save: Headline 0')
+    loadFeed.mockResolvedValueOnce(feed([{ ...story('new', []), publishedAt: 2000 }, ...items]))
+    await clickButton('Refresh market news')
+    expect(container.textContent).toContain('Show 1 new headline')
+    const group = vi.spyOn(readingOperations, 'groupNewsItems')
+    const classify = vi.spyOn(headlineTone, 'classifyHeadline')
+    try {
+      await clickButton('Search market news')
+      const input = container.querySelector<HTMLInputElement>('input[aria-label="Search market news"]')!
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Banks')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      expect(group).not.toHaveBeenCalled()
+      expect(classify).not.toHaveBeenCalled()
+      expect(container.querySelectorAll('.mn-stories article')).toHaveLength(150)
+      expect(container.textContent).toContain('Show 1 new headline')
+    } finally { group.mockRestore(); classify.mockRestore() }
+  })
+
+  it('opens search in the header, focuses the field, and closes on Escape or outside interaction', async () => {
+    await renderPanel()
+    const tools = container.querySelector('#monitor-news-tools')!
+    const input = tools.querySelector('input')!
+    const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Search market news"]')!
+    expect(tools.closest('.mn-head')).not.toBeNull()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(tools.hasAttribute('inert')).toBe(true)
+
+    await clickButton('Search market news')
+    expect(document.activeElement).toBe(input)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(tools.hasAttribute('inert')).toBe(false)
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(toggle)
+
+    await clickButton('Search market news')
+    await act(async () => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(loadFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it('submits a topic from the compact field and returns focus to its trigger', async () => {
+    await renderPanel()
+    await clickButton('Search market news')
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Search market news"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Interest rates')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await clickButton('Submit news search')
+    const toggle = container.querySelector('button[aria-label="Search market news"]')!
+    expect(loadFeed.mock.lastCall?.[1]?.query).toBe('Interest rates')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(toggle)
+  })
+
+  it('remembers opened and saved stories across leaving the page, including their snapshots', async () => {
+    await renderPanel()
+    await clickButton('Mark read: Headline holding')
+    await clickButton('Save: Headline holding')
+    expect(savedReading.articles.find((article) => article.key === newsReadingKey(story('holding', [])))).toMatchObject({ openedAt: expect.any(Number), savedAt: expect.any(Number) })
+    await act(async () => { root!.unmount() })
+    root = undefined
+    container.remove()
+    loadFeed.mockResolvedValue(feed([story('new-only', [])]))
+    await renderPanel()
+    expect(container.querySelector('.mn-saved')?.textContent).toContain('Headline holding')
+    expect(container.querySelector('.mn-saved .mn-story--opened')).not.toBeNull()
+  })
+
+  it('persists dismissal, supports Undo and keeps reading actions off the network', async () => {
+    await renderPanel()
+    await clickButton('Dismiss Headline holding')
+    expect(container.querySelector('.mn-stories')?.textContent).not.toContain('Headline holding')
+    expect(savedReading.articles.find((article) => article.key === newsReadingKey(story('holding', [])))?.dismissedAt).toEqual(expect.any(Number))
+    await clickButton('Undo')
+    expect(container.querySelector('.mn-stories')?.textContent).toContain('Headline holding')
+    expect(savedReading.articles.find((article) => article.key === newsReadingKey(story('holding', [])))?.dismissedAt).toBeUndefined()
+    expect(loadFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it('queues new headlines until the user chooses to update the list', async () => {
+    await renderPanel()
+    const previous = [...container.querySelectorAll('.mn-story-title')].map((link) => link.textContent)
+    loadFeed.mockResolvedValueOnce(feed([{ ...story('new', []), publishedAt: 2000 }, story('holding', ['HDFCBANK']), story('market', [])]))
+    await clickButton('Refresh market news')
+    expect([...container.querySelectorAll('.mn-story-title')].map((link) => link.textContent)).toEqual(previous)
+    expect(savedReading.articles.some((article) => article.item.title === 'Headline new')).toBe(false)
+    await clickButton('Show 1 new headline')
+    expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline new')
+    expect(savedReading.articles.some((article) => article.item.title === 'Headline new')).toBe(true)
+  })
+
+  it('groups identical publisher coverage with access to each original source', async () => {
+    loadFeed.mockResolvedValue(feed([story('holding', []), { ...story('other-source', []), title: 'Headline holding', source: 'Other publisher' }]))
+    await renderPanel()
+    expect(container.querySelectorAll('.mn-stories article')).toHaveLength(1)
+    expect(container.querySelector('.mn-sources summary')?.textContent).toBe('2 sources')
+    expect(container.querySelectorAll('.mn-sources a')).toHaveLength(2)
+  })
+
+  it('follows a selected company with its market and restores that preference after leaving', async () => {
+    state.store.positions.push({ ...position('AAPL', 'Apple Inc'), exchange: 'NASDAQ' })
+    await renderPanel()
+    await selectHolding('AAPL')
+    await clickButton('Follow')
+    expect(savedReading.follows[0]).toMatchObject({ query: 'Apple Inc', region: 'US' })
+    await clickButton('Back to wire')
+    const followed = container.querySelector<HTMLButtonElement>('.mn-following li .mn-text-button')!
+    await act(async () => followed.click())
+    expect(loadFeed.mock.lastCall?.[1]).toMatchObject({ query: 'Apple Inc', region: 'US' })
+    await clickButton('Unfollow Apple Inc')
+    expect(savedReading.follows).toHaveLength(0)
+  })
+
+  it('opens company context only for a unique matched listing', async () => {
+    const onOpenHolding = vi.fn()
+    await renderPanel({ onOpenHolding })
+    await clickButton('View HDFCBANK')
+    expect(onOpenHolding).toHaveBeenCalledWith(newsIdentity('HDFCBANK'))
+    state.store.positions = [{ ...position('AAL', 'American Airlines'), exchange: 'NASDAQ' }, { ...position('AAL', 'Anglo American'), id: 'miner', exchange: 'LSE' }]
+    loadFeed.mockResolvedValue(feed([story('ambiguous', ['AAL'])]))
+    await renderPanel({ onOpenHolding })
+    expect(container.querySelector('.mn-company')).toBeNull()
+  })
+
+  it('keeps persisted company context hidden while masked', async () => {
+    savedReading = updateArticleReading(emptyMonitorReadingState(), story('private-holding', ['HDFCBANK']), { savedAt: 1 })
+    savedReading.follows = [{ id: 'follow', query: 'HDFC Bank Ltd', region: 'IN' }]
+    state.store.settings.hideValues = true
+    await renderPanel()
+    expect(container.querySelector('.mn-following, .mn-saved')).toBeNull()
+    expect(container.textContent).not.toContain('private-holding')
+    expect(container.textContent).not.toContain('HDFC Bank')
+    expect(loadFeed.mock.lastCall?.[0]).toEqual([])
+  })
+
+  it('does not claim success when saving is unavailable and disables preference changes in read-only mode', async () => {
+    await renderPanel()
+    saveSucceeds = false
+    await clickButton('Save: Headline holding')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('could not be saved')
+    expect(savedReading.articles.some((article) => article.savedAt)).toBe(false)
+    await renderPanel({ readOnly: true })
+    expect([...container.querySelectorAll<HTMLButtonElement>('.mn-story-actions button')].every((button) => button.disabled)).toBe(true)
+  })
+
+  it('keeps the general wire available while masked without sending portfolio context', async () => {
     state.store.settings.hideValues = true
     await renderPanel({ initialQuery: 'HDFC Bank Ltd', selectedIdentity: newsIdentity('HDFCBANK'), selectedRevision: 1 })
-    expect(container.textContent).toContain('Masked mode enabled')
-    expect(container.querySelectorAll('article')).toHaveLength(0)
-    expect(container.querySelector('.mn-holding-search')).toBeNull()
-    expect(container.textContent).not.toMatch(/HDFCBANK|HDFC Bank|TCS|Tata Consultancy/)
-    expect(loadFeed).not.toHaveBeenCalled()
-    await clickButton('Market')
     expect(loadFeed.mock.lastCall?.[0]).toEqual([])
     expect(loadFeed.mock.lastCall?.[1]?.query).toBe('')
     expect(container.querySelectorAll('article')).toHaveLength(2)
-    expect([...container.querySelectorAll('.mn-story-tag')].map(tag => tag.textContent)).toEqual(['MARKET', 'MARKET'])
-    expect(container.querySelector('.mn-coverage')).toBeNull()
-    await clickButton('Holdings')
-    expect(container.textContent).toContain('Masked mode enabled')
-    expect(container.querySelector('article')).toBeNull()
+    expect(container.querySelector('.mn-holding-search')).toBeNull()
+    expect(container.textContent).not.toMatch(/HDFCBANK|HDFC Bank|TCS|Tata Consultancy/)
+    expect(container.querySelector('.mn-story-tag')).toBeNull()
   })
 
-  it('clears an existing company search immediately when masking is enabled', async () => {
+  it('clears company searches and aborts pending requests immediately when masking changes', async () => {
     await renderPanel({ initialQuery: 'HDFC Bank Ltd' })
     const signal = loadFeed.mock.lastCall![1]!.signal!
     state.store.settings.hideValues = true
     await renderPanel({ initialQuery: 'HDFC Bank Ltd' })
     expect(signal.aborted).toBe(true)
     expect(container.textContent).not.toContain('HDFC Bank')
-    expect(container.querySelector('.mn-query, .mn-search, article')).toBeNull()
-    await clickButton('Market')
+    expect(container.querySelector('.mn-query')).toBeNull()
     expect(loadFeed.mock.lastCall?.[0]).toEqual([])
     expect(loadFeed.mock.lastCall?.[1]?.query).toBe('')
   })
 
-  it('shows explained tone badges beside Market and filters using the same classification', async () => {
-    const titles = [
-      'US jobless claims hover near 57-year low for fourth consecutive week',
-      'Rs 9,395 crore block deal! GQG exits ITC shares after a sharp 30% crash this year',
-      'Revenue rises but profit falls',
-      'Company appoints a new director',
-    ]
-    loadFeed.mockResolvedValue(feed(titles.map((title, index) => ({ ...story(String(index), []), title }))))
+  it('shows the full market wire by default with honest holding mentions and plain publisher titles', async () => {
+    const title = 'TCS shares gain 1.25% after quarterly update'
+    loadFeed.mockResolvedValue(feed([{ ...story('holding', ['TCS', 'TCS', 'FUND']), title }, story('market', [])]))
     await renderPanel()
-    await clickButton('Market')
-    expect([...container.querySelectorAll('.mn-story-tags')].every((tags) => tags.querySelector('.mn-story-tag')?.textContent === 'MARKET' && tags.querySelector('.mn-tone'))).toBe(true)
-    expect([...container.querySelectorAll('.mn-tone')].map((badge) => badge.textContent)).toEqual(['+ Positive', '− Negative', '± Mixed'])
-    expect(container.querySelector('.mn-tone-negative')?.getAttribute('aria-label')).toContain('Estimated headline tone: negative.')
-    expect(container.querySelector('.mn-tone-negative')?.getAttribute('title')).toContain('crash')
-
-    await clickButton('Search and filter market news')
-    const select = [...container.querySelectorAll<HTMLSelectElement>('.mn-filter-fields select')][1]
-    for (const [status, index] of [['positive', 0], ['negative', 1], ['mixed', 2], ['unknown', 3]] as const) {
-      await act(async () => {
-        select.value = status
-        select.dispatchEvent(new Event('change', { bubbles: true }))
-      })
-      expect(container.querySelectorAll('article')).toHaveLength(1)
-      expect(container.querySelector('.mn-story-title')?.textContent?.trim()).toBe(titles[index])
-      expect(container.querySelector(`.mn-tone-${status}`)).not.toBeNull()
-    }
-    expect(loadFeed).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps publisher headlines readable and emphasizes only their relevant financial figures', async () => {
-    const titles = [
-      'TCS shares gain 1.25% as investors assess its AI services update',
-      'HDFC Bank shares down 0.86% after quarterly update',
-      'TCS shares rise as revenue grows 10% after a ₹5 crore contract',
-    ]
-    loadFeed.mockResolvedValue(feed(titles.map((title, index) => ({ ...story(String(index), ['TCS']), title }))))
-    await renderPanel()
-    const links = [...container.querySelectorAll<HTMLAnchorElement>('.mn-story-title')]
-    expect(links.map((link) => link.textContent?.trim())).toEqual(titles)
-    expect(links[0].querySelector('.mn-title-positive')?.textContent).toBe('1.25%')
-    expect(links[1].querySelector('.mn-title-negative')?.textContent).toBe('0.86%')
-    expect(links[2].querySelectorAll('.mn-title-positive, .mn-title-negative')).toHaveLength(0)
-    expect(links[2].querySelectorAll('strong')).toHaveLength(2)
-  })
-
-  it('defaults to headline matches, counts unique eligible holdings, and keeps Market local', async () => {
-    state.store.positions.push({ ...state.store.positions[0], id: 'second-folio' })
-    loadFeed.mockResolvedValue(feed([story('holding', ['HDFCBANK', 'TCS', 'HDFCBANK', 'FUND']), story('market', [])]))
-    await renderPanel()
-
-    expect(container.querySelector('.mn-scope button')?.getAttribute('aria-pressed')).toBe('true')
-    expect(container.querySelectorAll('article')).toHaveLength(1)
-    expect(container.querySelector('.mn-coverage strong')?.textContent).toBe('2 of 2 holdings mentioned')
-    expect(container.querySelector('.mn-story-tag')?.textContent).toBe('HDFCBANK · TCS')
-    expect(container.textContent).toContain('Mutual funds use NAV updates; constituent news is not available.')
+    expect(container.querySelector('h2')?.textContent).toBe('Market news')
+    expect(container.querySelectorAll('article')).toHaveLength(2)
+    expect(container.querySelector('.mn-scope')).toBeNull()
+    expect(container.querySelector('.mn-story-tag')?.textContent).toBe('Headline match \u00b7 TCS')
+    expect(container.querySelector('.mn-story-title')?.textContent?.trim()).toBe(title)
+    expect(container.querySelector('.mn-title-number')).toBeNull()
     expect([...container.querySelectorAll('.mn-holding-search option')].some((option) => option.textContent?.includes('Small Cap Fund'))).toBe(false)
     expect(container.querySelector('.mn-story-title')?.getAttribute('href')).toBe('https://example.com/holding')
-
-    await clickButton('Market')
-    expect(container.querySelectorAll('article')).toHaveLength(2)
-    expect(container.querySelectorAll('.mn-story-tag')[1].textContent).toBe('MARKET')
-    expect(loadFeed).toHaveBeenCalledTimes(1)
   })
 
-  it('searches a holding only on selection and retains unmatched search results with honest coverage', async () => {
+  it('shows explained headline status indicators without implying certainty for ambiguous headlines', async () => {
+    const titles = ['TCS shares gain 2%', 'HDFC Bank shares fall 1%', 'Revenue rises but profit falls', 'Shares could rise after results']
+    loadFeed.mockResolvedValue(feed(titles.map((title, index) => ({ ...story(String(index), []), title }))))
+    await renderPanel()
+    const badges = [...container.querySelectorAll('.mn-tone')]
+    expect(badges.map((badge) => badge.textContent)).toEqual(['+ Positive', '\u2212 Negative', '\u00b1 Mixed', '? Unclear'])
+    for (const [index, status] of ['positive', 'negative', 'mixed', 'unknown'].entries()) {
+      expect(badges[index].classList.contains(`mn-tone-${status}`)).toBe(true)
+      expect(badges[index].getAttribute('role')).toBe('img')
+      expect(badges[index].getAttribute('aria-label')).toContain(`Estimated headline tone: ${status === 'unknown' ? 'unclear' : status}.`)
+      expect(badges[index].getAttribute('title')).toBe(badges[index].getAttribute('aria-label'))
+    }
+    expect(badges[3].getAttribute('aria-label')).toContain('does not establish a clear financial direction')
+    expect(container.querySelector('.mn-scope')).toBeNull()
+  })
+
+  it('searches a holding only on selection and retains unmatched search results', async () => {
     loadFeed.mockImplementation(async (_positions, options) => feed(options?.query
       ? [story('wire', ['HDFCBANK']), story('result', [], 'search')]
       : [story('wire', ['HDFCBANK'])]))
@@ -183,9 +324,8 @@ describe('portfolio news', () => {
     expect(loadFeed.mock.calls[1][1]?.query).toBe('Tata Consultancy Services Ltd')
     expect(container.querySelector<HTMLSelectElement>('.mn-holding-search select')?.value).toBe(newsIdentity('TCS'))
     expect(container.querySelectorAll('article')).toHaveLength(1)
-    expect(container.querySelector('.mn-story-tag')?.textContent).toBe('SEARCH')
-    expect(container.querySelector('.mn-coverage strong')?.textContent).toBe('0 of 2 holdings mentioned')
-    expect(container.textContent).toContain('Search results may include other companies.')
+    expect(container.querySelector('.mn-story-tag')).toBeNull()
+    expect(container.textContent).toContain('Company or topic search')
 
     await clickButton('Back to wire')
     expect(container.querySelector<HTMLSelectElement>('.mn-holding-search select')?.value).toBe('')
@@ -204,7 +344,7 @@ describe('portfolio news', () => {
     expect(loadFeed.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ query: 'FMCGIETF', region: 'IN' }))
     expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline etf-result')
     expect([...container.querySelectorAll('.mn-holding-search option')].map((option) => option.textContent)).toEqual([
-      'Find news for a holding', 'FMCGIETF', 'HDFCBANK · HDFC Bank Ltd',
+      'Find news for a holding', 'FMCGIETF', 'HDFCBANK \u00b7 HDFC Bank Ltd',
     ])
   })
 
@@ -230,7 +370,7 @@ describe('portfolio news', () => {
     await selectHolding('AAPL')
     expect(loadFeed.mock.calls[1][1]).toEqual(expect.objectContaining({ query: 'Apple Inc', region: 'US' }))
 
-    await clickButton('Search and filter market news')
+    await clickButton('Search market news')
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Search market news"]')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Federal Reserve')
@@ -250,7 +390,6 @@ describe('portfolio news', () => {
     const select = container.querySelector<HTMLSelectElement>('.mn-holding-search select')!
     expect([...select.options].map((option) => option.value)).toEqual(expect.arrayContaining([holdingIdentity(airline), holdingIdentity(miner)]))
     expect(select.options).toHaveLength(3)
-    expect(container.querySelector('.mn-coverage strong')?.textContent).toBe('0 of 1 holding symbols mentioned')
 
     await selectHolding(miner)
     expect(loadFeed.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ query: 'Anglo American plc', region: 'GB' }))
@@ -270,7 +409,7 @@ describe('portfolio news', () => {
     expect(loadFeed.mock.calls[4][1]?.query).toBe('HDFC Bank Ltd')
   })
 
-  it('exits company search when Market is selected and shows the full wire', async () => {
+  it('returns from company search to the full wire', async () => {
     loadFeed.mockImplementation(async (_positions, options) => feed([
       story('holding', ['HDFCBANK']), story('market', []),
       ...(options?.query ? [story('searched', ['TCS'], 'search')] : []),
@@ -278,7 +417,7 @@ describe('portfolio news', () => {
     await renderPanel()
     await selectHolding('TCS')
     expect(container.querySelectorAll('article')).toHaveLength(1)
-    await clickButton('Market')
+    await clickButton('Back to wire')
     expect(container.querySelector('.mn-query')).toBeNull()
     expect(container.querySelectorAll('article')).toHaveLength(2)
     expect(container.querySelector<HTMLSelectElement>('[aria-label="Find news for a holding"]')?.value).toBe('')
@@ -286,27 +425,59 @@ describe('portfolio news', () => {
     expect(loadFeed.mock.calls[2][1]).not.toHaveProperty('region')
   })
 
-  it('keeps the scope and holding picker visible when external data is disabled', async () => {
+  it('respects external data settings without showing company controls', async () => {
     state.store.settings.allowExternalData = false
     await renderPanel()
-    expect(container.querySelectorAll('.mn-scope button')).toHaveLength(2)
-    expect(container.querySelector<HTMLButtonElement>('.mn-scope button')?.disabled).toBe(true)
-    expect(container.querySelector<HTMLSelectElement>('.mn-holding-search select')?.disabled).toBe(true)
+    expect(container.querySelector('.mn-search, .mn-holding-search')).toBeNull()
     expect(container.textContent).toContain('External data is off')
     expect(loadFeed).not.toHaveBeenCalled()
   })
 
-  it('retains paging and dismissal without refetching', async () => {
-    loadFeed.mockResolvedValue(feed([1, 2, 3, 4].map((number) => story(String(number), ['TCS']))))
+  it('loads general headlines without imported holdings', async () => {
+    state.store.positions = []
     await renderPanel()
-    expect(container.querySelectorAll('article')).toHaveLength(3)
-    await clickButton('Next news page')
-    expect(container.querySelectorAll('article')).toHaveLength(1)
-    expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline 4')
-    await clickButton('Dismiss Headline 4')
-    expect(container.querySelectorAll('article')).toHaveLength(3)
-    expect(container.querySelector('nav[aria-label="Market news pages"]')).toBeNull()
+    expect(loadFeed.mock.lastCall?.[0]).toEqual([])
+    expect(container.querySelectorAll('article')).toHaveLength(2)
+  })
+
+  it('makes every headline available inside the keyboard-accessible feed without expansion', async () => {
+    loadFeed.mockResolvedValue(feed([1, 2, 3, 4, 5].map((number) => story(String(number), ['TCS']))))
+    await renderPanel()
+    const scrollRegion = container.querySelector('[role="region"][aria-label="Market news feed"]')!
+    expect(scrollRegion.getAttribute('tabindex')).toBe('0')
+    expect(scrollRegion.querySelectorAll('article')).toHaveLength(5)
+    expect(container.textContent).not.toContain('Show more headlines')
+    await clickButton('Dismiss Headline 5')
+    expect(container.querySelectorAll('article')).toHaveLength(4)
+    expect(container.querySelector('.mn-footer')).toBeNull()
     expect(loadFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps same-query headlines during refresh and after failure but clears them for a new query', async () => {
+    await renderPanel()
+    let rejectRefresh: (reason: Error) => void = () => {}
+    loadFeed.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRefresh = reject }))
+    await clickButton('Refresh market news')
+    expect(container.querySelectorAll('article')).toHaveLength(2)
+    expect(container.textContent).toContain('Refreshing')
+    await act(async () => { rejectRefresh(new Error('Offline')) })
+    expect(container.querySelectorAll('article')).toHaveLength(2)
+    expect(container.querySelector('.mn-issues')?.textContent).toContain('Showing available headlines')
+    loadFeed.mockImplementationOnce(() => new Promise(() => {}))
+    await selectHolding('TCS')
+    expect(container.querySelector('article')).toBeNull()
+  })
+
+  it('shows available partial results with source failures and missing publication times', async () => {
+    loadFeed.mockImplementation(async (_positions, options) => {
+      const partial = { items: [{ ...story('partial', []), publishedAt: undefined }], issues: [{ source: 'Publisher B', message: 'Unavailable' }], fetchedAt: 1000 }
+      options?.onPartial?.(partial)
+      return partial
+    })
+    await renderPanel()
+    expect(container.querySelectorAll('article')).toHaveLength(1)
+    expect(container.querySelector('.mn-story-meta')?.textContent).toContain('Time unavailable')
+    expect(container.querySelector('.mn-issues')?.textContent).toContain('Publisher B: Unavailable')
   })
 
   it('aborts previous queries and prevents their late headlines from replacing current results', async () => {

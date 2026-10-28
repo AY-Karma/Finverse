@@ -3,6 +3,7 @@ import { emptyMonitorState, holdingIdentity, reconcileMonitorRules, type Monitor
 import { remapMonitorReferences } from './workspaceReferences'
 import { combinePositions } from './valuation'
 import type { Position } from './types'
+import { newsReadingKey } from './monitorReading'
 
 function position(id: string, instrumentKey = 'MF:example direct idcw'): Position {
   const code = /^MF:mfapi:(\d+)$/.exec(instrumentKey)?.[1]
@@ -20,6 +21,16 @@ function references(positions: Position[]): MonitorState {
 }
 
 describe('workspace reference migration', () => {
+  it('preserves news reading and follows when imported holdings are rekeyed', () => {
+    const before = [position('account-a-row')]
+    const after = before.map(row => position(row.id, 'MF:mfapi:2'))
+    const article = { id: 'story', title: 'Fund update', source: 'Publisher', sourceUrl: 'https://example.com/fund', origin: 'wire' as const, matches: [] }
+    const state: MonitorState = { ...references(before), reading: { articles: [{ key: newsReadingKey(article), seenAt: 100, savedAt: 101, item: article }], follows: [{ id: 'follow', query: 'Mutual funds', region: 'IN' }] } }
+    const result = remapMonitorReferences(state, before, after)
+    expect(result.reading).toEqual(state.reading)
+    expect(result.rules[0].instrumentIdentity).toBe(holdingIdentity(combinePositions(after)[0]))
+  })
+
   it('preserves combined references across two accounts when all members are rekeyed', () => {
     const before = [position('account-a-row'), position('account-b-row')]
     const after = before.map((row) => position(row.id, 'MF:mfapi:2'))

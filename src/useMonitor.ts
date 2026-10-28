@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from './useStore'
 import { privateValue } from './privacy'
+import { emptyMonitorReadingState, parseMonitorReadingState, type MonitorReadingState } from './monitorReading'
 import {
-  evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, latestQuoteRecords, loadMonitorState, reconcileMonitorRules, saveMonitorState, validReminderDate,
+  evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, loadMonitorState, reconcileMonitorRules, saveMonitorState, validReminderDate,
   MONITOR_STORAGE_KEY,
-  type AlertState, type MonitorAlert, type MonitorRecord, type RuleCondition,
+  type AlertState, type MonitorAlert, type RuleCondition,
 } from './monitor'
 
 function today(now: number): string {
@@ -21,6 +22,7 @@ export function useMonitor() {
   const [loaded] = useState(() => ({ ...loadMonitorState(), raw: persistedMonitor() }))
   const persistedRevision = useRef(loaded.raw)
   const [state, setState] = useState(loaded.state)
+  const savedState = useRef<typeof state | null>(null)
   const [status, setStatus] = useState(() => ({ message: settings.allowExternalData ? '' : 'External market data is off. Enable it in Settings to load quote updates.', revision: 0 }))
   const [storageError, setStorageError] = useState(loaded.error)
   const [refreshing, setRefreshing] = useState(false)
@@ -68,6 +70,7 @@ export function useMonitor() {
   }, [reloadMonitor])
 
   const rules = useMemo(() => reconcileMonitorRules(state.rules, positions), [state.rules, positions])
+  const reading = useMemo(() => state.reading ?? emptyMonitorReadingState(), [state.reading])
 
   useEffect(() => {
     if (workspaceReadOnly) return
@@ -90,8 +93,10 @@ export function useMonitor() {
       setStatusMessage('Monitor changed in another tab. Review it and retry your change.')
       return
     }
+    if (savedState.current === state) return
     if (!saveMonitorState(state)) setStorageError('Monitor changes could not be saved. They will only last in this session.')
     else {
+      savedState.current = state
       persistedRevision.current = persistedMonitor()
       setStorageError('')
     }
@@ -153,10 +158,49 @@ export function useMonitor() {
   }
 
   function setAlertState(id: string, alertState: AlertState) {
+    if (alertState === 'snoozed') {
+      snoozeAlert(id, Date.now() + 86_400_000)
+      return
+    }
     if (!canChangeMonitor()) return
-    if (!['open', 'reviewed', 'snoozed'].includes(alertState)) return
-    setState((current) => ({ ...current, alerts: current.alerts.map((alert) => alert.id === id ? { ...alert, state: alertState } : alert) }))
-    setStatusMessage(alertState === 'open' ? 'Alert reopened.' : alertState === 'reviewed' ? 'Alert marked reviewed.' : 'Alert moved to snoozed. Reopen it when you are ready.')
+    if (!['open', 'reviewed'].includes(alertState)) return
+    setState((current) => ({ ...current, alerts: current.alerts.map((alert) => {
+      if (alert.id !== id) return alert
+      const { snoozedUntil: _deadline, ...rest } = alert
+      return { ...rest, state: alertState }
+    }) }))
+    setStatusMessage(alertState === 'open' ? 'Alert reopened.' : 'Alert marked reviewed.')
+  }
+
+  function snoozeAlert(id: string, until: number): boolean {
+    if (!canChangeMonitor()) return false
+    const now = Date.now()
+    if (!state.alerts.some((alert) => alert.id === id) || !Number.isFinite(until) || until <= now || until > 8_640_000_000_000_000) {
+      setStatusMessage('Choose a future time for this alert.')
+      return false
+    }
+    setState((current) => ({ ...current, alerts: current.alerts.map((alert) => alert.id === id ? { ...alert, state: 'snoozed', snoozedUntil: until } : alert) }))
+    setStatusMessage('Alert snoozed. It will return when Monitor is open after the chosen time.')
+    return true
+  }
+
+  function updateReading(reading: MonitorReadingState): boolean {
+    if (!canChangeMonitor()) return false
+    let validated: MonitorReadingState
+    try { validated = parseMonitorReadingState(reading) } catch {
+      setStatusMessage('Reading preferences could not be saved. Reload Monitor and try again.')
+      return false
+    }
+    const next = { ...state, reading: validated }
+    if (!saveMonitorState(next)) {
+      setStorageError('Reading preferences could not be saved. Free browser storage and try again.')
+      return false
+    }
+    persistedRevision.current = persistedMonitor()
+    setStorageError('')
+    savedState.current = next
+    setState((current) => current === state ? next : { ...current, reading: validated })
+    return true
   }
 
   function toggleRule(id: string) {
@@ -203,15 +247,14 @@ export function useMonitor() {
     if (marketDataResult?.failed && !marketDataResult.updated) setStatusMessage('Latest quotes could not be reached. Showing previous provider observations where available.')
   }, [marketDataResult, settings.allowExternalData])
 
-  const redact = <T extends MonitorRecord | MonitorAlert>(item: T): T => !settings.hideValues ? item : ({
+  const redact = (item: MonitorAlert): MonitorAlert => !settings.hideValues ? item : ({
     ...item,
     holding: privateValue(item.holding, true),
-    title: item.kind === 'price' ? 'Watch observation hidden' : item.title,
+    title: 'Watch observation hidden',
     reason: 'Values are hidden.',
     evidence: 'Provider observation details are hidden while Hide values is enabled.',
     metrics: item.metrics.map((metric) => ({ ...metric, value: privateValue(metric.value, true), trend: 'neutral' })),
   })
-  const quoteRecords = useMemo(() => latestQuoteRecords(positions, liveQuotes, now, settings.allowExternalData), [positions, liveQuotes, now, settings.allowExternalData])
   const currentDate = today(now)
   return {
     now,
@@ -219,8 +262,8 @@ export function useMonitor() {
     hideValues: settings.hideValues,
     allowExternalData: settings.allowExternalData,
     alerts: state.alerts.map(redact),
-    quoteRecords: quoteRecords.map(redact),
     rules,
+    reading,
     events: [...state.events].sort((a, b) => a.date.localeCompare(b.date)).map((event) => settings.hideValues
       ? { ...event, holding: privateValue(event.holding, true), title: privateValue(event.title, true) }
       : event.unresolved ? { ...event, holding: `${event.holding} · Holding unavailable` } : event),
@@ -236,6 +279,8 @@ export function useMonitor() {
     refreshing: refreshing || marketDataRefreshing,
     refresh,
     setAlertState,
+    snoozeAlert,
+    updateReading,
     saveRule,
     toggleRule,
     deleteRule,

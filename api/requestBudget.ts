@@ -32,7 +32,7 @@ export function createRequestBudget(now: () => number = Date.now) {
 
   return async (
     key: string,
-    successTtlMs: number,
+    successTtlMs: number | (() => number),
     load: (signal: AbortSignal) => Promise<Response>,
   ): Promise<Response> => {
     const timestamp = now()
@@ -65,11 +65,12 @@ export function createRequestBudget(now: () => number = Date.now) {
         response = Response.json({ error: 'Provider deadline exceeded or data unavailable.' }, { status: 502 })
       }
       const body = await response.text()
+      const ttl = response.ok ? (typeof successTtlMs === 'function' ? successTtlMs() : successTtlMs) : FAILURE_CACHE_MS
       const entry: CachedResponse = {
         body,
         status: response.status,
         headers: [...response.headers.entries()],
-        expiresAt: now() + (response.ok ? successTtlMs : FAILURE_CACHE_MS),
+        expiresAt: now() + ttl,
         bytes: new TextEncoder().encode(body).byteLength,
       }
       if (entry.bytes <= MAX_CACHE_BYTES) {

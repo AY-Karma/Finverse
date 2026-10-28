@@ -13,7 +13,7 @@ export interface NewsItem {
   publishedAt?: number
   /** Tickers from the user's book this story mentions; empty for market-wide wire stories. */
   matches: string[]
-  /** Which layer produced the story: the standing market wire or the active search. */
+  /** Search includes stories returned by the active query, even when also on the wire. */
   origin: 'wire' | 'search'
 }
 
@@ -32,8 +32,8 @@ interface NewsFetch {
  * Wire = Indian market RSS feeds; companyNews = on-demand per-query search.
  */
 export interface MarketNewsAdapter {
-  fetchWire(options: { signal?: AbortSignal; onPartial?: (feed: NewsFetch) => void }): Promise<NewsFetch>
-  fetchCompanyNews(query: string, options: { signal?: AbortSignal; region?: NewsRegion }): Promise<NewsFetch>
+  fetchWire(options: { signal?: AbortSignal; forceRefresh?: boolean; onPartial?: (feed: NewsFetch) => void }): Promise<NewsFetch>
+  fetchCompanyNews(query: string, options: { signal?: AbortSignal; region?: NewsRegion; forceRefresh?: boolean }): Promise<NewsFetch>
 }
 
 export interface LoadedMarketFeed extends NewsFetch {
@@ -193,10 +193,14 @@ export function eligibleHoldings(positions: Position[]): { identity: string; tic
     .map((position) => ({ identity: holdingIdentity(position), ticker: position.ticker, name: position.name, region: holdingNewsRegion(position) }))
 }
 
+function newsItemKey(item: NewsItem): string {
+  return `${item.title.trim().toLowerCase()}:${item.sourceUrl}`
+}
+
 export function dedupeItems(items: NewsItem[]): NewsItem[] {
   const seen = new Set<string>()
   return items.filter((item) => {
-    const key = `${item.title.trim().toLowerCase()}:${item.sourceUrl}`
+    const key = newsItemKey(item)
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -227,8 +231,8 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
     return { items, issues: [] }
   }
 
-  const fetchWire = async ({ signal, onPartial }: { signal?: AbortSignal; onPartial?: (feed: NewsFetch) => void } = {}): Promise<NewsFetch> => {
-    if (wireCache && Date.now() - wireCache.at < wireCache.ttl) return wireCache.result
+  const fetchWire = async ({ signal, onPartial, forceRefresh }: { signal?: AbortSignal; forceRefresh?: boolean; onPartial?: (feed: NewsFetch) => void } = {}): Promise<NewsFetch> => {
+    if (!forceRefresh && wireCache && Date.now() - wireCache.at < wireCache.ttl) return wireCache.result
     const cutoff = Date.now() - NEWS_MAX_AGE_MS
     const received: NewsFetch[] = []
     // Every reachable feed contributes; a partial outage still shows news and names the dead feed.
@@ -256,7 +260,7 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
     return result
   }
 
-  const fetchCompanyNews = async (query: string, { signal, region }: { signal?: AbortSignal; region?: NewsRegion } = {}): Promise<NewsFetch> => {
+  const fetchCompanyNews = async (query: string, { signal, region, forceRefresh }: { signal?: AbortSignal; region?: NewsRegion; forceRefresh?: boolean } = {}): Promise<NewsFetch> => {
     const normalizedQuery = query.trim().toLowerCase()
     if (!normalizedQuery) return { items: [], issues: [] }
     const key = `${region ?? 'IN'}:${normalizedQuery}`
@@ -265,7 +269,7 @@ export function createMarketNewsAdapter(requestText: TextFetcher = fetchText): M
       if (timestamp - entry.at >= entry.ttl) searchCache.delete(storedKey)
     }
     const cached = searchCache.get(key)
-    if (cached) {
+    if (cached && !forceRefresh) {
       searchCache.delete(key)
       searchCache.set(key, cached)
       return cached.result
@@ -304,7 +308,7 @@ const marketNewsAdapter = createMarketNewsAdapter()
 /** Wire always loads; the optional query layers a company deep-dive on top. Both failures surface as issues. */
 export async function loadMarketFeed(
   positions: Position[],
-  options: { signal?: AbortSignal; query?: string; region?: NewsRegion; onPartial?: (feed: LoadedMarketFeed) => void } = {},
+  options: { signal?: AbortSignal; query?: string; region?: NewsRegion; forceRefresh?: boolean; onPartial?: (feed: LoadedMarketFeed) => void } = {},
   adapter: MarketNewsAdapter = marketNewsAdapter,
 ): Promise<LoadedMarketFeed> {
   const holdings = eligibleHoldings(positions)
@@ -313,14 +317,23 @@ export async function loadMarketFeed(
     ...item,
     matches: matchTitle(item.title),
   }))
-  const [wire, search] = await Promise.all([
+  let wire: NewsFetch = { items: [], issues: [] }
+  let search: NewsFetch = { items: [], issues: [] }
+  const snapshot = (): LoadedMarketFeed => {
+    const searchKeys = new Set(search.items.map(newsItemKey))
+    return {
+      items: tag([...wire.items, ...search.items]).map((item) => searchKeys.has(newsItemKey(item)) ? { ...item, origin: 'search' } : item),
+      issues: [...search.issues, ...wire.issues], fetchedAt: Date.now(),
+    }
+  }
+  const publish = () => { if (!options.signal?.aborted) options.onPartial?.(snapshot()) }
+  await Promise.all([
     adapter.fetchWire({
       signal: options.signal,
-      onPartial: options.onPartial ? (feed) => options.onPartial?.({
-        items: tag(feed.items), issues: feed.issues, fetchedAt: Date.now(),
-      }) : undefined,
-    }),
-    options.query?.trim() ? adapter.fetchCompanyNews(options.query, options) : Promise.resolve({ items: [] as NewsItem[], issues: [] as MonitorIssue[] }),
+      forceRefresh: options.forceRefresh,
+      onPartial: options.onPartial ? (feed) => { wire = feed; publish() } : undefined,
+    }).then((feed) => { wire = feed }),
+    options.query?.trim() ? adapter.fetchCompanyNews(options.query, options).then((feed) => { search = feed; publish() }) : Promise.resolve(),
   ])
-  return { items: tag([...wire.items, ...search.items]), issues: [...search.issues, ...wire.issues], fetchedAt: Date.now() }
+  return snapshot()
 }
