@@ -6,7 +6,7 @@ import type { Position } from './types'
 const EMPTY_FEED: MarketEventsFeed = { events: [], issues: [], fetchedAt: 0 }
 
 export function useMarketEvents(positions: Position[], allowed: boolean, masked: boolean) {
-  const positionsKey = JSON.stringify(positions.map((position) => [position.id, holdingIdentity(position)]).sort())
+  const positionsKey = JSON.stringify(positions.map((position) => [position.id, holdingIdentity(position), position.name, position.exchangeSource, position.identityIssue]).sort())
   const monitoredPositions = useMemo(() => positions, [positionsKey])
   const key = JSON.stringify([positionsKey, allowed, masked])
   const [result, setResult] = useState<{ key: string; feed: MarketEventsFeed } | null>(null)
@@ -22,12 +22,12 @@ export function useMarketEvents(positions: Position[], allowed: boolean, masked:
     setLoading(true)
     const receive = (feed: MarketEventsFeed) => {
       if (controller.signal.aborted) return
-      setResult((previous) => ({ key, feed: feed.events.length === 0 && feed.issues.length > 0 && previous?.key === key
-        ? { ...previous.feed, issues: feed.issues } : feed }))
+      setResult((previous) => ({ key, feed: feed.events.length === 0 && feed.sourceFailed && previous?.key === key
+        ? { ...previous.feed, issues: feed.issues, sourceFailed: true } : feed }))
     }
     void loadMarketEvents(monitoredPositions, { signal: controller.signal, forceRefresh })
       .then(receive)
-      .catch(() => receive({ ...EMPTY_FEED, issues: [{ source: 'Company updates', message: 'Could not load company events. Try again.' }] }))
+      .catch(() => receive({ ...EMPTY_FEED, sourceFailed: true, issues: [{ source: 'Company updates', message: 'Could not load company events. Try again.' }] }))
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [key, monitoredPositions, allowed, masked, revision])

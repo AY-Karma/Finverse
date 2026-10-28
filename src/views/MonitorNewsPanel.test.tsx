@@ -93,6 +93,19 @@ afterEach(async () => {
 })
 
 describe('portfolio news', () => {
+  it('restores a dismissed headline with Undo after leaving and remounting Monitor', async () => {
+    await renderPanel()
+    await clickButton('Dismiss Headline holding')
+    await act(async () => root!.unmount())
+    root = undefined
+    container.remove()
+    await renderPanel()
+    expect(container.querySelector('.mn-stories')?.textContent).not.toContain('Headline holding')
+    await clickButton('Undo')
+    expect(container.querySelector('.mn-stories')?.textContent).toContain('Headline holding')
+    expect(savedReading.articles.find((article) => article.key === newsReadingKey(story('holding', [])))?.dismissedAt).toBeUndefined()
+  })
+
   it('does not regroup or reassess unchanged headlines while typing with a queued refresh', async () => {
     const items = Array.from({ length: 150 }, (_,index) => story(String(index), []))
     loadFeed.mockResolvedValueOnce(feed(items))

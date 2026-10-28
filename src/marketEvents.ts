@@ -5,7 +5,7 @@ import type { Position } from './types'
 
 export type { MarketEventKind } from './marketEventsProtocol'
 export interface MarketEvent extends MarketEventPayload { holdingId: string; instrumentIdentity: string; holdingName: string }
-export interface MarketEventsFeed { events: MarketEvent[]; issues: MarketEventIssue[]; fetchedAt: number }
+export interface MarketEventsFeed { events: MarketEvent[]; issues: MarketEventIssue[]; fetchedAt: number; sourceFailed?: boolean }
 type Options = { signal?: AbortSignal; forceRefresh?: boolean }
 const MAX_CONCURRENT_BATCHES = 3
 const KINDS = ['results', 'meeting', 'dividend', 'corporate-action', 'filing']
@@ -121,7 +121,7 @@ export function createMarketEventsLoader(fetcher: typeof fetch = fetch, now: () 
     for (const { holding, expected } of mismatches.values()) issues.push({ source: 'Company events', message: `ISIN mismatch for ${holdingLabel(holding)}: holding ${holding.isin}, NSE ${[...expected].join(', ')}. These updates were skipped.` })
     if (ambiguous.size) issues.push({ source: 'Company events', message: `Conflicting imported listing identities for ${[...ambiguous].join(', ')}. Confirm these listings in Settings.` })
     const uniqueIssues = new Map([...issues, ...feeds.flatMap((feed) => feed.issues)].map((issue) => [`${issue.source}:${issue.message}`, issue]))
-    return { events: [...new Map(events.map((event) => [`${event.id}:${event.instrumentIdentity}`, event])).values()], issues: [...uniqueIssues.values()], fetchedAt: Math.max(...feeds.map((feed) => feed.fetchedAt)) }
+    return { events: [...new Map(events.map((event) => [`${event.id}:${event.instrumentIdentity}`, event])).values()], issues: [...uniqueIssues.values()], fetchedAt: Math.max(...feeds.map((feed) => feed.fetchedAt)), sourceFailed: feeds.some((feed) => feed.issues.length > 0) }
   }
 }
 

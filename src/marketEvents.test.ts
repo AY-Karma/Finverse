@@ -9,6 +9,16 @@ const event: MarketEventPayload = { id: 'meeting:INFY', symbol: 'INFY', title: '
 const response = (events: unknown[] = [event], issues: unknown[] = []) => Response.json({ events, issues, fetchedAt: NOW })
 
 describe('company event loading', () => {
+  it('distinguishes routine coverage notes from unavailable source data', async () => {
+    const fund: Position = { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }
+    const complete = await createMarketEventsLoader(vi.fn(async () => response([])), () => NOW)([position, fund])
+    expect(complete.events).toEqual([])
+    expect(complete.issues.some((issue) => issue.source === 'Company events')).toBe(true)
+    expect(complete.sourceFailed).toBe(false)
+    const failed = await createMarketEventsLoader(vi.fn(async () => response([], [{ source: 'NSE filings', message: 'Unavailable' }])), () => NOW)([position, fund])
+    expect(failed.sourceFailed).toBe(true)
+  })
+
   it('runs at most three symbol batches together and starts queued batches as slots open', async () => {
     const pending: (() => void)[] = []
     const fetcher = vi.fn<typeof fetch>(() => new Promise((resolve) => { pending.push(() => resolve(response([]))) }))
