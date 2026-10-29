@@ -1,7 +1,7 @@
 .portfolio-welcome {
   --welcome-accent: var(--primary-hover);
   width: min(1120px, 100%);
-  margin: auto;
+  margin: 0 auto;
   padding: 12px 0 0;
 }
 [data-mode='light'] .portfolio-welcome { --welcome-accent: var(--primary); }
