@@ -7,7 +7,7 @@ import { captureWorkspaceRecords, writeWorkspaceRecords } from './workspaceStora
 
 export { migrateFolioIdentities }
 
-const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'indigo', mode: 'dark', hideValues: false }
+const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false }
 const EMPTY_MONITOR = { version: 1, rules: [], events: [], alerts: [] }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

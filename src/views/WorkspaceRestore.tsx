@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from '../useStore'
 import {
   captureWorkspaceRecords, hasWorkspaceRecovery, MAX_WORKSPACE_ARCHIVE_BYTES,
@@ -6,12 +7,12 @@ import {
   type WorkspaceArchivePreview, type WorkspaceRecords,
 } from '../workspaceArchive'
 
-export function WorkspaceRestore() {
+export function WorkspaceRestore({ actionsTarget }: { actionsTarget?: HTMLElement | null }) {
   const { folios } = useStore()
-  return <WorkspaceRestorePanel accountCount={folios.length} />
+  return <WorkspaceRestorePanel accountCount={folios.length} actionsTarget={actionsTarget} />
 }
 
-export function WorkspaceRestorePanel({ accountCount }: { accountCount: number | null }) {
+export function WorkspaceRestorePanel({ accountCount, actionsTarget }: { accountCount: number | null; actionsTarget?: HTMLElement | null }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<WorkspaceArchivePreview | null>(null)
   const [expected, setExpected] = useState<WorkspaceRecords | null>(null)
@@ -58,13 +59,14 @@ export function WorkspaceRestorePanel({ accountCount }: { accountCount: number |
     }
   }
 
-  return <div className="workspace-recovery">
-    <input ref={inputRef} type="file" accept=".json,application/json" className="sr-only" aria-label="Choose workspace backup" disabled={reading} onChange={(event) => void readArchive(event.target.files?.[0])} />
-    <div className="import-actions">
+  const actions = <div className="import-actions">
       <button type="button" className="btn btn--secondary btn--small" disabled={reading} onClick={() => inputRef.current?.click()}>{reading ? 'Reading backup…' : 'Restore backup'}</button>
       {recoveryAvailable && <button type="button" className="btn btn--ghost btn--small" onClick={() => { setUndoArmed(true); setPreview(null); setError('') }}>Undo last restore</button>}
     </div>
-    <p className="hint">JSON backups include accounts, preferences, tracked balances and Monitor data. Keep them private; the file is unencrypted.</p>
+
+  return <div className="workspace-recovery">
+    <input ref={inputRef} type="file" accept=".json,application/json" className="sr-only" aria-label="Choose workspace backup" disabled={reading} onChange={(event) => void readArchive(event.target.files?.[0])} />
+    {actionsTarget === undefined ? actions : actionsTarget ? createPortal(actions, actionsTarget) : null}
     {preview && <section className="import-preview" aria-label="Review workspace restore">
       <div className="panel-head"><span className="panel-title">Review workspace restore</span><span className="section-index">Nothing changed yet</span></div>
       <div className="import-quality">

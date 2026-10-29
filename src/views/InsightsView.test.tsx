@@ -69,6 +69,21 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
+it('opens import from the empty insights landing without fetching market data', async () => {
+  const onRequestImport = vi.fn()
+  await renderInsights([], [], [])
+  await act(async () => root!.render(<InsightsView onRequestImport={onRequestImport} />))
+  const welcome = container.querySelector('.portfolio-welcome')!
+  expect(welcome.querySelector('h1')?.textContent).toBe('Your investments.A closer look.')
+  expect(welcome.querySelector('.portfolio-welcome-index, .portfolio-welcome-features')).toBeNull()
+  const importButton = welcome.querySelector<HTMLButtonElement>('button')!
+  expect(importButton.textContent).toBe('Import portfolio')
+  await act(async () => importButton.click())
+  expect(onRequestImport).toHaveBeenCalledOnce()
+  expect(state.build).not.toHaveBeenCalled()
+  expect(state.benchmark).not.toHaveBeenCalled()
+})
+
 it('shows holding price history for all holdings at the bottom below the insights grid', async () => {
   await renderInsights([])
   const history = container.querySelector('[data-history-scope="all"]')

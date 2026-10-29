@@ -37,6 +37,22 @@ async function click(text: string) {
 }
 
 describe('research desk', () => {
+  it('opens import from the empty research landing without fetching holding sources', async () => {
+    state.positions = []
+    state.settings.allowExternalData = true
+    const onRequestImport = vi.fn()
+    await act(async () => root.render(<ResearchView onRequestImport={onRequestImport} />))
+    const welcome = container.querySelector('.portfolio-welcome')!
+    expect(welcome.querySelector('h1')?.textContent).toBe('Your holdings.Well researched.')
+    expect(welcome.querySelector('.portfolio-welcome-index, .portfolio-welcome-features')).toBeNull()
+    const importButton = welcome.querySelector<HTMLButtonElement>('button')!
+    expect(importButton.textContent).toBe('Import portfolio')
+    await act(async () => importButton.click())
+    expect(onRequestImport).toHaveBeenCalledOnce()
+    expect(state.resolvePath).not.toHaveBeenCalled()
+    expect(state.history).not.toHaveBeenCalled()
+  })
+
   it.each(['stock', 'etf', 'mutual-fund', 'other'] as const)('places the shared history directly below Your holding for %s', async (type) => {
     state.positions = [{ ...position, type }]
     await render()

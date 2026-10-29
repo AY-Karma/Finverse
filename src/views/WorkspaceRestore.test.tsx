@@ -20,6 +20,26 @@ beforeEach(() => {
 })
 
 describe('workspace restore review', () => {
+  it('keeps restore review outside the compact action target', async () => {
+    const archive = { folios: [], snapshots: [], monitor: { rules: [], events: [], alerts: [] } }
+    vi.mocked(parseWorkspaceArchive).mockReturnValue({ archive, legacy: false, warnings: [] } as unknown as ReturnType<typeof parseWorkspaceArchive>)
+    const target = document.createElement('div')
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<WorkspaceRestore actionsTarget={target} />))
+      expect(target.textContent).toContain('Restore backup')
+      const file = new File(['{}'], 'backup.json')
+      Object.defineProperty(file, 'text', { value: async () => '{}' })
+      const input = container.querySelector<HTMLInputElement>('input')!
+      Object.defineProperty(input, 'files', { value: [file] })
+      await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
+      expect(container.querySelector('[aria-label="Review workspace restore"]')).not.toBeNull()
+      expect(target.querySelector('[aria-label="Review workspace restore"]')).toBeNull()
+      expect(target.textContent).not.toContain('Replace workspace')
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('keeps the workspace unchanged until confirmation and preserves the preview after a save failure', async () => {
     const archive = { folios: [{ positions: [{}] }], snapshots: [{}], monitor: { rules: [], events: [], alerts: [] } }
     vi.mocked(parseWorkspaceArchive).mockReturnValue({ archive, legacy: true, warnings: ['Legacy backup contains holdings only.'] } as unknown as ReturnType<typeof parseWorkspaceArchive>)

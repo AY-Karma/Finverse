@@ -7,22 +7,24 @@
    ============================================================ */
 
 :root {
-  /* Accent (runtime-swappable via Settings → applyTheme) */
-  --primary: #5e6ad2;
-  --primary-hover: #828fff;
-  --primary-focus: #5e69d1;
-  --spark: rgba(94, 106, 210, 0.16);
+  /* Fixed blue accent */
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-focus: #2f6cd8;
+  --spark: rgba(59, 130, 246, 0.14);
   --chart-portfolio: var(--primary-hover);
+  --primary-action: #2563eb;
+  --primary-action-hover: #1d4ed8;
   --chart-benchmark: #e4b35b;
   --chart-value: #65c9a5;
   --chart-invested: #d4a85d;
 
   /* Ink */
   --ink: #f4f4f2;
-  --ink-muted: #b9b9b4;
-  --ink-subtle: #8a8a84;
-  --ink-tertiary: #63635e;
-  --ink-faint: #4a4a46;
+  --ink-muted: #e0e0dd;
+  --ink-subtle: #ccccc8;
+  --ink-tertiary: #bdbdb8;
+  --ink-faint: #adada8;
 
   /* Surfaces */
   --canvas: #0d0d0c;
@@ -277,12 +279,6 @@ body {
   color: var(--ink);
   font-weight: 600;
 }
-.nav-index {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--ink-tertiary);
-  opacity: 0.7;
-}
 .nav-item-label {
   display: inline-flex;
   align-items: center;
@@ -378,27 +374,6 @@ body {
   .overview-title-row { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .btn.overview-review-action { padding: 0 12px; font-size: 14px; }
 }
-.overview-empty {
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 28px;
-  min-height: calc(100vh - 96px);
-  padding: 48px 24px;
-  text-align: center;
-}
-.overview-empty .page-title {
-  max-width: 720px;
-  font-size: clamp(36px, 5vw, 64px);
-  text-transform: none;
-}
-.overview-empty .page-sub {
-  max-width: 620px;
-  margin: 14px auto 0;
-  font-size: 15px;
-  text-align: center;
-}
-
 /* ============ Icon buttons ============ */
 .icon-btn {
   display: inline-grid;
@@ -930,12 +905,34 @@ body {
   cursor: not-allowed;
 }
 .btn--primary {
-  background: var(--primary);
+  background: var(--primary-action);
   color: #fff;
 }
 .btn--primary:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: var(--primary-action-hover);
 }
+.btn.btn--import {
+  min-height: 44px;
+  height: auto;
+  gap: 9px;
+  padding: 11px 16px;
+  border: 1px solid var(--primary-action);
+  border-radius: 8px;
+  background: var(--primary-action);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.4;
+  letter-spacing: -.01em;
+}
+.btn.btn--import:hover:not(:disabled) {
+  border-color: var(--primary-action-hover);
+  background: var(--primary-action-hover);
+  color: #fff;
+}
+.btn.btn--import:active:not(:disabled) { transform: translateY(1px); }
+.btn.btn--import:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: 3px; }
+.btn.btn--import .action-icon { width: 18px; height: 18px; flex: none; stroke-width: 1.6; }
 .btn--secondary {
   color: var(--ink);
   border-color: var(--hairline-strong);
@@ -1066,28 +1063,7 @@ body {
 }
 
 /* Settings status pill */
-.settings-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 500;
-  border: 1px solid var(--hairline-strong);
-  background: transparent;
-  transition: color 0.15s ease, border-color 0.15s ease;
-}
-.settings-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.settings-status-pill--on {
-  color: var(--semantic-success);
-  border-color: color-mix(in srgb, var(--semantic-success) 35%, transparent);
-}
+
 
 /* ============ Table — the ledger ============ */
 .table {
@@ -2717,38 +2693,6 @@ body {
   font-weight: 600;
 }
 .segmented-control button:disabled { cursor: not-allowed; opacity: 0.4; }
-/* Segmented controls placed in the settings control column fill it edge-to-edge,
-   matching the selects above them instead of leaving a dead right gap. */
-.segmented-control.settings-control { display: flex; }
-.segmented-control.settings-control > button { flex: 1 1 0; min-width: 0; text-align: center; }
-
-/* Appearance toggle: each side literally wears the theme it switches to.
-   Dark = near-black with white type, Light = paper white with black type.
-   Inactive side dims; active side gets a selection ring. */
-.segmented-control.mode-toggle { gap: 3px; }
-.segmented-control.mode-toggle > button {
-  border-radius: var(--r-sm);
-  font-weight: 600;
-  transition: opacity 0.12s ease, box-shadow 0.12s ease;
-}
-.segmented-control.mode-toggle > button:first-child,
-.segmented-control.mode-toggle > button:first-child.is-active {
-  background: #141414;
-  color: #ffffff;
-}
-[data-mode='light'] .segmented-control.mode-toggle > button:first-child {
-  box-shadow: inset 0 0 0 1px rgba(20, 20, 16, 0.18);
-}
-.segmented-control.mode-toggle > button:last-child,
-.segmented-control.mode-toggle > button:last-child.is-active {
-  background: #f7f7f4;
-  color: #141414;
-}
-.segmented-control.mode-toggle > button:not(.is-active) { opacity: 0.45; }
-.segmented-control.mode-toggle > button.is-active {
-  box-shadow: 0 0 0 2px var(--canvas), 0 0 0 4px var(--ink);
-}
-
 .performance-method-note { margin: 0 0 16px; color: var(--ink-subtle); font-size: 11.5px; line-height: 1.4; }
 .risk-profile { display: grid; }
 .insight-panel--risk { overflow: visible; }
@@ -2964,11 +2908,29 @@ details.workspace-recovery > summary {
 .instrument-review-head h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
 .instrument-review-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px; }
 .instrument-review-scroll > .import-actions { margin-bottom: 12px; }
-.listing-review-trigger { width: 100%; height: auto; justify-content: flex-start; white-space: normal; text-align: left; padding: 10px 12px; line-height: 1.5; }
-.listing-review-trigger > span:last-child { margin-left: auto; }
 details.fund-review > summary { list-style: none; }
 details.fund-review > summary::-webkit-details-marker { display: none; }
-.fund-review[open] .fund-review-arrow { transform: rotate(90deg); }
+.fund-scheme-content { display: grid; gap: 10px; padding: 14px; border-top: 1px solid var(--hairline-strong); }
+.fund-scheme-content > .import-preview { padding: 14px; background: var(--surface-2); border-radius: 8px; }
+.fund-scheme-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+  padding-block: 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+.fund-scheme-row:last-of-type { border-bottom: 0; }
+.fund-scheme-content > .import-actions { align-items: center; margin-top: 0; }
+.fund-scheme-row .folio-copy { gap: 6px; }
+.fund-scheme-row .sym { color: var(--ink); font: 550 13px/1.5 var(--font-body); }
+.fund-scheme-row > .btn { width: auto; min-height: 36px; white-space: nowrap; }
+@media (max-width: 640px) {
+  .fund-scheme-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .fund-scheme-row > .btn { justify-self: start; min-height: 44px; }
+}
+.fund-review[open] > summary .listing-review-chevron { transform: rotate(180deg); }
 .import-quality {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3309,411 +3271,6 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
 [data-density='compact'] .panel-head { margin-bottom: var(--sp-md); }
 [data-density='compact'] .page-head { padding-bottom: var(--sp-md); }
 
-/* ============ Settings ============ */
-.settings-shell {
-  display: grid;
-  grid-template-columns: 244px minmax(0, 1fr);
-  width: 100%;
-  min-height: calc(100vh - 176px);
-  overflow: hidden;
-  background: var(--surface-1);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-lg);
-}
-.settings-nav {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 18px 12px 14px;
-  background: color-mix(in srgb, var(--canvas) 42%, var(--surface-1));
-  border-right: 1px solid var(--hairline);
-}
-.settings-nav-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 10px 12px;
-  color: var(--ink-tertiary);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-}
-.settings-nav-list {
-  display: grid;
-  gap: 4px;
-}
-.settings-nav-item {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-  width: 100%;
-  min-height: 62px;
-  padding: 10px;
-  color: var(--ink-subtle);
-  text-align: left;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-md);
-  cursor: pointer;
-  transition: color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
-}
-.settings-nav-item:hover {
-  color: var(--ink);
-  background: var(--surface-1);
-}
-.settings-nav-item:focus-visible {
-  outline: 2px solid var(--primary-focus);
-  outline-offset: -2px;
-}
-.settings-nav-item--active {
-  color: var(--ink);
-  background: var(--surface-2);
-  box-shadow: inset 2px 0 0 var(--primary);
-}
-.settings-nav-icon { display: flex; align-items: center; padding-top: 3px; color: var(--ink-muted); }
-.settings-nav-item--active .settings-nav-icon { color: var(--primary-hover); }
-.settings-nav-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-.settings-nav-copy strong {
-  color: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.settings-nav-copy small {
-  overflow: hidden;
-  color: var(--ink-tertiary);
-  font-size: 11.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-nav-foot {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-  margin-top: auto;
-  padding: 14px 10px 4px;
-  border-top: 1px solid var(--hairline);
-}
-.settings-nav-foot > span:last-child {
-  display: grid;
-  gap: 1px;
-}
-.settings-nav-foot strong {
-  color: var(--ink-muted);
-  font-size: 11.5px;
-  font-weight: 500;
-}
-.settings-nav-foot small {
-  color: var(--ink-tertiary);
-  font-size: 10.5px;
-  line-height: 1.45;
-}
-.settings-saved-mark {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  margin-top: 1px;
-  color: var(--semantic-success);
-  border: 1px solid color-mix(in srgb, var(--semantic-success) 38%, transparent);
-  border-radius: 50%;
-  font-size: 10px;
-}
-.settings-detail {
-  display: grid;
-  align-content: start;
-  justify-items: start;
-  gap: var(--sp-xl);
-  min-width: 0;
-  padding: var(--sp-xxl);
-}
-.settings-detail > * {
-  width: min(840px, 100%);
-}
-.settings-preferences { display: grid; align-content: start; gap: var(--sp-xl); min-width: 0; }
-.settings-detail-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--sp-xl);
-  padding-bottom: var(--sp-xl);
-  border-bottom: 1px solid var(--hairline);
-}
-.settings-detail-head > div {
-  display: grid;
-  gap: 5px;
-}
-.settings-detail-head h2 {
-  font-size: 21px;
-  font-weight: 650;
-  letter-spacing: -0.018em;
-  line-height: 1.2;
-}
-.settings-detail-head p,
-.settings-subhead p {
-  color: var(--ink-subtle);
-  font-size: 12.5px;
-}
-.settings-detail-eyebrow {
-  color: var(--ink-tertiary);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-}
-.settings-status,
-.data-destination {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 3px 9px;
-  color: var(--ink-subtle);
-  background: var(--surface-2);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-pill);
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.settings-stack {
-  display: grid;
-  gap: var(--sp-xl);
-}
-.settings-group {
-  overflow: hidden;
-  background: var(--surface-2);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-}
-.setting-row {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(220px, auto);
-  align-items: center;
-  gap: var(--sp-xl);
-  min-height: 78px;
-  padding: 16px 18px;
-  border-top: 1px solid var(--hairline);
-}
-.setting-row:first-child { border-top: 0; }
-.setting-row.setting-row--toggle {
-  grid-template-columns: minmax(0, 1fr) auto;
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-.setting-row--toggle:hover { background: var(--surface-3); }
-.setting-row--toggle:focus-within { box-shadow: inset 2px 0 0 var(--primary); }
-.setting-copy {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-.setting-copy strong {
-  color: var(--ink);
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.setting-copy > span {
-  color: var(--ink-subtle);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.setting-control-wrap {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
-}
-.settings-control { width: 240px; }
-.setting-toggle-control {
-  display: inline-flex;
-  align-items: center;
-  justify-self: end;
-  gap: 10px;
-}
-.setting-toggle-status {
-  min-width: 20px;
-  color: var(--ink-muted);
-  font-size: 12px;
-  text-align: right;
-}
-.accent-options {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.accent-option {
-  position: relative;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: none;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-.accent-option:hover .accent-option-dot {
-  transform: scale(1.12);
-}
-.accent-option:focus-visible {
-  outline: 2px solid var(--primary-focus);
-  outline-offset: 3px;
-}
-.accent-option-dot {
-  display: block;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--swatch);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-/* Selected ring: neutral ink so it reads against any swatch hue, including the
-   rainbow custom dot. */
-.accent-option--active .accent-option-dot {
-  box-shadow: 0 0 0 2px var(--canvas), 0 0 0 4px var(--ink);
-}
-.accent-hex {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  text-transform: lowercase;
-  max-width: 140px;
-}
-.accent-hex-state {
-  font-size: 11px;
-  color: var(--ink-tertiary);
-}
-/* Floating custom-accent card (portal) — sits in the empty right zone of the
-   settings page, anchored to the rainbow chip. */
-.accent-popover {
-  position: fixed;
-  z-index: 60;
-  width: 304px;
-  padding: 16px;
-  display: grid;
-  gap: 12px;
-  background: var(--surface-1);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--r-lg);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
-}
-.accent-popover-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-.accent-popover-foot .accent-hex-state { font-size: 10.5px; }
-.accent-popover .accent-hex { flex: 1; max-width: none; }
-
-/* In-app colour picker */
-.colorpicker { display: grid; gap: 12px; }
-.colorpicker-pad {
-  position: relative;
-  height: 180px;
-  border-radius: 10px;
-  cursor: crosshair;
-  border: 1px solid var(--hairline-strong);
-  background-image:
-    linear-gradient(to top, #000, rgba(0, 0, 0, 0)),
-    linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
-}
-.colorpicker-thumb {
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-.colorpicker-hue {
-  position: relative;
-  height: 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
-}
-.colorpicker-hue .colorpicker-thumb { top: 50%; }
-.colorpicker-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.colorpicker-swatch {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--hairline-strong);
-  flex: none;
-}
-.accent-popover .accent-hex-state { font-size: 10.5px; }
-.settings-subhead {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: var(--sp-lg);
-  margin-bottom: var(--sp-md);
-}
-.settings-subhead h3 {
-  color: var(--ink-muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-.data-handling-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
-  gap: 12px;
-}
-.data-handling-card {
-  display: grid;
-  align-content: start;
-  gap: 16px;
-  min-width: 0;
-  padding: 20px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-}
-.data-handling-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.data-handling-icon {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--surface-3);
-  color: var(--ink-muted);
-}
-.data-handling-icon .action-icon { width: 18px; height: 18px; }
-.data-handling-card .setting-copy { gap: 6px; }
-.data-handling-card h4 {
-  color: var(--ink);
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-.data-handling-card p {
-  color: var(--ink-subtle);
-  font-size: 12px;
-  line-height: 1.6;
-}
-.data-destination {
-  background: transparent;
-  color: var(--ink-muted);
-}
-
 /* ============ Holdings / research / monitor workspaces ============ */
 .holdings-empty, .research-empty { display: grid; justify-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
 .holdings-name { display: block; max-width: 300px; margin-top: 2px; overflow: hidden; color: var(--ink-subtle); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -3818,11 +3375,11 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
 .folio-review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .folio-review-actions .btn { min-height: 34px; white-space: normal; }
 .holdings-manage .panel-head { margin-bottom: 0; }
-.settings-preferences > .holdings-manage { min-width: 0; padding: 16px; gap: 12px; }
 .holdings-manage > .panel-head { padding: 0; margin: 0 0 8px; }
 .holdings-manage > .manage-actions { margin: 0; padding: 0; justify-content: start; }
 .manage-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 140px)); gap: 8px; }
-.manage-actions .btn { position: relative; width: 100%; height: 34px; min-height: 34px; min-width: 0; padding: 0 12px; border: 1px solid var(--hairline-strong); color: var(--ink); }
+.manage-actions .btn { position: relative; width: 100%; height: 34px; min-height: 34px; min-width: 0; padding: 0 12px; border: 1px solid var(--hairline-strong); }
+.manage-actions .btn:not(.btn--import) { color: var(--ink); }
 .manage-actions .btn:disabled { opacity: 1; color: var(--ink-subtle); background: var(--surface-2); }
 .folio-list { display: grid; border-top: 1px solid var(--hairline); }
 .holdings-manage .folio-row { align-items: flex-start; min-width: 0; gap: var(--sp-md); }
@@ -3842,19 +3399,6 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
 @keyframes undo-confirm-timeout { to { transform: scaleX(0); } }
 
 /* ============ Responsive ============ */
-@media (min-width: 1280px) {
-  .settings-detail--review { grid-template-columns: minmax(0, 1.15fr) minmax(300px, 1fr); align-items: start; }
-  .settings-detail--review > * { width: 100%; }
-  .settings-detail--review > .instrument-review { contain: size; align-self: stretch; max-height: calc(100dvh - 176px); }
-  .settings-detail--review .setting-row { grid-template-columns: minmax(0, 1fr) minmax(150px, 200px); gap: 16px; padding: 14px 16px; }
-  .settings-detail--review .settings-control { width: min(200px, 100%); }
-  .settings-detail--review .manage-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (min-width: 1280px) and (max-width: 1499px) {
-  .settings-detail--review .setting-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .settings-detail--review .setting-control-wrap { justify-content: flex-start; }
-  .settings-detail--review .setting-row.setting-row--toggle { grid-template-columns: minmax(0, 1fr) auto; }
-}
 @media (max-width: 1100px) {
   .scoreboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .score:nth-child(3), .score:nth-child(4) { border-top: 1px solid var(--hairline-strong); }
@@ -3863,12 +3407,6 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
 @media (max-width: 1024px) {
   .import-source-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .span-grid { grid-template-columns: 1fr; }
-  .settings-shell { grid-template-columns: 210px minmax(0, 1fr); }
-  .settings-detail { padding: var(--sp-xl); }
-  .setting-row { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--sp-md); }
-  .setting-control-wrap { justify-content: flex-start; width: 100%; }
-  .settings-control { width: min(320px, 100%); }
-  .accent-options { width: 100%; }
 }
 @media (max-width: 900px) {
   .monitor-consent { align-items: stretch; flex-direction: column; }
@@ -4066,7 +3604,6 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   .nav-label, .sidebar-foot { display: none; }
   .nav-item { flex-direction: column; gap: 4px; white-space: nowrap; padding: 8px 3px; justify-content: center; font-size: 11px; min-height: 52px; }
   .nav-item-label { flex: initial; }
-  .nav-index { display: none; }
   .main { padding: var(--sp-lg); }
   .page-head { align-items: flex-start; flex-direction: column; }
   .page-sub { text-align: left; }
@@ -4074,25 +3611,6 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   .overview-sub { justify-items: stretch; }
   .overview-actions { justify-content: space-between; gap: 8px; }
   .overview-tools { margin-left: auto; }
-  .settings-shell { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  .settings-nav { padding: 10px; border-right: 0; border-bottom: 1px solid var(--hairline); }
-  .settings-nav-head, .settings-nav-foot { display: none; }
-  .settings-nav-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px;
-  }
-  .settings-nav-item {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 0;
-    min-height: 44px;
-    padding: 10px 8px;
-  }
-  .settings-nav-icon, .settings-nav-copy small { display: none; }
-  .settings-nav-copy strong { white-space: nowrap; }
-  .settings-nav-item--active { box-shadow: inset 0 -2px 0 var(--primary); }
-  .settings-detail { padding: var(--sp-xl); }
   .history-tools, .history-picker, .history-range { width: 100%; }
   .history-picker { align-items: stretch; }
   .history-input { width: auto; min-width: 0; flex: 1 1 auto; }
@@ -4132,11 +3650,6 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   .import-source-card { min-height: 150px; }
   .monitor-feed-actions, .monitor-feed-meta { align-items: flex-start; flex-wrap: wrap; }
   .monitor-event { grid-template-columns: minmax(0, 1fr) auto; }
-  .settings-detail { padding: 20px 16px; }
-  .settings-detail-head { flex-direction: column; gap: var(--sp-md); }
-  .setting-row { padding: 15px 14px; }
-  .accent-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .data-handling-card { padding: 16px; }
 }
 @media (max-width: 420px) {
   .main { padding: var(--sp-lg) var(--sp-md); }

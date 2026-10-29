@@ -9,6 +9,14 @@ afterEach(() => {
 })
 
 describe('settings persistence', () => {
+  it.each(['indigo', 'emerald', 'amber', 'custom', 'cobalt'])('migrates the saved %s accent to fixed blue and removes custom colors', (accent) => {
+    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), accent, customAccent: '#123abc' }))
+    const settings = loadSettings()
+    expect(settings.accent).toBe('cobalt')
+    expect(settings).not.toHaveProperty('customAccent')
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(settings)
+  })
+
   it('normalizes legacy currency preferences to INR', () => {
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), currency: 'EUR' }))
     expect(loadSettings().currency).toBe('INR')
@@ -17,11 +25,11 @@ describe('settings persistence', () => {
 
   it('removes retired connection settings and browser data while preserving preferences and portfolios', () => {
     const preferences = {
-      currency: 'INR', allowExternalData: true, density: 'compact', accent: 'custom',
-      customAccent: '#7c6cff', mode: 'light', hideValues: true,
+      currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt',
+      mode: 'light', hideValues: true,
     }
     localStorage.setItem('finverse:settings', JSON.stringify({
-      ...preferences, provider: 'openai', apiKey: 'retired-key', model: 'retired-model',
+      ...preferences, accent: 'custom', customAccent: '#7c6cff', provider: 'openai', apiKey: 'retired-key', model: 'retired-model',
       baseUrl: 'https://retired.example', confirmRemoteOllama: true, monitorNewsApiKey: 'retired-news-key',
     }))
     const portfolio = JSON.stringify([{ id: 'saved', positions: [] }])
@@ -56,7 +64,7 @@ describe('settings persistence', () => {
         const preferences = loadSettings()
         expect(preferences).toEqual({
           currency: 'INR', allowExternalData: false, density: 'comfortable',
-          accent: 'indigo', mode: 'dark', hideValues: false,
+          accent: 'cobalt', mode: 'dark', hideValues: false,
         })
         expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
       }, raw).not.toThrow()
@@ -69,7 +77,7 @@ describe('settings persistence', () => {
     vi.stubGlobal('sessionStorage', { removeItem: blocked })
     expect(loadSettings()).toEqual({
       currency: 'INR', allowExternalData: false, density: 'comfortable',
-      accent: 'indigo', mode: 'dark', hideValues: false,
+      accent: 'cobalt', mode: 'dark', hideValues: false,
     })
     expect(saveSettings(loadSettings())).toBe(false)
   })

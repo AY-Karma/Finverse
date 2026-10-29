@@ -22,7 +22,8 @@ type MonitorNewsPanelProps = {
 type FeedResult = { key: string; value: LoadedMarketFeed }
 
 export function MonitorNewsPanel(props: MonitorNewsPanelProps) {
-  const { settings } = useStore()
+  const { positions, settings } = useStore()
+  if (positions.length === 0) return null
   return <MonitorNewsContent key={settings.hideValues ? 'masked' : 'visible'} {...props} />
 }
 

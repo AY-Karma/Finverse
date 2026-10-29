@@ -7,6 +7,7 @@ import type { MarketEvent } from '../marketEvents'
 import { quoteKey } from '../valuation'
 import { MonitorToast } from './MonitorToast'
 import { MonitorNewsPanel } from './MonitorNewsPanel'
+import { MonitorOnboarding } from './MonitorOnboarding'
 import { MonitorAlerts } from './MonitorAlerts'
 import { MonitorAgenda, MonitorDevelopments } from './MonitorAgenda'
 import { MonitorCompanyContext } from './MonitorCompanyContext'
@@ -42,10 +43,12 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
     })
   }
 
+  if (controller.positions.length === 0) return <div className="mp-page"><MonitorOnboarding onRequestImport={onRequestImport} /></div>
+
   return <div className="mp-page">
     <header className="mp-hero"><div className="mp-hero-main">
       <div><h1>Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : <>External data off · <a href="/app/settings">Settings</a></>}</p></div>
-      {controller.positions.length ? <button className="mp-button" type="button" disabled={controller.refreshing || !controller.allowExternalData} onClick={() => { void controller.refresh(); refreshEvents() }}>{controller.refreshing ? 'Refreshing prices…' : 'Refresh prices'}</button> : <button className="mp-button" type="button" onClick={onRequestImport}>Import holdings</button>}
+      <button className="mp-button" type="button" disabled={controller.refreshing || !controller.allowExternalData} onClick={() => { void controller.refresh(); refreshEvents() }}>{controller.refreshing ? 'Refreshing prices…' : 'Refresh prices'}</button>
     </div></header>
     <div className="mp-content-flow" data-has-portfolio={controller.positions.length > 0}>
       <div className="mp-monitor-content">

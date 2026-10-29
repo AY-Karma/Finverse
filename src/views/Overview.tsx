@@ -15,6 +15,7 @@ import { AllocationCard } from './AllocationCard'
 import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
 import { DitherBar } from './DitherBar'
+import { PortfolioWelcome } from './PortfolioWelcome'
 const PortfolioPerformance = lazy(() => import('./PortfolioPerformance').then((module) => ({ default: module.PortfolioPerformance })))
 
 const LEDGER_PAGE_SIZE = 100
@@ -185,19 +186,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   }, [scope, stats])
 
   if (positions.length === 0) {
-    return (
-      <div className="overview-empty enter">
-        <div>
-          <h1 className="page-title">Overview</h1>
-          <p className="page-sub">
-            Bring in your latest holdings file to see value, allocation, performance, and the market around your investments.
-          </p>
-        </div>
-        <button className="btn btn--primary" type="button" onClick={onRequestImport}>
-          <ActionIcon name="import" />Import portfolio
-        </button>
-      </div>
-    )
+    return <PortfolioWelcome onRequestImport={onRequestImport} />
   }
 
   if (scopePositions.length === 0) {
@@ -214,7 +203,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
               : 'Import a broker export (.xlsx / .csv) with ticker, quantity, and cost to run it onto the equity scoreboard.'}
           </p>
         </div>
-        <button className="btn btn--primary" type="button" onClick={onRequestImport}>
+        <button className="btn btn--import" type="button" aria-haspopup="dialog" onClick={onRequestImport}>
           <ActionIcon name="import" />Import holdings
         </button>
       </div>

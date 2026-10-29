@@ -97,7 +97,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [savedSettings, setSettingsState] = useState<Settings>(() => loadSettings())
   const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>({})
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
-  const [marketDataRefreshing, setMarketDataRefreshing] = useState(savedSettings.allowExternalData)
+  const [marketDataRefreshing, setMarketDataRefreshing] = useState(savedSettings.allowExternalData && folios.some((folio) => folio.positions.length > 0))
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
   const [folioSaveFailed, setFolioSaveFailed] = useState(false)
   const [settingsSaveFailed, setSettingsSaveFailed] = useState(false)
@@ -349,7 +349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setWorkspaceError(cause instanceof Error ? cause.message : 'Reload the workspace before requesting market data.')
       return { ok: false, reason: 'disabled', retryInMs: 0 }
     }
-    if (!settings.allowExternalData) {
+    if (!settings.allowExternalData || positionsRef.current.length === 0) {
       return { ok: false, reason: 'disabled', retryInMs: 0 }
     }
     const check = manualRefreshCheck()
@@ -381,7 +381,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // close to capture the official closing price; and one immediate fetch on load
   // (even off-hours) so the board always shows the latest available price.
   useEffect(() => {
-    if (!settings.allowExternalData) {
+    if (!settings.allowExternalData || positions.length === 0) {
       setMarketDataRefreshing(false)
       setMarketDataResult(null)
       return
@@ -460,7 +460,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       window.clearInterval(refreshTimer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [assertCurrentWorkspace, folioRefreshKey, settings.allowExternalData, setLiveQuotes])
+  }, [assertCurrentWorkspace, folioRefreshKey, positions.length, settings.allowExternalData, setLiveQuotes])
 
   // Keep a small local performance history so the portfolio story survives
   // between sessions without sending holdings to a remote system.

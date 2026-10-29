@@ -167,9 +167,9 @@ export function loadFolios(): Folio[] {
 
 export function saveSettings(settings: Settings): boolean {
   if (workspaceWritesBlocked()) return false
-  const { allowExternalData, density, accent, customAccent, mode, hideValues } = settings
+  const { allowExternalData, density, mode, hideValues } = settings
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency: 'INR', allowExternalData, density, accent, customAccent, mode, hideValues }))
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency: 'INR', allowExternalData, density, accent: 'cobalt', mode, hideValues }))
     return true
   } catch {
     return false
@@ -194,7 +194,7 @@ function clearRetiredStorage(): void {
 export function loadSettings(): Settings {
   const defaults: Settings = {
     currency: 'INR', allowExternalData: false,
-    density: 'comfortable', accent: 'indigo', mode: 'dark', hideValues: false,
+    density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false,
   }
   clearRetiredStorage()
   let parsed: Record<string, unknown> = {}
@@ -205,13 +205,11 @@ export function loadSettings(): Settings {
   } catch {
     /* invalid or unavailable storage uses defaults */
   }
-  const customAccent = typeof parsed.customAccent === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.customAccent) ? parsed.customAccent.toLowerCase() : undefined
   const settings: Settings = {
     currency: defaults.currency,
     allowExternalData: parsed.allowExternalData === true,
     density: parsed.density === 'compact' ? 'compact' : defaults.density,
-    accent: parsed.accent === 'emerald' || parsed.accent === 'cobalt' || parsed.accent === 'amber' || parsed.accent === 'custom' ? parsed.accent : defaults.accent,
-    ...(customAccent ? { customAccent } : {}),
+    accent: defaults.accent,
     mode: parsed.mode === 'light' ? 'light' : defaults.mode,
     hideValues: parsed.hideValues === true,
   }

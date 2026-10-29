@@ -13,6 +13,21 @@ vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { state.positions = [initialPosition]; state.settings.hideValues = false; vi.resetAllMocks() })
 
+it('shows listings needing confirmation before ready listings', async () => {
+  state.positions = [
+    { ...initialPosition, id: 'ready', name: 'Ready listing', exchangeSource: 'explicit', identityIssue: undefined },
+    { ...initialPosition, id: 'pending', name: 'Pending listing' },
+  ]
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<InstrumentReview />))
+    const rows = [...container.querySelectorAll('.instrument-review-item')]
+    expect(rows.map((row) => row.querySelector('.sym')?.textContent)).toEqual(['Pending listing', 'Ready listing'])
+    expect(rows.map((row) => row.querySelector('.listing-item-status')?.textContent)).toEqual(['Needs review', 'Ready'])
+  } finally { await act(async () => root.unmount()) }
+})
+
 it('allows reviewing a mistaken foreign venue when the amounts are explicitly INR', async () => {
   state.positions = [{ ...initialPosition, exchange: 'LSE', currency: 'INR' }]
   const container = document.createElement('div')
@@ -72,7 +87,7 @@ it('previews an explicit listing correction and keeps the edits after a save fai
   }
   try {
     await act(async () => root.render(<InstrumentReview />))
-    expect(container.textContent).toContain('1 inferred or unresolved')
+    expect(container.textContent).toContain('1 listing needs confirmation')
     expect(container.textContent).toContain('Statement metadata: exchange BSE')
     await act(async () => button('Review listing').click())
     await change('Exchange', 'BSE')
@@ -138,7 +153,7 @@ it('approves all pending listings with their current defaults, excluding reviewe
     ])
     expect(container.querySelector('[role="status"]')?.textContent).toContain('2 default listings approved')
     expect(container.querySelector('#instrument-review')?.classList.contains('review-required')).toBe(false)
-    expect(container.textContent).toContain('0 inferred or unresolved')
+    expect(container.textContent).toContain('No listings need review')
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Approve all default listings')).toBe(false)
   } finally { await act(async () => root.unmount()) }
 })

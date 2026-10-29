@@ -7,7 +7,7 @@ import { newsReadingKey, type MonitorReadingState } from './monitorReading'
 import type { Folio, PortfolioSnapshot, Settings } from './types'
 import { captureWorkspaceRecords, createWorkspaceArchive, MAX_WORKSPACE_ARCHIVE_BYTES, parseWorkspaceArchive, restoreWorkspaceArchive } from './workspaceArchive'
 
-const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'custom', customAccent: '#123abc', mode: 'light', hideValues: true }
+const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt', mode: 'light', hideValues: true }
 const position = normalizePosition({ id: 'holding-1', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 2, buyPrice: 100, lastPrice: 120, invested: 200, exchange: 'NSE', currency: 'INR', providerSymbol: 'TCS.NS', identityVersion: 2, exchangeSource: 'explicit' })
 const folios: Folio[] = [{ id: 'account-1', name: 'Broker account', importedAt: 100, positions: [position] }]
 const snapshots: PortfolioSnapshot[] = [{ at: 100, value: 240, invested: 200, pnl: 40, holdingCount: 1 }]
@@ -86,6 +86,16 @@ describe('workspace archives', () => {
     expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual({ ...settings, allowExternalData: false })
     expect(JSON.parse(localStorage.getItem('finverse:portfolio-snapshots')!)).toEqual(snapshots)
     expect(JSON.parse(localStorage.getItem('finverse:monitor:v1')!)).toEqual({ version: 1, ...monitor })
+  })
+
+  it('normalizes retired accent settings in old backups to blue', async () => {
+    const original = archive()
+    const legacy = { ...original, settings: { ...original.settings, accent: 'custom', customAccent: '#123abc' } }
+    const parsed = parseWorkspaceArchive(JSON.stringify(legacy))
+    expect(parsed.archive.settings.accent).toBe('cobalt')
+    expect(parsed.archive.settings).not.toHaveProperty('customAccent')
+    await restoreWorkspaceArchive(parsed.archive, captureWorkspaceRecords())
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual({ ...settings, allowExternalData: false })
   })
 
   it('reads persisted Monitor state and excludes credentials, caches and derived positions from the archive', () => {

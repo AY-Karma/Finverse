@@ -18,12 +18,12 @@ const ResearchView = lazy(() => loadResearchView().then((module) => ({ default: 
 const SettingsView = lazy(() => loadSettingsView().then((module) => ({ default: module.SettingsView })))
 const InsightsView = lazy(() => loadInsightsView().then((module) => ({ default: module.InsightsView })))
 
-const NAV: { id: View; label: string; index: string }[] = [
-  { id: 'overview', label: 'Overview', index: '01' },
-  { id: 'insights', label: 'Insights', index: '02' },
-  { id: 'holdings', label: 'Monitor', index: '03' },
-  { id: 'research', label: 'Research', index: '04' },
-  { id: 'settings', label: 'Settings', index: '05' },
+const NAV: { id: View; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'insights', label: 'Insights' },
+  { id: 'holdings', label: 'Monitor' },
+  { id: 'research', label: 'Research' },
+  { id: 'settings', label: 'Settings' },
 ]
 
 export default function App({ initialView }: { initialView: View }) {
@@ -77,12 +77,10 @@ export default function App({ initialView }: { initialView: View }) {
   // Reflect theme + density across the whole app as soon as it loads or changes.
   useEffect(() => {
     applyTheme({
-      accent: settings.accent,
       density: settings.density,
       mode: settings.mode,
-      customAccent: settings.customAccent,
     })
-  }, [settings.accent, settings.density, settings.mode, settings.customAccent])
+  }, [settings.density, settings.mode])
 
   return (
     <div className="app-shell">
@@ -122,7 +120,6 @@ export default function App({ initialView }: { initialView: View }) {
               <span className="nav-item-label">
                 {item.label}
               </span>
-              <span className="nav-index">{item.index}</span>
             </button>
           ))}
         </nav>

@@ -507,7 +507,7 @@ export function InteractiveTrendChart({
       onClick={onChartClick}
     >
       <defs>
-        <linearGradient id={`trend-area-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={primaryLine?.color ?? '#5e6ad2'} stopOpacity="0.22" /><stop offset="100%" stopColor={primaryLine?.color ?? '#5e6ad2'} stopOpacity="0" /></linearGradient>
+        <linearGradient id={`trend-area-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={primaryLine?.color ?? 'var(--primary)'} stopOpacity="0.22" /><stop offset="100%" stopColor={primaryLine?.color ?? 'var(--primary)'} stopOpacity="0" /></linearGradient>
         <linearGradient id={`comparison-gain-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#78dba0" stopOpacity="0.3" /><stop offset="100%" stopColor="#78dba0" stopOpacity="0.035" /></linearGradient>
         <linearGradient id={`comparison-loss-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ff8a65" stopOpacity="0.3" /><stop offset="100%" stopColor="#ff8a65" stopOpacity="0.035" /></linearGradient>
         <linearGradient id={`comparison-flat-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b9b9b4" stopOpacity="0.18" /><stop offset="100%" stopColor="#b9b9b4" stopOpacity="0.025" /></linearGradient>

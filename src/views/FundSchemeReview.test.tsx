@@ -26,7 +26,7 @@ it('hides fund identities and aborts an in-flight lookup when masking turns on',
   const root = createRoot(container)
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Find scheme')!.click())
     const signal = state.search.mock.calls[0][1] as AbortSignal
     state.settings.hideValues = true
     await act(async () => root.render(<FundSchemeReview />))
@@ -73,7 +73,7 @@ it.each([{ reportedCurrency: 'EUR' }, { currency: 'INR' as const, reportedCurren
   const root = createRoot(container)
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    const search = container.querySelector<HTMLButtonElement>('button')!
+    const search = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Find scheme')!
     expect(search.disabled).toBe(true)
     expect(container.textContent).toContain('MFAPI supports INR mutual funds only')
     await act(async () => search.click())
@@ -90,7 +90,7 @@ it('closes a provider confirmation when the holding currency changes after the s
   const root = createRoot(container)
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Find scheme')!.click())
     expect(container.querySelector('[aria-label="Review fund scheme"]')).not.toBeNull()
     state.positions = [{ ...state.positions[0], reportedCurrency: 'EUR' }]
     await act(async () => root.render(<FundSchemeReview />))
@@ -105,11 +105,89 @@ it('highlights scheme review only while funds need confirmation', async () => {
   const root = createRoot(container)
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    expect(container.querySelector('details')!.classList.contains('review-required')).toBe(true)
-    expect(container.querySelector('summary')!.textContent).toContain('1 need confirmation')
+    expect(container.querySelector('details')!.classList.contains('listing-review--pending')).toBe(true)
+    expect(container.querySelector('summary')!.textContent).toContain('1 scheme needs your confirmation')
     state.positions = [{ ...state.positions[0], mfScheme: { code: 2, name: 'Example Equity Fund Direct IDCW', source: 'confirmed' } }]
     await act(async () => root.render(<FundSchemeReview />))
-    expect(container.querySelector('details')!.classList.contains('review-required')).toBe(false)
-    expect(container.querySelector('summary')!.textContent).toContain('0 need confirmation')
+    expect(container.querySelector('details')!.classList.contains('listing-review--pending')).toBe(false)
+    expect(container.querySelector('summary')!.textContent).toContain('No schemes need review')
+  } finally { await act(async () => root.unmount()) }
+})
+
+
+it('auto-approves only exact schemes and skips confirmed or unsupported holdings', async () => {
+  const exact = { schemeCode: 2, schemeName: 'Example Equity Fund Direct Plan IDCW Option' }
+  const ambiguous = { schemeCode: 3, schemeName: 'Another Equity Fund Direct Plan Growth Option' }
+  state.positions = [
+    state.positions[0],
+    { ...state.positions[0], id: 'ambiguous', name: 'Another Equity Fund Direct Growth' },
+    { ...state.positions[0], id: 'confirmed', mfScheme: { code: 2, name: exact.schemeName, source: 'confirmed' } },
+    { ...state.positions[0], id: 'unsupported', reportedCurrency: 'EUR' },
+  ]
+  state.search.mockResolvedValueOnce({ status: 'matched', candidates: [exact], match: exact })
+    .mockResolvedValueOnce({ status: 'review', candidates: [ambiguous, { ...ambiguous, schemeCode: 4 }] })
+  state.confirmFundScheme.mockResolvedValue(undefined)
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<FundSchemeReview />))
+    const approve = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Auto-approve schemes')!
+    await act(async () => approve.click())
+    expect(state.search).toHaveBeenCalledTimes(2)
+    expect(state.confirmFundScheme).toHaveBeenCalledExactlyOnceWith('fund', exact)
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('1')
+  } finally { await act(async () => root.unmount()) }
+})
+
+it('disables bulk approval when external market data is off', async () => {
+  state.settings.allowExternalData = false
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<FundSchemeReview />))
+    const approve = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Auto-approve schemes')!
+    expect(approve.disabled).toBe(true)
+    await act(async () => approve.click())
+    expect(state.search).not.toHaveBeenCalled()
+    expect(state.confirmFundScheme).not.toHaveBeenCalled()
+  } finally { await act(async () => root.unmount()) }
+})
+
+it('continues bulk approval after a save failure and reports the failure', async () => {
+  const exact = { schemeCode: 2, schemeName: 'Example Equity Fund Direct Plan IDCW Option' }
+  state.positions = [state.positions[0], { ...state.positions[0], id: 'second' }]
+  state.search.mockResolvedValue({ status: 'matched', candidates: [exact], match: exact })
+  state.confirmFundScheme.mockRejectedValueOnce(new Error('Storage is full.')).mockResolvedValueOnce(undefined)
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<FundSchemeReview />))
+    const approve = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Auto-approve schemes')!
+    await act(async () => approve.click())
+    expect(state.confirmFundScheme).toHaveBeenCalledTimes(2)
+    expect(state.confirmFundScheme).toHaveBeenLastCalledWith('second', exact)
+    expect(container.querySelector('[role="status"]')?.textContent).toMatch(/failed|could not|not saved/i)
+  } finally { await act(async () => root.unmount()) }
+})
+
+it('aborts bulk approval without saving when external data is disabled during lookup', async () => {
+  const exact = { schemeCode: 2, schemeName: 'Example Equity Fund Direct Plan IDCW Option' }
+  let resolveSearch!: (value: unknown) => void
+  state.search.mockImplementation(() => new Promise((resolve) => { resolveSearch = resolve }))
+  state.positions = [state.positions[0], { ...state.positions[0], id: 'second' }]
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<FundSchemeReview />))
+    const approve = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Auto-approve schemes')!
+    await act(async () => approve.click())
+    expect(approve.disabled).toBe(true)
+    const signal = state.search.mock.calls[0][1] as AbortSignal
+    state.settings.allowExternalData = false
+    await act(async () => root.render(<FundSchemeReview />))
+    expect(signal.aborted).toBe(true)
+    await act(async () => resolveSearch({ status: 'matched', candidates: [exact], match: exact }))
+    expect(state.confirmFundScheme).not.toHaveBeenCalled()
+    expect(state.search).toHaveBeenCalledTimes(1)
   } finally { await act(async () => root.unmount()) }
 })

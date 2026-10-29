@@ -4,7 +4,7 @@ import { MAX_IMPORT_FILES } from '../importLimits'
 import { useStore, type ImportPreview } from '../useStore'
 import { planStatementImport, type StatementImportOptions } from '../accountStatements'
 import { investmentWorkspace } from '../investmentWorkspace'
-import { formatCurrency, importedPriceWarnings } from '../valuation'
+import { formatCurrency } from '../valuation'
 import { privateValue, visibleQuotes } from '../privacy'
 import type { Position } from '../types'
 import { UndoImportButton } from './UndoImportButton'
@@ -105,18 +105,16 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
       const added: Position[] = []
       const removed: Position[] = []
       const changed: { before: Position; after: Position }[] = []
-      const warnings: string[] = []
       for (const preview of previews) {
         const plan = planStatementImport(nextFolios, { preview, ...options })
         nextFolios = plan.nextFolios
         added.push(...plan.added)
         removed.push(...plan.removed)
         changed.push(...plan.changed)
-        warnings.push(...plan.warnings)
       }
-      return { nextFolios, added, removed, changed, warnings: [...new Set([...warnings, ...importedPriceWarnings(nextFolios)])], error: null }
+      return { nextFolios, added, removed, changed, error: null }
     } catch (cause) {
-      return { nextFolios: folios, added: [] as Position[], removed: [] as Position[], changed: [] as { before: Position; after: Position }[], warnings: [] as string[], error: cause instanceof Error && cause.message ? cause.message : 'This statement cannot be imported.' }
+      return { nextFolios: folios, added: [] as Position[], removed: [] as Position[], changed: [] as { before: Position; after: Position }[], error: cause instanceof Error && cause.message ? cause.message : 'This statement cannot be imported.' }
     }
   }, [previews, folios, operation, accountId, accountAlias, statementDate, complete, expectedStatementId, allowUndatedReplacement])
   const resultingSnapshot = review && !review.error
@@ -338,8 +336,6 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
               <div><strong>{money(resultingSnapshot.currentValue)}</strong><span>resulting portfolio value</span></div>
             </div>
             {!resultingSnapshot.valuationComplete && <p className="hint">Value is partial. {resultingSnapshot.unpricedCount} holding{resultingSnapshot.unpricedCount === 1 ? ' is' : 's are'} unpriced; unsupported asset currencies are excluded.</p>}
-            <p className="hint">{settings?.allowExternalData ? 'Available enabled market quotes take precedence.' : 'External data is off. Values use imported prices.'} Across accounts, the latest dated statement supplies an imported price. Undated prices are a fallback; conflicts are reported below. Account changes record balance events, not investment returns.</p>
-            {review.warnings.map((warning) => <p className="hint" key={warning}>{warning}</p>)}
           </>}
           <div className="import-actions"><button type="button" className="btn btn--primary" disabled={saving || !review || !!review.error} onClick={() => void confirmImport()}>{saving ? 'Saving import…' : replacing ? 'Update account' : rejectedCount > 0 ? 'Add accepted holdings' : previews.length === 1 ? 'Add to portfolio' : `Add ${previews.length} accounts`}</button><button type="button" className="btn btn--ghost" disabled={saving} onClick={() => { setPreviews([]); setError(null) }}>Cancel</button></div>
         </section>

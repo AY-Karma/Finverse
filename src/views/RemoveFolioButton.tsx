@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Folio } from '../types'
 
-export function RemoveFolioButton({ folio, onConfirm }: { folio: Pick<Folio, 'id' | 'name'>; onConfirm: (id: string) => void }) {
+export function RemoveFolioButton({ folio, onConfirm, showLabel = false }: { folio: Pick<Folio, 'id' | 'name'>; onConfirm: (id: string) => void; showLabel?: boolean }) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const removeButtonRef = useRef<HTMLButtonElement>(null)
   const restoreFocusRef = useRef(false)
@@ -19,7 +19,7 @@ export function RemoveFolioButton({ folio, onConfirm }: { folio: Pick<Folio, 'id
   }
 
   if (confirmingId !== folio.id) {
-    return <button ref={removeButtonRef} className="btn-remove" type="button" aria-label={`Remove ${folio.name}`} title="Remove import" onClick={() => setConfirmingId(folio.id)}>×</button>
+    return <button ref={removeButtonRef} className={`btn-remove${showLabel ? ' btn-remove--label' : ''}`} type="button" aria-label={`Remove ${folio.name}`} title="Remove import" onClick={() => setConfirmingId(folio.id)}>{showLabel ? 'Remove' : '\u00d7'}</button>
   }
 
   return <div className="folio-remove-confirm" role="group" aria-label={`Confirm deletion of ${folio.name}`} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); cancel() } }}>

@@ -25,7 +25,7 @@ export interface WorkspaceArchivePreview { archive: WorkspaceArchive; legacy: bo
 
 const MAX_NUMBER = Number.MAX_SAFE_INTEGER
 const MAX_DATE = 8_640_000_000_000_000
-const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'indigo', mode: 'dark', hideValues: false }
+const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false }
 
 function fail(label: string): never { throw new Error(`The backup contains an invalid ${label}. Your current workspace was not changed.`) }
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -143,13 +143,8 @@ function parseSettings(value: unknown): Settings {
   const row = object(value, 'preferences')
   const settings: Settings = {
     currency: 'INR', allowExternalData: boolean(row.allowExternalData, 'external-data preference'),
-    density: choice(row.density, ['comfortable', 'compact'], 'density'), accent: choice(row.accent, ['indigo', 'emerald', 'cobalt', 'amber', 'custom'], 'accent'),
+    density: choice(row.density, ['comfortable', 'compact'], 'density'), accent: 'cobalt',
     mode: choice(row.mode, ['dark', 'light'], 'theme'), hideValues: boolean(row.hideValues, 'hidden-values preference'),
-  }
-  if (row.customAccent !== undefined) {
-    const hex = text(row.customAccent, 'custom accent')
-    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return fail('custom accent')
-    settings.customAccent = hex
   }
   return settings
 }
