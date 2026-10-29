@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import { IMPORT_SOURCES } from '../importSources'
 import { ActionIcon, type ActionIconName } from './ActionIcon'
 import './portfolioWelcome.css'
@@ -25,11 +25,18 @@ const WELCOME_CONTENT = {
     artTitle: 'Follow the sources', icon: 'research',
     legend: ['Reports', 'Financials', 'Sources'], destination: 'Company context',
   },
+  monitor: {
+    area: 'Monitor', eyebrow: 'The updates around your investments',
+    title: 'Your holdings.', emphasis: 'In the loop.',
+    description: 'News, company updates and watches, tied to the investments you own.',
+    artTitle: 'Your first edition', icon: 'bell',
+    legend: ['News', 'Watches', 'Reminders'], destination: 'Stay informed',
+  },
 } satisfies Record<string, { area: string; eyebrow: string; title: string; emphasis: string; description: string; artTitle: string; icon: ActionIconName; legend: string[]; destination: string }>
 
 type WelcomeVariant = keyof typeof WELCOME_CONTENT
 
-export function PortfolioWelcome({ onRequestImport, variant = 'overview' }: { onRequestImport: () => void; variant?: WelcomeVariant }) {
+export function PortfolioWelcome({ onRequestImport, variant = 'overview', children }: { onRequestImport: () => void; variant?: WelcomeVariant; children?: ReactNode }) {
   const id = useId()
   const content = WELCOME_CONTENT[variant]
 
@@ -53,7 +60,7 @@ export function PortfolioWelcome({ onRequestImport, variant = 'overview' }: { on
           <span className="portfolio-welcome-privacy"><ActionIcon name="privacy" />No broker login. Review before you add.</span>
         </div>
 
-        <div className="portfolio-welcome-art" aria-hidden="true">
+        {children ?? <div className="portfolio-welcome-art" aria-hidden="true">
           <div className="portfolio-welcome-art-head"><span>{content.artTitle}</span><ActionIcon name={content.icon} /></div>
           <div className="portfolio-welcome-orbit">
             <svg viewBox="0 0 360 320" fill="none" focusable="false">
@@ -105,7 +112,7 @@ export function PortfolioWelcome({ onRequestImport, variant = 'overview' }: { on
           </div>
           <div className="portfolio-welcome-art-legend">{content.legend.map((label) => <span key={label}>{label}</span>)}</div>
           <div className="portfolio-welcome-art-foot"><ActionIcon name="sources" /><span>Your holdings</span><span className="portfolio-welcome-art-connector" /><span>{content.destination}</span></div>
-        </div>
+        </div>}
       </div>
 
       <div className="portfolio-welcome-sources">

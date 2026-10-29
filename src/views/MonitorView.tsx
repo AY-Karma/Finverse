@@ -43,7 +43,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
     })
   }
 
-  if (controller.positions.length === 0) return <div className="mp-page"><MonitorOnboarding onRequestImport={onRequestImport} /></div>
+  if (controller.positions.length === 0) return <MonitorOnboarding onRequestImport={onRequestImport} />
 
   return <div className="mp-page">
     <header className="mp-hero"><div className="mp-hero-main">

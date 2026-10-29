@@ -96,7 +96,7 @@ describe('single-page Monitor', () => {
     const review = container.querySelector<HTMLDetailsElement>('.mo-story details')!
     await act(async () => review.querySelector('summary')!.click())
     expect(review.open).toBe(true)
-    await clickButton('Import holdings')
+    await clickButton('Import portfolio')
     expect(importHoldings).toHaveBeenCalledOnce()
 
     state.store.positions = [{ id: 'imported', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
