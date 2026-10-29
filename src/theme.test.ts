@@ -1,51 +1,26 @@
-import { describe, expect, it } from 'vitest'
-import { deriveAccentPalette, normalizeHex, resolveThemePalette } from './theme'
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from 'vitest'
+import { applyTheme, BLUE_ACCENT } from './theme'
 
-describe('normalizeHex', () => {
-  it('canonicalizes case and expands shorthand', () => {
-    expect(normalizeHex('#7C6CFF')).toBe('#7c6cff')
-    expect(normalizeHex(' #F0B ')).toBe('#ff00bb')
-  })
-
-  it('rejects garbage and out-of-format strings', () => {
-    expect(normalizeHex(undefined)).toBeNull()
-    expect(normalizeHex('')).toBeNull()
-    expect(normalizeHex('7c6cff')).toBeNull()
-    expect(normalizeHex('#7c6cf')).toBeNull()
-    expect(normalizeHex('#zzzzzz')).toBeNull()
-  })
+afterEach(() => {
+  document.documentElement.removeAttribute('style')
+  delete document.documentElement.dataset.mode
+  delete document.documentElement.dataset.density
+  document.head.innerHTML = ''
 })
 
-describe('deriveAccentPalette', () => {
-  it('derives hover lighter, focus darker, and an alpha spark from any hex', () => {
-    const palette = deriveAccentPalette('#000000')
-    expect(palette).not.toBeNull()
-    expect(palette?.primary).toBe('#000000')
-    // Lifted toward white: every channel strictly above zero.
-    expect(palette?.primaryHover).not.toBe('#000000')
-    // Spark keeps the raw channels at low alpha.
-    expect(palette?.spark).toBe('rgba(0, 0, 0, 0.16)')
-  })
-
-  it('returns null for invalid input instead of guessing', () => {
-    expect(deriveAccentPalette('nope')).toBeNull()
-    expect(deriveAccentPalette('')).toBeNull()
-  })
-})
-
-describe('resolveThemePalette', () => {
-  it('falls back to indigo for custom without a usable hex', () => {
-    const palette = resolveThemePalette({ accent: 'custom' })
-    expect(palette.primary).toBe('#5e6ad2')
-  })
-
-  it('uses the custom hex when provided', () => {
-    const palette = resolveThemePalette({ accent: 'custom', customAccent: '#e8491d' })
-    expect(palette.primary).toBe('#e8491d')
-    expect(palette.spark).toContain('rgba(232, 73, 29')
-  })
-
-  it('maps known presets straight through', () => {
-    expect(resolveThemePalette({ accent: 'emerald' }).primary).toBe('#10b981')
+describe('fixed blue theme', () => {
+  it.each(['dark', 'light'] as const)('applies blue while preserving %s mode and density', (mode) => {
+    document.head.innerHTML = '<meta name="theme-color" content="old">'
+    document.documentElement.style.setProperty('--primary', '#10b981')
+    applyTheme({ density: 'compact', mode })
+    const root = document.documentElement
+    expect(root.style.getPropertyValue('--primary')).toBe('#3b82f6')
+    expect(root.style.getPropertyValue('--primary-hover')).toBe(BLUE_ACCENT.primaryHover)
+    expect(root.style.getPropertyValue('--primary-focus')).toBe(BLUE_ACCENT.primaryFocus)
+    expect(root.style.getPropertyValue('--spark')).toBe(BLUE_ACCENT.spark)
+    expect(root.dataset.mode).toBe(mode)
+    expect(root.dataset.density).toBe('compact')
+    expect(document.querySelector('meta')?.content).toBe(mode === 'light' ? '#f2f2ef' : '#0d0d0c')
   })
 })

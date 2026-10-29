@@ -433,11 +433,21 @@ describe('portfolio news', () => {
     expect(loadFeed).not.toHaveBeenCalled()
   })
 
-  it('loads general headlines without imported holdings', async () => {
+  it('waits for imported holdings before loading news, then clears the feed when they are removed', async () => {
+    const positions = state.store.positions
     state.store.positions = []
     await renderPanel()
-    expect(loadFeed.mock.lastCall?.[0]).toEqual([])
+    expect(loadFeed).not.toHaveBeenCalled()
+    expect(container.querySelector('.mn-panel')).toBeNull()
+    state.store.positions = positions
+    await renderPanel()
+    expect(loadFeed).toHaveBeenCalledOnce()
     expect(container.querySelectorAll('article')).toHaveLength(2)
+    state.store.positions = []
+    await renderPanel()
+    expect(container.querySelector('.mn-panel')).toBeNull()
+    expect(loadFeed.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(loadFeed).toHaveBeenCalledOnce()
   })
 
   it('makes every headline available inside the keyboard-accessible feed without expansion', async () => {

@@ -32,24 +32,41 @@ describe('workspace settings', () => {
     await act(async () => trigger.click())
     expect(onRequestImport).toHaveBeenCalledOnce()
     expect(window.location.pathname).toBe('/app/settings')
-    expect(container.querySelector('.settings-nav-item[aria-current="page"] strong')?.textContent).toBe('Preferences')
+    expect(container.querySelector('[aria-label="Settings categories"]')).toBeNull()
     expect(container.querySelector('.holdings-import')).toBeNull()
   })
 
-  it('keeps display preferences and holdings management together', async () => {
+  it('shows holdings, privacy, preferences, and data handling in one continuous page', async () => {
     await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
-    expect([...container.querySelectorAll('.settings-nav-copy strong')].map((item) => item.textContent)).toEqual(['Preferences', 'Data & privacy'])
-    expect(container.querySelector('.settings-preferences > .settings-group')?.nextElementSibling?.getAttribute('aria-label')).toBe('Manage holdings')
+    const page = container.querySelector('.settings-page')!
+    expect([...page.children].map((item) => item.getAttribute('aria-label') || item.getAttribute('aria-labelledby'))).toEqual(['Manage holdings', 'Data & privacy', 'Preferences', 'data-handling-title'])
+    expect(container.querySelector('.settings-nav, [role="tablist"]')).toBeNull()
     expect(container.querySelector('#currency')).toBeNull()
-    const density = container.querySelector<HTMLSelectElement>('#density')!
-    await act(async () => {
-      density.value = 'compact'
-      density.dispatchEvent(new Event('change', { bubbles: true }))
-    })
-    expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, density: 'compact' })
+    expect(container.querySelector('[aria-label="Accent colour"], [aria-label="Hue"], .accent-popover')).toBeNull()
+    expect(container.textContent).not.toContain('Accent colour')
+    expect(container.querySelector('#density, [aria-label="Interface density"]')).toBeNull()
+    expect(container.textContent).not.toContain('Interface density')
   })
 
-  it('opens listing review beside preferences, provides a separate scroll region, and restores focus on close', async () => {
+  it('applies appearance and hidden-value changes immediately', async () => {
+    state.settings = { ...state.settings, mode: 'dark', hideValues: false }
+    const render = () => act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
+    await render()
+    const light = [...container.querySelectorAll<HTMLButtonElement>('.mode-toggle button')].find((button) => button.textContent === 'Light')!
+    await act(async () => light.click())
+    expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, mode: 'light' })
+    state.settings = state.setSettings.mock.lastCall![0]
+    await render()
+    expect(light.getAttribute('aria-pressed')).toBe('true')
+    const hidden = container.querySelector<HTMLInputElement>('#hide-values')!
+    await act(async () => hidden.click())
+    expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, hideValues: true })
+    state.settings = state.setSettings.mock.lastCall![0]
+    await render()
+    expect(hidden.checked).toBe(true)
+  })
+
+  it('opens listing review inline, provides a separate scroll region, and restores focus on close', async () => {
     state.positions = [{ id: 'test', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchangeSource: 'inferred' }]
     const originalScroll = HTMLElement.prototype.scrollIntoView
     const scroll = vi.fn()
@@ -58,13 +75,15 @@ describe('workspace settings', () => {
       await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
       const trigger = container.querySelector<HTMLButtonElement>('#listing-review-trigger')!
       expect(container.querySelector('#instrument-review')).toBeNull()
+      trigger.focus()
       await act(async () => trigger.click())
-      const panel = container.querySelector<HTMLElement>('.settings-detail--review > #instrument-review')!
+      const panel = container.querySelector<HTMLElement>('.settings-page #instrument-review')!
       expect(panel).not.toBeNull()
       expect(panel.querySelector('[role="region"][aria-label="Instrument listings"]')?.getAttribute('tabindex')).toBe('0')
       expect(trigger.getAttribute('aria-expanded')).toBe('true')
-      expect(document.activeElement).toBe(panel)
-      expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+      expect(trigger.nextElementSibling?.contains(panel)).toBe(true)
+      expect(document.activeElement).toBe(trigger)
+      expect(scroll).not.toHaveBeenCalled()
       await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Close listing review"]')!.click())
       expect(container.querySelector('#instrument-review')).toBeNull()
       expect(document.activeElement).toBe(trigger)
@@ -74,13 +93,12 @@ describe('workspace settings', () => {
       root = createRoot(container)
       window.history.replaceState({}, '', '/app/settings#instrument-review')
       await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
-      expect(container.querySelector('.settings-detail--review > #instrument-review')).not.toBeNull()
+      expect(container.querySelector('.settings-page #instrument-review')).not.toBeNull()
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close listing review"]')!.click())
       expect(window.location.hash).toBe('')
       await act(async () => container.querySelector<HTMLButtonElement>('#listing-review-trigger')!.click())
       state.positions = []
       await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
-      expect(container.querySelector('.settings-detail--review')).toBeNull()
       expect(container.querySelector('#instrument-review')).toBeNull()
     } finally { HTMLElement.prototype.scrollIntoView = originalScroll }
   })
@@ -88,15 +106,13 @@ describe('workspace settings', () => {
   it('describes browser storage and keeps market access opt-in', async () => {
     state.settings = { ...state.settings, allowExternalData: false }
     await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
-    const privacy = [...container.querySelectorAll<HTMLButtonElement>('.settings-nav-item')].find((button) => button.textContent?.includes('Data & privacy'))!
-    await act(async () => privacy.click())
-    expect(container.querySelector('[aria-label="Manage holdings"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Manage holdings"]')).not.toBeNull()
     expect([...container.querySelectorAll('.data-handling-card h4')].map((item) => item.textContent)).toEqual(['Portfolio & history', 'Market data'])
     expect(container.textContent).toContain('Holdings and tracked history use local storage.')
     const externalData = container.querySelector<HTMLInputElement>('#external-data')!
     expect(externalData.getAttribute('role')).toBe('switch')
     expect(container.querySelector(`#${externalData.getAttribute('aria-describedby')}`)?.textContent).toContain('Allow quote')
-    expect(container.querySelector('.setting-toggle-status')?.textContent).toBe('Off')
+    expect(externalData.closest('.setting-row')?.querySelector('.setting-toggle-status')?.textContent).toBe('Off')
     expect(container.querySelector('.data-handling-card:last-child .data-destination')?.textContent).toBe('Blocked')
     expect(externalData.checked).toBe(false)
     await act(async () => externalData.click())
@@ -104,7 +120,7 @@ describe('workspace settings', () => {
     state.settings = state.setSettings.mock.lastCall![0]
     await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     expect(externalData.checked).toBe(true)
-    expect(container.querySelector('.setting-toggle-status')?.textContent).toBe('On')
+    expect(externalData.closest('.setting-row')?.querySelector('.setting-toggle-status')?.textContent).toBe('On')
     expect(container.querySelector('.data-handling-card:last-child .data-destination')?.textContent).toBe('Identifiers only')
   })
 })

@@ -5,7 +5,7 @@ export type Currency = 'INR'
 export type Exchange = 'NSE' | 'BSE' | 'NASDAQ' | 'NYSE' | 'LSE' | 'OTHER'
 
 export type Density = 'comfortable' | 'compact'
-export type Accent = 'indigo' | 'emerald' | 'cobalt' | 'amber' | 'custom'
+export type Accent = 'cobalt'
 export type Mode = 'dark' | 'light'
 
 export interface MfSchemeMapping {
@@ -81,8 +81,6 @@ export interface Settings {
   allowExternalData: boolean
   density: Density
   accent: Accent
-  /** Hex source for the 'custom' accent, e.g. '#7c6cff'. */
-  customAccent?: string
   mode: Mode
   hideValues: boolean
 }

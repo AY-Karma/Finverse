@@ -20,6 +20,30 @@ vi.mock('./PortfolioPerformance', () => ({ PortfolioPerformance: ({ scope }: { s
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
+  it('opens the existing import flow from the empty portfolio welcome', async () => {
+    const refreshNow = vi.fn()
+    const onRequestImport = vi.fn()
+    state.store = {
+      positions: [], rawPositions: [],
+      snapshot: investmentWorkspace.readSnapshot({ folios: [], quotes: {} }),
+      settings: loadSettings(), refreshNow, marketDataRefreshing: false,
+    } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={onRequestImport} />))
+      expect(container.querySelector('h1')?.textContent).toBe('Your portfolio.In focus.')
+      expect(container.querySelector('.portfolio-welcome-index')).toBeNull()
+      expect(container.querySelector('.portfolio-welcome-features')).toBeNull()
+      const importButton = container.querySelector<HTMLButtonElement>('button')!
+      expect(importButton.textContent).toBe('Import portfolio')
+      await act(async () => importButton.click())
+      expect(onRequestImport).toHaveBeenCalledOnce()
+      expect(refreshNow).not.toHaveBeenCalled()
+      expect(container.querySelector('.scoreboard')).toBeNull()
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('shows LTP and daily price moves in the ticker and ledger, with neutral missing data and privacy masking', async () => {
     const positions: Position[] = ['DOWN', 'UP', 'FLAT', 'MISSING', 'INVALID', 'REVIEW'].map((ticker) => ({
       id: ticker, ticker, name: ticker, type: 'stock', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120,

@@ -1,0 +1,170 @@
+.settings-page-head,
+.settings-page {
+  width: min(100%, 880px);
+}
+.settings-page-head { align-items: center; justify-content: space-between; padding-bottom: 0; text-align: left; }
+.settings-save-status { flex: none; color: var(--ink-subtle); font-size: 11px; }
+.settings-page { display: grid; gap: 20px; min-width: 0; }
+.settings-page > .holdings-manage {
+  min-width: 0;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.settings-page .holdings-manage > .panel-head { margin: 0; }
+.settings-page .holdings-manage .panel-title,
+.settings-detail-head,
+.settings-subhead h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -.015em;
+}
+.settings-detail-head h2 { font: inherit; letter-spacing: inherit; }
+.settings-page .panel-title .action-icon,
+.settings-detail-head > .action-icon { width: 17px; height: 17px; flex: none; color: var(--ink-subtle); }
+.settings-page .manage-actions { display: flex; align-items: flex-start; width: 100%; min-width: 0; gap: 0; }
+.manage-import-control { display: inline-flex; flex: none; align-items: center; border-radius: 7px; background: var(--primary-action); }
+.settings-page .manage-import-control > .btn:first-child { border: 0; border-radius: 7px; padding-right: 8px; }
+.settings-page .manage-actions .manage-import-control > .manage-actions-toggle { flex: none; width: 24px; height: 24px; min-height: 24px; margin-right: 5px; padding: 4px; border: 0; border-radius: 4px; }
+.manage-actions-toggle svg { width: 14px; height: 14px; transition: transform .15s; pointer-events: none; }
+.manage-actions-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }
+.manage-actions-reveal { display: grid; grid-template-rows: 0fr; flex: 0 1 auto; min-width: 0; opacity: 0; visibility: hidden; clip-path: inset(0 100% 0 0); transform: translateX(-6px); transition: grid-template-rows .22s ease, clip-path .22s ease, opacity .18s ease, transform .22s ease, visibility 0s .22s; }
+.manage-actions-reveal[data-open='true'] { grid-template-rows: 1fr; opacity: 1; visibility: visible; clip-path: inset(0); transform: translateX(0); transition-delay: 0s; }
+.manage-actions-clip { min-height: 0; min-width: 0; overflow: hidden; }
+.manage-actions-list { display: flex; align-items: start; flex-wrap: wrap; gap: 4px; min-width: 0; margin-left: 6px; padding: 0 4px; border: 1px solid var(--hairline-strong); border-radius: 8px; background: var(--surface-1); }
+.settings-page .manage-actions .manage-actions-list .btn { justify-content: flex-start; width: auto; border: 0; background: transparent; color: var(--ink-muted); text-align: left; }
+.settings-page .manage-actions-list .btn:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
+.manage-restore-actions,
+.manage-restore-actions > .import-actions { display: contents; }
+.manage-actions-list :is(.import-preview, [role='alert']) { flex-basis: 100%; }
+.manage-actions-list .import-preview { margin-top: 8px; }
+@media (max-width: 640px) {
+  .manage-actions-list { flex-direction: column; }
+  .settings-page .manage-actions .manage-actions-list .btn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .manage-actions-reveal, .manage-actions-toggle svg { transition: none; transform: none; }
+}
+.settings-page .manage-actions .btn { width: auto; height: 40px; min-height: 40px; padding-inline: 14px; border-radius: 7px; font-size: 12px; white-space: nowrap; }
+.settings-page .manage-actions .btn:disabled { background: transparent; color: var(--ink-subtle); border-color: var(--hairline); cursor: not-allowed; }
+.settings-page .workspace-recovery { margin-top: 0; padding-top: 0; border-top: 0; gap: 7px; }
+.settings-page .workspace-recovery > .hint { max-width: 620px; color: var(--ink-subtle); font-size: 11px; }
+.settings-page .workspace-recovery > .import-actions { margin: 0; }
+.settings-page .workspace-recovery > .import-actions > .btn { min-height: 36px; border-radius: 7px; }
+.imported-statements { margin-top: 8px; }
+.imported-statements > h3 { margin-bottom: 10px; color: var(--ink-muted); font-size: 12px; font-weight: 500; }
+.settings-page .folio-list { border-top: 0; }
+.settings-page .holdings-manage .folio-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 16px 0; }
+.settings-page .holdings-manage .folio-row:first-child { padding-top: 0; }
+.folio-document { display: flex; padding-top: 3px; color: var(--ink-subtle); }
+.folio-document .action-icon { width: 20px; height: 20px; }
+.settings-page .holdings-manage .folio-copy { gap: 10px; }
+.settings-page .folio-title { flex-wrap: wrap; gap: 8px 12px; }
+.settings-page .folio-title > .sym { color: var(--ink); font: 550 13px/1.5 var(--font-body); }
+.folio-facts, .listing-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; }
+.folio-facts > div, .listing-facts > div { display: grid; gap: 3px; min-width: 0; }
+.folio-facts dt, .listing-facts dt { color: var(--ink-subtle); font-size: 10px; }
+.folio-facts dd, .listing-facts dd { margin: 0; color: var(--ink-muted); font-size: 12px; overflow-wrap: anywhere; }
+.settings-page .folio-review-actions { margin-top: 0; }
+.settings-page .folio-review-actions .btn { border-radius: 6px; min-height: 34px; }
+.settings-page .holdings-manage .btn-remove--label { width: auto; height: auto; min-height: 34px; padding: 4px 8px; border: 0; border-radius: 6px; color: var(--ink-subtle); font: 11px var(--font-body); }
+.settings-page .folio-remove-confirm { grid-column: 2 / -1; justify-content: start; }
+.listing-review { overflow: hidden; min-width: 0; border: 1px solid var(--hairline-strong); border-radius: 8px; background: var(--surface-1); }
+.listing-review--pending { border-color: color-mix(in srgb, var(--primary) 45%, var(--hairline-strong)); }
+.listing-review-trigger { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 16px; align-items: center; gap: 12px; width: 100%; padding: 14px; border: 0; background: transparent; color: var(--ink); font-family: var(--font-body); text-align: left; cursor: pointer; }
+.listing-review-trigger:hover { background: var(--surface-2); }
+.listing-review-trigger:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: -3px; }
+.listing-review-trigger > .action-icon { width: 18px; height: 18px; color: var(--ink-subtle); }
+.listing-review--pending .listing-review-trigger > .action-icon { color: var(--primary-hover); }
+[data-mode='light'] .listing-review--pending .listing-review-trigger > .action-icon { color: var(--primary-action); }
+.listing-review-copy { display: grid; gap: 4px; }
+.listing-review-copy strong { font-size: 13px; font-weight: 550; }
+.listing-review-copy > span { color: var(--ink-subtle); font-size: 11px; line-height: 1.5; }
+.listing-review--pending .listing-review-copy > span { color: var(--primary-hover); }
+.listing-review-action { color: var(--primary-hover); font-size: 12px; }
+[data-mode='light'] :is(.listing-review-action, .listing-review--pending .listing-review-copy > span) { color: var(--primary-action); }
+.listing-review-chevron { width: 16px; height: 16px; color: var(--ink-muted); transition: transform .15s; }
+.listing-review-trigger[aria-expanded='true'] .listing-review-chevron { transform: rotate(180deg); }
+.listing-review .instrument-review { border: 0; border-top: 1px solid var(--hairline-strong); border-radius: 0; background: transparent; max-height: none; overflow: visible; }
+.listing-review .instrument-review-head { padding: 14px; }
+.listing-review .instrument-review-head h2 { font-size: 13px; }
+.listing-review .instrument-review-scroll { padding: 14px; overflow: visible; scrollbar-gutter: auto; }
+.listing-review .instrument-review-item { padding-top: 14px; }
+.listing-review .instrument-review-item > .folio-row { grid-template-columns: minmax(0, 1fr) auto; }
+.listing-item-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.listing-item-status { color: var(--ink-muted); font: 11px var(--font-body); }
+.listing-item-status--pending { color: var(--primary-hover); }
+[data-mode='light'] .listing-item-status--pending { color: var(--primary-action); }
+.listing-review .instrument-review-item .sym { color: var(--ink); font: 550 13px/1.5 var(--font-body); }
+.listing-review .instrument-review-item .btn { border-radius: 6px; }
+.settings-section,
+.settings-data { min-width: 0; padding-top: 20px; border-top: 1px solid var(--hairline-strong); }
+.settings-detail-head { margin-bottom: 4px; }
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 390px) 180px;
+  align-items: center;
+  gap: 24px;
+  min-height: 64px;
+  padding-block: 12px;
+  border-top: 1px solid var(--hairline);
+}
+.setting-row:first-child { border-top: 0; }
+.setting-copy { display: grid; min-width: 0; gap: 4px; }
+.setting-copy strong { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1.4; }
+.setting-copy > span { color: var(--ink-subtle); font-size: 12px; line-height: 1.5; }
+.setting-row--toggle { cursor: pointer; }
+.setting-row--toggle:hover .setting-copy strong { color: var(--primary-hover); }
+.setting-row--toggle:focus-within { outline: 2px solid var(--primary-focus); outline-offset: 4px; border-radius: 4px; }
+.setting-control-wrap { display: flex; align-items: center; justify-content: start; min-width: 0; }
+.settings-control { width: 180px; max-width: 100%; }
+.settings-page .segmented-control.settings-control { display: flex; }
+.settings-page .segmented-control.mode-toggle { gap: 2px; padding: 3px; border-color: var(--hairline-strong); background: var(--surface-1); }
+.settings-page .mode-toggle > button { flex: 1; min-width: 0; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--ink-muted); font: 500 12px var(--font-body); }
+.settings-page .mode-toggle > button.is-active { background: var(--surface-3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--primary); }
+.settings-page .mode-toggle > button:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: -2px; }
+.setting-toggle-control { display: inline-flex; align-items: center; justify-self: start; gap: 9px; min-height: 40px; }
+.setting-toggle-status { min-width: 22px; color: var(--ink-muted); font-size: 11px; }
+.settings-subhead { margin-bottom: 12px; }
+.data-handling-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.data-handling-card { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.data-handling-card-head { display: flex; align-items: center; gap: 8px; }
+.data-handling-icon { display: flex; color: var(--ink-subtle); }
+.data-handling-icon .action-icon { width: 16px; height: 16px; }
+.data-destination { color: var(--ink-muted); font: 11px var(--font-mono); }
+.data-handling-card h4 { color: var(--ink); font-size: 12px; font-weight: 500; }
+.data-handling-card p { max-width: 350px; color: var(--ink-subtle); font-size: 11px; line-height: 1.6; }
+[data-mode='light'] .setting-row--toggle:hover .setting-copy strong { color: var(--primary-action); }
+@media (max-width: 640px) {
+  .folio-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+  .settings-page .holdings-manage .folio-row { position: relative; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .settings-page .folio-title { padding-right: 60px; }
+  .settings-page .holdings-manage .btn-remove--label { position: absolute; top: 10px; right: 0; }
+  .settings-page .holdings-manage .folio-row:first-child > .btn-remove--label { top: 0; }
+  .folio-document { display: none; }
+  .settings-page .folio-review-actions .btn, .settings-page .holdings-manage .btn-remove--label { min-height: 44px; }
+  .settings-page .folio-remove-confirm { grid-column: 1 / -1; }
+  .listing-review-trigger { grid-template-columns: 18px minmax(0, 1fr) 16px; gap: 10px; }
+  .listing-review-action { grid-column: 2; grid-row: 2; }
+  .listing-review-chevron { grid-column: 3; grid-row: 1; }
+  .listing-review .instrument-review-item > .folio-row { grid-template-columns: minmax(0, 1fr); }
+  .listing-review .instrument-review-item > .folio-row > button { justify-self: start; min-height: 44px; }
+  .settings-page-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .settings-page { gap: 18px; }
+  .settings-section, .settings-data { padding-top: 18px; }
+  .setting-row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-block: 14px; }
+  .setting-row--toggle { grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
+  .settings-control { width: 200px; }
+  .settings-page .mode-toggle > button { min-height: 36px; }
+  .settings-page .manage-actions .btn,
+  .settings-page .workspace-recovery > .import-actions > .btn { min-height: 44px; }
+  .setting-toggle-control { min-height: 44px; gap: 6px; }
+  .data-handling-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}

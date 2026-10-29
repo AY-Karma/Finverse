@@ -60,6 +60,31 @@ it('updates an open app when an import crosses an age boundary', async () => {
   expect(container.querySelector('.import-health')?.getAttribute('data-status')).toBe('aging')
 })
 
+it.each([
+  ['2026-10-04T10:00:00Z', importedAt, 'Recent import'],
+  ['2026-10-15T10:00:00Z', importedAt, 'Review soon'],
+  ['2026-10-29T10:00:00Z', importedAt, 'Update suggested'],
+  ['2026-10-29T10:00:00Z', Number.NaN, 'Date unknown'],
+] as const)('provides visible freshness text at %s alongside the colored strip', async (now, at, label) => {
+  vi.setSystemTime(Date.parse(now))
+  await render()
+  await act(async () => root!.render(<ImportHealthIndicator importedAt={at} showLabel />))
+  const indicator = container.querySelector('.import-health--label')!
+  expect(indicator.querySelector('.import-health-label')?.textContent).toBe(label)
+  expect(indicator.getAttribute('aria-label')).toBe(label)
+  expect(indicator.querySelector('.dither-bar')).not.toBeNull()
+})
+
+it('names a recent review separately from a recent import', async () => {
+  const reviewedAt = Date.parse('2026-10-29T10:00:00Z')
+  vi.setSystemTime(reviewedAt)
+  await render()
+  await act(async () => root!.render(<ImportHealthIndicator importedAt={importedAt} reviewedAt={reviewedAt} showLabel />))
+  const indicator = container.querySelector('.import-health--label')!
+  expect(indicator.querySelector('.import-health-label')?.textContent).toBe('Recently reviewed')
+  expect(indicator.getAttribute('title')).toContain('Holdings confirmed unchanged')
+})
+
 it('refreshes age immediately when returning to the app and removes its timer on unmount', async () => {
   vi.setSystemTime(importedAt)
   await render()

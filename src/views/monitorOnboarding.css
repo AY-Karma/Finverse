@@ -1,0 +1,33 @@
+.mo-edition {
+  min-width: 0;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+}
+.mo-edition-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 20px; border-bottom: 1px solid var(--hairline-strong); }
+.mo-edition-head h2 { color: var(--ink); font-size: 13px; font-weight: 550; }
+.mo-edition-head > span { color: var(--ink-subtle); font: 10px/1.5 var(--font-mono); }
+.mo-story { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; padding: 20px; border-bottom: 1px solid var(--hairline); }
+.mo-story-icon { display: flex; padding-top: 2px; color: var(--welcome-accent); }
+.mo-story-icon .action-icon { width: 18px; height: 18px; }
+.mo-story h3 { color: var(--ink); font-size: 13px; font-weight: 550; line-height: 1.5; }
+.mo-story p { margin-top: 6px; color: var(--ink-muted); font-size: 12px; line-height: 1.7; }
+.mo-story details { margin-top: 6px; }
+.mo-story summary { display: flex; align-items: center; gap: 7px; width: fit-content; min-height: 32px; color: var(--welcome-accent); font-size: 11px; cursor: pointer; list-style: none; }
+.mo-story summary::-webkit-details-marker { display: none; }
+.mo-story summary::after { content: ''; width: 5px; height: 5px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg); transition: transform .15s; }
+.mo-story details[open] > summary::after { transform: rotate(225deg); }
+.mo-story summary:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: 2px; border-radius: 2px; }
+.mo-story details > p { margin: 0 0 4px; }
+.mo-edition-footer { display: flex; align-items: center; gap: 8px; padding: 16px 20px; color: var(--ink-subtle); font-size: 10px; line-height: 1.6; }
+.mo-edition-footer .action-icon { width: 14px; height: 14px; flex: none; }
+[data-mode='light'] .mo-edition { --welcome-accent: var(--primary-action-hover); }
+@media (max-width: 640px) {
+  .mo-edition { width: min(400px, 100%); justify-self: center; }
+  .mo-edition-head, .mo-story { padding: 16px; }
+  .mo-story summary { min-height: 44px; }
+  .mo-edition-footer { padding: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mo-story summary::after { transition: none; }
+}

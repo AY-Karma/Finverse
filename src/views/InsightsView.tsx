@@ -10,7 +10,7 @@ import { assetTypeLabel } from '../instruments'
 import { dateFormatter } from '../formatters'
 import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
-import { PortfolioRequiredState } from './PortfolioRequiredState'
+import { PortfolioWelcome } from './PortfolioWelcome'
 import { HiddenValuesState } from './HiddenValuesState'
 import { SessionContributors } from './SessionContributors'
 import { WorstDrawdownChart } from './WorstDrawdownChart'
@@ -131,11 +131,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
   if (snapshot.positions.length === 0) {
     return (
-      <PortfolioRequiredState
-        area="Insights"
-        description="Bring in your holdings to turn market prices into contribution, allocation, performance, and risk views."
-        onImport={onRequestImport}
-      />
+      <PortfolioWelcome variant="insights" onRequestImport={onRequestImport} />
     )
   }
 

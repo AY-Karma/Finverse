@@ -14,7 +14,7 @@ const ICON_PATHS = {
   preferences: 'M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6',
   privacy: 'm12 3 8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6l8-3Zm-3 9 2 2 4-4',
   device: 'M3 4h18v13H3V4Zm5 17h8m-4-4v4',
-  import: 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',
+  import: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6m-8 9v-6m-3 3 3-3 3 3',
   external: 'M14 3h7v7m0-7L10 14M10 3H3v18h18v-7',
   calendar: 'M5 5h14a2 2 0 0 1 2 2v13H3V7a2 2 0 0 1 2-2Zm2-3v6m10-6v6M3 11h18m-13 4h2m4 0h2',
   bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-11 12a2 2 0 0 0 4 0',

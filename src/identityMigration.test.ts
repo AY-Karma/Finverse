@@ -7,7 +7,7 @@ import { captureWorkspaceRecords, recoverWorkspaceWrite, workspaceWritesBlocked 
 import { combinePositions } from './valuation'
 import type { Folio, Position, Settings } from './types'
 
-const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'indigo', mode: 'light', hideValues: true }
+const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt', mode: 'light', hideValues: true }
 const position: Position = { id: 'holding', ticker: '500112', name: 'Bank', type: 'stock', quantity: 2, buyPrice: 100, invested: 200, lastPrice: 120, exchange: 'BSE', currency: 'INR', providerSymbol: '500112.BO', instrumentKey: 'EQ:500112', sector: 'Financials' }
 const folio: Folio = { id: 'account', name: 'Broker account', importedAt: 100, positions: [position] }
 const snapshot = { at: 100, value: 240, invested: 200, pnl: 40, holdingCount: 1 }

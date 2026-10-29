@@ -32,6 +32,20 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('groups mutual-fund schemes directly below instrument listings with the same disclosure styling', async () => {
+    state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const listings = container.querySelector('#listing-review-trigger')!.parentElement!
+      const schemes = listings.nextElementSibling!
+      expect(schemes.matches('details.fund-review.listing-review')).toBe(true)
+      expect(schemes.querySelector('summary.listing-review-trigger .listing-review-copy strong')!.textContent).toBe('Mutual-fund schemes')
+      expect(schemes.querySelector('.listing-review-action')!.textContent).toBe('Review schemes')
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('shows unchanged confirmation only after seven days and ignores repeat clicks while saving', async () => {
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
@@ -92,6 +106,8 @@ describe('holdings management', () => {
       expect(container.textContent).toContain('Import details hidden')
       expect(container.textContent).not.toContain('1 holding')
       expect(container.textContent).not.toContain('inferred or unresolved')
+      expect(container.querySelector('.folio-facts')).toBeNull()
+      expect(container.querySelector('.listing-review-copy')?.textContent).toContain('Listing details are hidden.')
       expect(container.querySelector('.import-health')).toBeNull()
       const remove = container.querySelector<HTMLButtonElement>('.folio-list .btn-remove')!
       expect(remove.getAttribute('aria-label')).toBe('Remove ••••••')
@@ -118,6 +134,8 @@ describe('holdings management', () => {
       await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
       const rows = [...container.querySelectorAll('.folio-list > .folio-row')]
       expect(rows.map((row) => row.querySelector('.folio-title > .sym')?.nextElementSibling?.getAttribute('data-status'))).toEqual(['healthy', 'aging', 'old'])
+      expect(rows.map((row) => row.querySelector('.import-health-label')?.textContent)).toEqual(['Recent import', 'Review soon', 'Update suggested'])
+      expect(rows.every((row) => row.querySelector('.dither-bar') !== null)).toBe(true)
       const importButton = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')].find((button) => button.textContent === 'Import holdings')!
       expect(importButton.disabled).toBe(false)
       await act(async () => importButton.click())
@@ -126,6 +144,59 @@ describe('holdings management', () => {
       await act(async () => root.unmount())
       clock.mockRestore()
     }
+  })
+
+  it('separates statement facts from the filename and actions', async () => {
+    const importedAt = Date.parse('2026-10-10T12:00:00Z')
+    const reviewedAt = Date.parse('2026-10-20T12:00:00Z')
+    state.folios = [{ ...folio, importedAt, reviewedAt }]
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      expect(container.querySelector('.imported-statements > h3')?.textContent).toBe('Imported statements')
+      expect(container.querySelector('.folio-title > .sym')?.textContent).toBe(folio.name)
+      const facts = Object.fromEntries([...container.querySelectorAll('.folio-facts > div')].map((item) => [item.querySelector('dt')?.textContent, item.querySelector('dd')?.textContent]))
+      expect(facts.Holdings).toBe('1')
+      expect(facts.Statement).toBeUndefined()
+      expect(container.textContent).not.toContain('Date not provided')
+      expect(facts.Imported).toMatch(/10.*Oct.*2026/)
+      expect(facts.Reviewed).toMatch(/20.*Oct.*2026/)
+      state.folios = [{ ...state.folios[0], statement: { id: 'dated', fileName: folio.name, statementDate: '2026-10-01', completeness: 'complete' } }]
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const datedFacts = [...container.querySelectorAll('.folio-facts > div')].find((item) => item.querySelector('dt')?.textContent === 'Statement')
+      expect(datedFacts?.querySelector('dd')?.textContent).toMatch(/1.*Oct.*2026/)
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('distinguishes pending review from ready listings and connects the disclosure', async () => {
+    const onReviewListings = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const render = () => act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={onReviewListings} />))
+    try {
+      await render()
+      const trigger = container.querySelector<HTMLButtonElement>('#listing-review-trigger')!
+      expect(trigger.textContent).toContain('1 listing needs your confirmation.')
+      expect(trigger.querySelector('.listing-review-action')?.textContent).toBe('Review listings')
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      const content = container.querySelector<HTMLElement>(`#${trigger.getAttribute('aria-controls')}`)!
+      expect(content.hidden).toBe(true)
+      expect(container.querySelector('#instrument-review')).toBeNull()
+      await act(async () => trigger.click())
+      expect(onReviewListings).toHaveBeenCalledOnce()
+
+      state.positions = [{ ...position, exchangeSource: 'explicit' }]
+      await render()
+      expect(trigger.textContent).toContain('No listings need review.')
+      expect(trigger.querySelector('.listing-review-action')?.textContent).toBe('View listings')
+      expect(trigger.textContent).not.toContain('0 inferred')
+
+      state.settings.hideValues = true
+      await render()
+      expect(trigger.textContent).toContain('Listing details are hidden.')
+      expect(trigger.textContent).not.toContain('No listings need review')
+    } finally { await act(async () => root.unmount()) }
   })
 
   it.each([['settings', ManageHoldings], ['import page', ImportView]])('requires confirmation and supports cancel on the %s', async (_, View) => {
@@ -160,7 +231,13 @@ describe('holdings management', () => {
     const findButton = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent === label)!
     try {
       await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
-      expect(container.querySelector('.manage-actions')?.children).toHaveLength(4)
+      const toggle = container.querySelector<HTMLButtonElement>('[aria-label="More holdings actions"]')!
+      const actions = container.querySelector<HTMLElement>('.manage-actions-reveal')!
+      expect(actions.getAttribute('aria-hidden')).toBe('true')
+      await act(async () => toggle.click())
+      expect(actions.getAttribute('aria-hidden')).toBe('false')
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      expect(actions.textContent).toContain('Restore backup')
       await act(async () => findButton('Export CSV').click())
       await act(async () => findButton('Backup JSON').click())
       expect(state.exportPortfolio.mock.calls).toEqual([['csv'], ['json']])
@@ -168,6 +245,8 @@ describe('holdings management', () => {
       expect(state.undoLastImport).not.toHaveBeenCalled()
       await act(async () => findButton('Confirm undo').click())
       expect(state.undoLastImport).toHaveBeenCalledOnce()
+      await act(async () => actions.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      expect(actions.getAttribute('aria-hidden')).toBe('true')
       await act(async () => findButton('Import holdings').click())
       expect(onRequestImport).toHaveBeenCalledOnce()
       expect(findButton('Import holdings').getAttribute('aria-haspopup')).toBe('dialog')
@@ -186,7 +265,9 @@ describe('holdings management', () => {
     try {
       await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
       const buttons = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')]
-      expect(buttons.map((button) => button.disabled)).toEqual([false, true, false, true])
+      expect(buttons.map((button) => [button.textContent || button.getAttribute('aria-label'), button.disabled])).toEqual([
+        ['Import holdings', false], ['More holdings actions', false], ['Export CSV', true], ['Backup JSON', false], ['Undo import', true], ['Restore backup', false],
+      ])
     } finally { await act(async () => root.unmount()) }
   })
 

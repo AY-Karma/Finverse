@@ -16,9 +16,10 @@ function defaultCorrection(position: Position): InstrumentCorrection {
   return { ticker: position.ticker, type: position.type, exchange: position.exchange ?? 'OTHER', currency: position.currency ?? 'INR', providerSymbol: position.providerSymbol ?? '', isin: position.isin ?? '', sector: position.sector ?? '' }
 }
 
-export function InstrumentReview({ onClose }: { onClose?: () => void }) {
+export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () => void; autoFocus?: boolean }) {
   const { positions, confirmInstrument, settings } = useStore()
   const holdings = positions.filter((position) => position.type !== 'mutual-fund')
+    .sort((a, b) => Number(needsInstrumentReview(b)) - Number(needsInstrumentReview(a)))
   const pending = holdings.filter(needsInstrumentReview)
   const reviewCount = pending.length
   const reviewRef = useRef<HTMLElement>(null)
@@ -34,7 +35,7 @@ export function InstrumentReview({ onClose }: { onClose?: () => void }) {
 
   useEffect(() => {
     const section = reviewRef.current
-    if (!section || !onClose) return
+    if (!section || !onClose || !autoFocus) return
     section.focus({ preventScroll: true })
     section.scrollIntoView({ block: 'nearest' })
   }, [])
@@ -100,7 +101,7 @@ export function InstrumentReview({ onClose }: { onClose?: () => void }) {
   </section>
   return <section id="instrument-review" ref={reviewRef} tabIndex={-1} aria-label="Review instrument listings" className={`panel instrument-review fund-review${reviewCount > 0 ? ' review-required' : ''}`}>
     <div className="instrument-review-head">
-      <div><h2>Review listings</h2><span className="hint">{reviewCount} inferred or unresolved</span></div>
+      <div><h2>Listing details</h2><span className="hint">{reviewCount > 0 ? `${reviewCount} listing${reviewCount === 1 ? ' needs' : 's need'} confirmation` : 'No listings need review'}</span></div>
       {onClose && <button className="icon-btn" type="button" aria-label="Close listing review" onClick={onClose}><ActionIcon name="close" /></button>}
     </div>
     <div className="instrument-review-scroll" role="region" aria-label="Instrument listings" tabIndex={0}>
@@ -114,9 +115,13 @@ export function InstrumentReview({ onClose }: { onClose?: () => void }) {
       {holdings.map((position) => <div key={position.id} className="instrument-review-item">
         <div className="folio-row">
           <div className="folio-copy" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-            <span className="sym">{position.name || position.ticker}</span>
-            <span className="hint">{listing(position)}</span>
-            <span className="hint">{position.exchangeSource === 'explicit' ? 'Explicit exchange' : 'Inferred exchange, confirm with your statement'}</span>
+            <div className="listing-item-title"><span className="sym">{position.name || position.ticker}</span><span className={`listing-item-status${needsInstrumentReview(position) ? ' listing-item-status--pending' : ''}`}>{needsInstrumentReview(position) ? 'Needs review' : 'Ready'}</span></div>
+            <dl className="listing-facts">
+              <div><dt>Symbol</dt><dd>{position.ticker || 'Not provided'}</dd></div>
+              <div><dt>Exchange</dt><dd>{position.exchange ?? 'Unresolved'}{position.exchangeSource !== 'explicit' && ' (inferred)'}</dd></div>
+              <div><dt>Currency</dt><dd>{position.currency ?? 'Unresolved'}</dd></div>
+              <div><dt>Price symbol</dt><dd>{position.providerSymbol || 'Derived from listing'}</dd></div>
+            </dl>
             {position.identityIssue && <span className="hint down">{position.identityIssue}</span>}
             {(position.reportedExchange || position.reportedCurrency) && <span className="hint">Statement metadata: {position.reportedExchange ? `exchange ${position.reportedExchange}` : ''}{position.reportedExchange && position.reportedCurrency ? ', ' : ''}{position.reportedCurrency ? `currency ${position.reportedCurrency}` : ''}</span>}
             {!hasInrDenomination(position) && <span className="hint">Import a corrected INR statement to review this listing. Original unsupported amounts are retained.</span>}

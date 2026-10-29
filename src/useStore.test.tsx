@@ -2,7 +2,7 @@
 import { act, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { StoreProvider, useStore } from './useStore'
+import { StoreProvider, useStore, type ImportPreview } from './useStore'
 import { loadSettings } from './store'
 import { quoteKey } from './valuation'
 import type { Position } from './types'
@@ -19,6 +19,50 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); refreshQuotes.mockReset() })
 
 describe('portfolio saving', () => {
+  it('waits for a saved import before starting market requests and stops after removing the last folio', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(live, 'isMarketOpen').mockReturnValue(true)
+    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
+    refreshQuotes.mockResolvedValue({ quotes: {}, updated: 0, failed: 0, skipped: 1 })
+    const preview: ImportPreview = {
+      id: 'first-import', fileName: 'holdings.csv', createdAt: Date.now(), issues: [], rejectedCount: 0, duplicateCount: 0, unmatchedCount: 0,
+      positions: [{ id: 'first-holding', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }],
+    }
+    let store!: ReturnType<typeof useStore>
+    const Capture = () => { store = useStore(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
+      expect(store.marketDataRefreshing).toBe(false)
+      await act(async () => {
+        expect(await store.refreshNow()).toMatchObject({ ok: false, reason: 'disabled' })
+        await vi.advanceTimersByTimeAsync(10 * 60_000)
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      expect(refreshQuotes).not.toHaveBeenCalled()
+      const setItem = Storage.prototype.setItem
+      const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+        if (key === 'finverse:workspace-write:v1') throw new DOMException('Full', 'QuotaExceededError')
+        setItem.call(this, key, value)
+      })
+      await act(async () => { await expect(store.commitImport(preview)).rejects.toThrow('could not be saved') })
+      expect(store.positions).toEqual([])
+      expect(refreshQuotes).not.toHaveBeenCalled()
+      failure.mockRestore()
+      await act(async () => { expect(await store.commitImport(preview)).toBe(true) })
+      expect(refreshQuotes).toHaveBeenCalledOnce()
+      expect(refreshQuotes.mock.calls[0][0]).toMatchObject([{ ticker: 'TCS' }])
+      await act(async () => { expect(await store.removeFolio(store.folios[0].id)).toBe(true) })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10 * 60_000)
+        document.dispatchEvent(new Event('visibilitychange'))
+        expect(await store.refreshNow()).toMatchObject({ ok: false, reason: 'disabled' })
+      })
+      expect(store.marketDataRefreshing).toBe(false)
+      expect(refreshQuotes).toHaveBeenCalledOnce()
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('allows correcting a mistaken foreign venue when the original amounts are explicitly INR', async () => {
     const position: Position = { id: 'inr-venue', ticker: 'TCS', name: 'TCS', type: 'stock', exchange: 'LSE', currency: 'INR', providerSymbol: 'TCS', identityVersion: 2, exchangeSource: 'explicit', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
     localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'account', name: 'Account', importedAt: 1, positions: [position] }]))
@@ -91,6 +135,8 @@ describe('portfolio saving', () => {
     } finally { await act(async () => root.unmount()) }
   })
   it('preserves another tab\'s preferences before its storage event arrives', async () => {
+    const position: Position = { id: 'holding', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+    localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'test', name: 'Test', importedAt: 1, positions: [position] }]))
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
     refreshQuotes.mockResolvedValue({ quotes: {}, updated: 0, failed: 0, skipped: 0 })
     let store!: ReturnType<typeof useStore>
@@ -155,6 +201,8 @@ describe('portfolio saving', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-10-13T06:00:00Z'))
     vi.spyOn(live, 'isMarketOpen').mockReturnValue(true)
+    const position: Position = { id: 'holding', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
+    localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'test', name: 'Test', importedAt: 1, positions: [position] }]))
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
     refreshQuotes.mockResolvedValue({ quotes: {}, updated: 0, failed: 0, skipped: 0 })
     let store!: ReturnType<typeof useStore>

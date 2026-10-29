@@ -8,7 +8,7 @@ import { marketLinks, researchSource, resolveScreenerCompanyPath, reviewQuestion
 import { monogramTile } from '../logos'
 import { privateValue, visibleQuotes } from '../privacy'
 import { effectivePrice, formatCurrency, formatPercent, hasSupportedValuationCurrency, positionPnl, positionPnlPct, positionValue, quoteKey } from '../valuation'
-import { PortfolioRequiredState } from './PortfolioRequiredState'
+import { PortfolioWelcome } from './PortfolioWelcome'
 import { HistoryPanel } from './HistoryPanel'
 import { ResearchSourceIcon } from './ResearchSourceIcon'
 import { ActionIcon } from './ActionIcon'
@@ -85,7 +85,7 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
     updateNavigation({ holding: position.id, tab: 'overview' }, !navigation.holding)
   }
 
-  if (!positions.length) return <PortfolioRequiredState area="Research" description="Bring in your holdings to explore sources for every investment." onImport={onRequestImport} />
+  if (!positions.length) return <PortfolioWelcome variant="research" onRequestImport={onRequestImport} />
 
   const amount = (number: number | null, fallback = 'Unavailable') => privateValue(number == null || (selected && !hasSupportedValuationCurrency(selected)) ? fallback : formatCurrency(number), settings.hideValues)
   const quote = selected ? quotes[quoteKey(selected)] : undefined

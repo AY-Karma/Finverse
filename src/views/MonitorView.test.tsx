@@ -81,17 +81,29 @@ afterEach(async () => {
 })
 
 describe('single-page Monitor', () => {
-  it('keeps market news available before importing holdings', async () => {
-    await renderWatch()
-    state.store.positions = []
-    state.store.liveQuotes = {}
-    await restoreSaved(saved => { saved.alerts = []; saved.rules = []; saved.events = [] })
+  it('shows an onboarding edition without loading news or events before import', async () => {
+    state.store = { positions: [], liveQuotes: {}, settings: { ...loadSettings(), allowExternalData: true }, refreshNow: vi.fn() } as unknown as ReturnType<typeof useStore>
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
     const importHoldings = vi.fn()
     await act(async () => root.render(<MonitorView onRequestImport={importHoldings} />))
-    expect(container.querySelector('[data-news-identity]')).not.toBeNull()
+    expect(container.querySelector('[data-news-identity]')).toBeNull()
+    expect(container.querySelector('.mo-edition')?.querySelectorAll('article')).toHaveLength(3)
     expect(container.querySelector('.mp-monitor-sidebar')).toBeNull()
-    await clickButton('Import holdings')
+    expect(loadMarketEvents).not.toHaveBeenCalled()
+    expect(state.store.refreshNow).not.toHaveBeenCalled()
+    const review = container.querySelector<HTMLDetailsElement>('.mo-story details')!
+    await act(async () => review.querySelector('summary')!.click())
+    expect(review.open).toBe(true)
+    await clickButton('Import portfolio')
     expect(importHoldings).toHaveBeenCalledOnce()
+
+    state.store.positions = [{ id: 'imported', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
+    await rerender()
+    expect(container.querySelector('.mo-edition')).toBeNull()
+    expect(container.querySelector('[data-news-identity]')).not.toBeNull()
+    expect(loadMarketEvents).toHaveBeenCalledOnce()
   })
 
   it('prefills watch and reminder forms from a selected company', async () => {
