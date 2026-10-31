@@ -9,10 +9,14 @@ interface RiskPoint {
   isCurrent?: boolean
 }
 
+function calendarDay(at: number): number {
+  return Math.floor((at + IST_OFFSET_MS) / DAY_MS)
+}
+
 function consecutiveCloses(previous: RiskPoint, point: RiskPoint): boolean {
   if (previous.isCurrent || point.isCurrent) return false
-  const previousDay = Math.floor((previous.at + IST_OFFSET_MS) / DAY_MS)
-  const day = Math.floor((point.at + IST_OFFSET_MS) / DAY_MS)
+  const previousDay = calendarDay(previous.at)
+  const day = calendarDay(point.at)
   if (day <= previousDay) return false
   for (let missing = previousDay + 1; missing < day; missing += 1) {
     if (isRegularMarketOpen(new Date(missing * DAY_MS + 12 * 3600000 - IST_OFFSET_MS))) return false
@@ -20,7 +24,7 @@ function consecutiveCloses(previous: RiskPoint, point: RiskPoint): boolean {
   return true
 }
 
-/** Drawdown uses every observation; volatility uses consecutive daily closes only. */
+/** Drawdown uses every observation; session statistics use consecutive daily closes only. */
 export function calculatePortfolioRisk(points: readonly RiskPoint[]) {
   let peak = 0
   let peakAt: number | null = null
@@ -44,10 +48,23 @@ export function calculatePortfolioRisk(points: readonly RiskPoint[]) {
   }
   const average = returns.length ? returns.reduce((sum, item) => sum + item, 0) / returns.length : 0
   const variance = returns.length > 1 ? returns.reduce((sum, item) => sum + (item - average) ** 2, 0) / (returns.length - 1) : null
-  const currentValue = points[points.length - 1]?.value ?? peak
+  const latest = points[points.length - 1]
+  const currentValue = latest?.value ?? peak
+  const daysBelowPeak = peak > 0 && peakAt != null && latest
+    ? Math.max(0, calendarDay(latest.at) - calendarDay(peakAt))
+    : null
+  const downSessions = returns.filter((value) => value < 0).length
   return {
     worst,
     current: peak > 0 ? ((currentValue - peak) / peak) * 100 : 0,
+    peakValue: peak,
+    peakAt,
+    currentValue,
+    daysBelowPeak,
+    historyDays: latest ? Math.max(0, calendarDay(latest.at) - calendarDay(points[0].at)) : 0,
+    downSessions,
+    observedSessions: returns.length,
+    downSessionPct: returns.length ? downSessions / returns.length * 100 : null,
     volatility: variance == null ? null : Math.sqrt(variance) * Math.sqrt(252) * 100,
     worstAt,
     worstPeakAt,

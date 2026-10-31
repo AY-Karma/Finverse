@@ -3,7 +3,7 @@ import { quoteKey } from './valuation'
 import { createSharedRequest } from './sharedRequest'
 import { isRegularMarketOpen } from './marketCalendar'
 import { hasCompatibleFundScheme } from './fundSchemes'
-import { normalizePosition } from './instruments'
+import { normalizePosition, pricingProviderSymbol } from './instruments'
 import {
   MAX_MARKET_SYMBOLS,
   isMarketSymbol,
@@ -61,7 +61,7 @@ export function marketStatusText(
 export function resolveYahooSymbol(p: Position): string | null {
   if (p.type === 'mutual-fund') return null
   const normalized = normalizePosition(p)
-  return normalized.identityIssue ? null : normalized.providerSymbol ?? null
+  return normalized.identityIssue ? null : pricingProviderSymbol(normalized) ?? null
 }
 
 /** An explicit provider mapping never falls back to a guessed different listing. */
@@ -171,7 +171,7 @@ function fetchNavByCode(code: number, signal?: AbortSignal): Promise<LiveQuote |
 async function fetchNavUncached(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
   try {
     const requestSignal = signal ?? AbortSignal.timeout(12000)
-    const history = await fetchNavHistoryUncached(code, undefined, undefined, requestSignal)
+    const history = await fetchNavHistoryUncached(code, undefined, undefined, requestSignal) ?? []
     requestSignal.throwIfAborted()
     let latest = history.at(-1)
     if (!latest) {
@@ -221,6 +221,7 @@ export function quoteRefreshIssueText(result: LiveQuotesResult | null): string |
   return 'Latest quotes could not be reached. Showing previous or imported prices.'
 }
 
+export const NAV_REFRESH_MS = 15 * 60_000
 const NAV_REQUEST_CONCURRENCY = 2
 const NAV_REQUEST_GAP_MS = 750
 
@@ -232,7 +233,9 @@ export async function fetchLiveQuotes(
   const activeKeys = new Set(positions.filter((position) => position.type === 'mutual-fund'
     ? hasCompatibleFundScheme(position) : Boolean(resolveYahooSymbol(position))).map(quoteKey))
   const quotes: Record<string, LiveQuote> = Object.fromEntries(Object.entries(prev).filter(([key]) => activeKeys.has(key)))
-  const today = istDate()
+  const now = new Date()
+  const today = istDate(now)
+  const marketOpen = isMarketOpen(now)
 
   // combinePositions normally makes this unique already, but keeping the
   // network module defensive avoids duplicate provider calls for raw callers.
@@ -245,28 +248,30 @@ export async function fetchLiveQuotes(
     const candidates = resolveYahooSymbolCandidates(position)
     return candidates.length > 0 ? [{ position, candidates }] : []
   })
-  const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]), signal)
-  const retrySymbols = equities.flatMap(({ candidates }) =>
-    !primaryQuotes.has(candidates[0]) && candidates[1] ? [candidates[1]] : [],
-  )
-  const retryQuotes = await fetchYahooPrices(retrySymbols, signal)
-  for (const { position, candidates } of equities) {
-    const key = quoteKey(position)
-    const quote = primaryQuotes.get(candidates[0]) ?? retryQuotes.get(candidates[1])
-    outcomes.push(quote
-      ? {
-          key,
-          quote: {
-            price: quote.price,
-            at: quote.at,
-            fetchedAt: quote.fetchedAt,
-            source: quote.source,
-            change: quote.change,
-            changePct: quote.pct,
-          },
-          status: 'updated',
-        }
-      : { key, status: 'failed' })
+  const refreshEquities = async () => {
+    const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]), signal)
+    const retrySymbols = equities.flatMap(({ candidates }) =>
+      !primaryQuotes.has(candidates[0]) && candidates[1] ? [candidates[1]] : [],
+    )
+    const retryQuotes = await fetchYahooPrices(retrySymbols, signal)
+    for (const { position, candidates } of equities) {
+      const key = quoteKey(position)
+      const quote = primaryQuotes.get(candidates[0]) ?? retryQuotes.get(candidates[1])
+      outcomes.push(quote
+        ? {
+            key,
+            quote: {
+              price: quote.price,
+              at: quote.at,
+              fetchedAt: quote.fetchedAt,
+              source: quote.source,
+              change: quote.change,
+              changePct: quote.pct,
+            },
+            status: 'updated',
+          }
+        : { key, status: 'failed' })
+    }
   }
   for (const position of unique) {
     if (position.type !== 'mutual-fund' && !resolveYahooSymbol(position)) {
@@ -287,12 +292,17 @@ export async function fetchLiveQuotes(
         continue
       }
       const existing = prev[key]
+      const checkedAt = existing?.fetchedAt ?? existing?.at
       if (
         existing &&
         existing.source === 'nav' &&
-        Number.isFinite(existing.change) &&
-        istDate(new Date(existing.at)) === today &&
-        istDate(new Date(existing.fetchedAt ?? existing.at)) === today
+        Number.isFinite(existing.price) && existing.price > 0 &&
+        Number.isFinite(existing.at) &&
+        typeof checkedAt === 'number' && Number.isFinite(checkedAt) && checkedAt <= now.getTime() &&
+        istDate(new Date(checkedAt)) === today &&
+        // Completed daily NAVs are reusable; pending publications get checked at the NAV cadence.
+        ((Number.isFinite(existing.change) && istDate(new Date(existing.at)) === today)
+          || (marketOpen && now.getTime() - checkedAt < NAV_REFRESH_MS))
       ) {
         outcomes.push({ key, status: 'skipped' })
       } else {
@@ -306,7 +316,7 @@ export async function fetchLiveQuotes(
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(NAV_REQUEST_CONCURRENCY, funds.length) }, () => worker()))
+  await Promise.all([refreshEquities(), ...Array.from({ length: Math.min(NAV_REQUEST_CONCURRENCY, funds.length) }, () => worker())])
 
   for (const outcome of outcomes) {
     if (outcome.quote) quotes[outcome.key] = outcome.quote
@@ -343,6 +353,7 @@ export interface HistoryPoint {
 }
 
 const HISTORY_TTL_MS = 24 * 60 * 60 * 1000
+const EMPTY_HISTORY_TTL_MS = 60_000
 const sharedHistory = createSharedRequest<{ from: string; to: string; points: HistoryPoint[] }>()
 
 interface HistoryCacheEntry {
@@ -354,6 +365,18 @@ interface HistoryCacheEntry {
 
 const parsedHistory = new Map<string, { raw: string; entry: HistoryCacheEntry }>()
 const cleanedHistoryStores = new WeakSet<Storage>()
+const emptyHistoryRanges = new WeakMap<Storage, Map<string, { history: HistoryCacheEntry; at: number }>>()
+
+function emptyHistoryRangeCache(): Map<string, { history: HistoryCacheEntry; at: number }> | undefined {
+  try {
+    let ranges = emptyHistoryRanges.get(localStorage)
+    if (!ranges) {
+      ranges = new Map()
+      emptyHistoryRanges.set(localStorage, ranges)
+    }
+    return ranges
+  } catch { return undefined }
+}
 
 function rememberHistory(key: string, raw: string, entry: HistoryCacheEntry): HistoryCacheEntry {
   if (parsedHistory.size >= 128 && !parsedHistory.has(key)) {
@@ -412,7 +435,7 @@ function fetchCachedHistory(
   symbol: string,
   from: Date,
   to: Date,
-  fetchRange: (from: string, to: string, signal: AbortSignal) => Promise<HistoryPoint[]>,
+  fetchRange: (from: string, to: string, signal: AbortSignal) => Promise<HistoryPoint[] | null>,
   signal?: AbortSignal,
 ): Promise<HistoryPoint[]> {
   signal?.throwIfAborted()
@@ -423,6 +446,9 @@ function fetchCachedHistory(
   if (cached && cached.from <= fromS && cached.to >= toS) {
     return Promise.resolve(historyInRange(cached.points, fromS, toS))
   }
+  const emptyRanges = cached?.points.some((point) => point.date >= fromS && point.date <= toS)
+    ? emptyHistoryRangeCache()
+    : undefined
 
   return sharedHistory(key, async (requestSignal) => {
     const ranges: [string, string][] = cached
@@ -432,10 +458,19 @@ function fetchCachedHistory(
         ]
       : [[fromS, toS]]
     let next = cached ?? { from: fromS, to: toS, points: [], at: Date.now() }
+    const checkedEmptyRanges: string[] = []
     for (const [rangeFrom, rangeTo] of ranges) {
+      const rangeKey = JSON.stringify([key, rangeFrom, rangeTo])
+      const empty = emptyRanges?.get(rangeKey)
+      if (empty?.history === cached && Date.now() - empty.at < EMPTY_HISTORY_TTL_MS) continue
+      emptyRanges?.delete(rangeKey)
       const points = await fetchRange(rangeFrom, rangeTo, requestSignal)
       requestSignal.throwIfAborted()
-      if (points.length === 0) continue
+      if (!points) continue
+      if (points.length === 0) {
+        checkedEmptyRanges.push(rangeKey)
+        continue
+      }
       next = {
         from: rangeFrom < next.from ? rangeFrom : next.from,
         to: rangeTo > next.to ? rangeTo : next.to,
@@ -445,6 +480,14 @@ function fetchCachedHistory(
       }
     }
     if (next.points.length > 0) writeHistoryCache(key, next)
+    for (const rangeKey of checkedEmptyRanges) {
+      if (!emptyRanges) break
+      if (emptyRanges.size >= 128) {
+        const oldest = emptyRanges.keys().next().value
+        if (oldest) emptyRanges.delete(oldest)
+      }
+      emptyRanges.set(rangeKey, { history: next, at: Date.now() })
+    }
     return { from: fromS, to: toS, points: historyInRange(next.points, fromS, toS) }
   }, signal).then((result) => result.from === fromS && result.to === toS
     ? result.points
@@ -478,7 +521,7 @@ async function withHistorySlot<T>(signal: AbortSignal, load: () => Promise<T>): 
   }
 }
 
-async function fetchHistoryUncached(symbol: string, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[]> {
+async function fetchHistoryUncached(symbol: string, from: string, to: string, signal: AbortSignal): Promise<HistoryPoint[] | null> {
   const params = new URLSearchParams({
     symbol,
     from,
@@ -487,14 +530,14 @@ async function fetchHistoryUncached(symbol: string, from: string, to: string, si
   try {
     return await withHistorySlot(signal, async () => {
       const res = await fetch(`/api/history?${params}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) })
-      if (!res.ok) return []
+      if (!res.ok) return null
       const json = (await res.json()) as HistoryPayload
       return (json.points ?? []).filter(
         (point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.close) && point.close > 0,
       )
     })
   } catch {
-    return []
+    return null
   }
 }
 
@@ -523,17 +566,17 @@ function navPoints(rows: { date?: string; nav?: string }[] = []): HistoryPoint[]
   return [...points.values()].sort((a, b) => a.date.localeCompare(b.date))
 }
 
-async function fetchNavHistoryUncached(code: number, from: string | undefined, to: string | undefined, signal: AbortSignal): Promise<HistoryPoint[]> {
+async function fetchNavHistoryUncached(code: number, from: string | undefined, to: string | undefined, signal: AbortSignal): Promise<HistoryPoint[] | null> {
   try {
     const res = await fetch(
       `https://api.mfapi.in/mf/${code}${from && to ? `?startDate=${from}&endDate=${to}` : ''}`,
       { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) },
     )
-    if (!res.ok) return []
+    if (!res.ok) return null
     const data = (await res.json()) as { data?: { date?: string; nav?: string }[] }
     return navPoints(data.data)
   } catch {
-    return []
+    return null
   }
 }
 

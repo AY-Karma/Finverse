@@ -2,6 +2,7 @@ import type { AccountRevision, AccountStatement, Folio, Position, Settings } fro
 import { normalizePosition } from './instruments'
 import { workspaceWritesBlocked } from './workspaceStorage'
 import { isMfSchemeMapping } from './fundSchemes'
+import { isNsePricingListing } from './nsePricingProtocol'
 
 const FOLIOS_KEY = 'finverse:folios'
 const LEGACY_POSITIONS_KEY = 'finverse:positions'
@@ -76,6 +77,7 @@ function sanitizePosition(value: unknown): Position | null {
       ? { code: value.mfScheme.code, name: value.mfScheme.name.trim(), source: value.mfScheme.source }
       : undefined,
     instrumentKey: optionalText('instrumentKey'),
+    pricingListing: isNsePricingListing(value.pricingListing) ? { ...value.pricingListing } : undefined,
     isin: optionalText('isin'),
     exchange,
     providerSymbol,

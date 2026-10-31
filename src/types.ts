@@ -14,6 +14,15 @@ export interface MfSchemeMapping {
   source: 'exact' | 'confirmed'
 }
 
+export interface NsePricingListing {
+  exchange: 'NSE'
+  isin: string
+  providerSymbol: string
+  type: 'stock' | 'etf'
+  source: 'nse-master'
+  verifiedAt: number
+}
+
 export interface Position {
   id: string
   ticker: string
@@ -35,6 +44,8 @@ export interface Position {
   xirr?: number | null
   /** Reviewed provider identity shared by NAV and historical prices. */
   mfScheme?: MfSchemeMapping
+  /** Approved valuation venue; imported listing and purchase details remain unchanged. */
+  pricingListing?: NsePricingListing
   /** Canonical identity fields filled by the investment workspace. */
   instrumentKey?: string
   isin?: string

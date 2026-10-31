@@ -1,17 +1,22 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { InstrumentReview } from './InstrumentReview'
 import type { Position } from '../types'
 
 const { initialPosition, state } = vi.hoisted(() => {
   const initialPosition: Position = { id: 'holding', ticker: '500112', name: 'State Bank', type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 100, invested: 100, exchange: 'NSE', currency: 'INR', providerSymbol: '500112.NS', exchangeSource: 'inferred', identityIssue: 'Confirm the venue', reportedExchange: 'BSE' }
-  return { initialPosition, state: { positions: [initialPosition] as Position[], confirmInstrument: vi.fn(), settings: { hideValues: false } } }
+  return { initialPosition, state: { positions: [initialPosition] as Position[], confirmInstrument: vi.fn(), confirmNsePricing: vi.fn(), lookupNse: vi.fn(), settings: { hideValues: false, allowExternalData: true } } }
 })
 vi.mock('../useStore', () => ({ useStore: () => state }))
+vi.mock('../nsePricing', () => ({ loadNsePricingCandidates: (...args: unknown[]) => state.lookupNse(...args) }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-afterEach(() => { state.positions = [initialPosition]; state.settings.hideValues = false; vi.resetAllMocks() })
+beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: vi.fn(function (this: HTMLDialogElement) { this.open = true }) })
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: vi.fn(function (this: HTMLDialogElement) { this.open = false }) })
+})
+afterEach(() => { state.positions = [initialPosition]; state.settings.hideValues = false; state.settings.allowExternalData = true; vi.restoreAllMocks(); vi.resetAllMocks() })
 
 it('shows listings needing confirmation before ready listings', async () => {
   state.positions = [
@@ -91,10 +96,10 @@ it('previews an explicit listing correction and keeps the edits after a save fai
     expect(container.textContent).toContain('Statement metadata: exchange BSE')
     await act(async () => button('Review listing').click())
     await change('Exchange', 'BSE')
-    expect((field('Provider symbol, required') as HTMLInputElement).required).toBe(true)
-    expect(container.textContent).toContain('Numeric BSE codes need a confirmed provider symbol ending in .BO')
-    expect(container.textContent).toContain('Reviewed listing: 500112 · Stock · BSE · INR · Provider symbol required')
-    await change('Provider symbol, required', 'SBIN.BO')
+    expect((field('Price symbol, required') as HTMLInputElement).required).toBe(true)
+    expect(container.textContent).toContain('Numeric BSE codes need a confirmed price symbol ending in .BO')
+    expect(container.textContent).toContain('Reviewed listing: 500112 · Stock · BSE · INR · Price symbol required')
+    await change('Price symbol, required', 'SBIN.BO')
     await change('ISIN, optional', 'INE062A01020')
     await change('Sector, optional', 'Financials')
     expect(container.textContent).toContain('Reviewed listing: 500112 · Stock · BSE · INR · SBIN.BO')
@@ -102,7 +107,7 @@ it('previews an explicit listing correction and keeps the edits after a save fai
     expect(state.confirmInstrument).toHaveBeenCalledWith('holding', { ticker: '500112', type: 'stock', exchange: 'BSE', currency: 'INR', providerSymbol: 'SBIN.BO', isin: 'INE062A01020', sector: 'Financials' })
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('storage is full')
     expect(field('Exchange').value).toBe('BSE')
-    expect(field('Provider symbol, required').value).toBe('SBIN.BO')
+    expect(field('Price symbol, required').value).toBe('SBIN.BO')
     expect(field('Sector, optional').value).toBe('Financials')
     await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(container.querySelector('form')).toBeNull()
@@ -201,4 +206,112 @@ it('requires manual currency review before bulk approval can clear unresolved cu
     expect(state.positions[1].reportedCurrency).toBe('GBP')
     expect(container.querySelector('#instrument-review')?.classList.contains('review-required')).toBe(true)
   } finally { await act(async () => root.unmount()) }
+})
+
+const nseCandidate = { exchange: 'NSE' as const, isin: 'INE062A01020', type: 'stock' as const, providerSymbol: 'SBIN.NS' }
+const bseHolding: Position = { ...initialPosition, exchange: 'BSE', reportedExchange: undefined, ticker: '500112', providerSymbol: 'SBIN.BO', isin: nseCandidate.isin }
+
+async function mountNseReview() {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  await act(async () => root.render(<InstrumentReview />))
+  return {
+    container, root,
+    button: (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent === label)!,
+    close: async () => { await act(async () => root.unmount()); container.remove() },
+  }
+}
+
+it('requires acknowledgment before switching BSE pricing and leaves unmatched holdings for review', async () => {
+  state.positions = [bseHolding, { ...bseHolding, id: 'missing', name: 'Unidentified holding', isin: undefined }]
+  state.lookupNse.mockResolvedValue([nseCandidate])
+  state.confirmNsePricing.mockResolvedValue(undefined)
+  const view = await mountNseReview()
+  try {
+    await act(async () => view.button('Auto-approve NSE matches').click())
+    expect(state.lookupNse.mock.calls[0][0]).toEqual([bseHolding])
+    expect(state.confirmNsePricing).not.toHaveBeenCalled()
+    expect(view.container.querySelector('dialog')!.open).toBe(true)
+    expect(view.container.querySelector('dialog')!.textContent).toContain('SBIN.NS')
+    expect(view.container.querySelector('dialog')!.textContent).toContain('1 unmatched holding needs individual review')
+    await act(async () => view.button('Use NSE prices & approve').click())
+    expect(state.confirmNsePricing).toHaveBeenCalledExactlyOnceWith('holding', nseCandidate)
+    expect(state.confirmInstrument).not.toHaveBeenCalled()
+    expect(view.container.querySelector('dialog')!.open).toBe(false)
+    expect(view.container.querySelector('[role="status"]')!.textContent).toContain('1 NSE pricing match approved. 1 needs review.')
+    expect(bseHolding.exchange).toBe('BSE')
+  } finally { await view.close() }
+})
+
+it('approves an exact NSE match directly and reports a failed save without losing the holding', async () => {
+  state.positions = [{ ...bseHolding, ticker: 'SBIN', exchange: 'NSE', providerSymbol: 'SBIN.NS' }]
+  state.lookupNse.mockResolvedValue([nseCandidate])
+  state.confirmNsePricing.mockRejectedValueOnce(new Error('Storage is full.')).mockResolvedValueOnce(undefined)
+  const view = await mountNseReview()
+  try {
+    await act(async () => view.button('Auto-approve NSE matches').click())
+    expect(view.container.querySelector('dialog')!.open).toBe(false)
+    expect(state.confirmNsePricing).toHaveBeenCalledOnce()
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Storage is full')
+    await act(async () => view.button('Auto-approve NSE matches').click())
+    expect(state.confirmNsePricing).toHaveBeenCalledTimes(2)
+    expect(view.container.querySelector('[role="status"]')!.textContent).toContain('1 NSE pricing match approved')
+  } finally { await view.close() }
+})
+
+it('keeps ambiguous or wrong-ISIN candidates out of auto-approval', async () => {
+  state.positions = [bseHolding]
+  state.lookupNse.mockResolvedValue([nseCandidate, { ...nseCandidate, providerSymbol: 'OTHER.NS' }, { ...nseCandidate, isin: 'INE009A01021' }])
+  const view = await mountNseReview()
+  try {
+    await act(async () => view.button('Auto-approve NSE matches').click())
+    expect(state.confirmNsePricing).not.toHaveBeenCalled()
+    expect(view.container.querySelector('dialog')!.open).toBe(false)
+    expect(view.container.querySelector('[role="status"]')!.textContent).toContain('0 NSE pricing matches approved. 1 needs review.')
+  } finally { await view.close() }
+})
+
+it('cancels lookup when external data is disabled and ignores a late response', async () => {
+  state.positions = [bseHolding]
+  let resolve!: (value: unknown) => void
+  state.lookupNse.mockImplementation(() => new Promise((done) => { resolve = done }))
+  const view = await mountNseReview()
+  try {
+    await act(async () => view.button('Auto-approve NSE matches').click())
+    const signal = state.lookupNse.mock.calls[0][1] as AbortSignal
+    state.settings.allowExternalData = false
+    await act(async () => view.root.render(<InstrumentReview />))
+    expect(signal.aborted).toBe(true)
+    await act(async () => resolve([nseCandidate]))
+    expect(state.confirmNsePricing).not.toHaveBeenCalled()
+    expect(view.container.querySelector('dialog')!.open).toBe(false)
+    expect(view.button('Auto-approve NSE matches').disabled).toBe(true)
+  } finally { await view.close() }
+})
+
+it('opens individual review without saving when the NSE acknowledgment is declined', async () => {
+  state.positions = [bseHolding]
+  state.lookupNse.mockResolvedValue([nseCandidate])
+  const view = await mountNseReview()
+  try {
+    await act(async () => view.button('Auto-approve NSE matches').click())
+    await act(async () => view.button('Review individually').click())
+    expect(view.container.querySelector('dialog')!.open).toBe(false)
+    expect(state.confirmNsePricing).not.toHaveBeenCalled()
+    expect(view.container.querySelector('form')?.textContent).toContain('State Bank')
+    const exchangeLabel = [...view.container.querySelectorAll('form label')].find((label) => label.firstChild?.textContent === 'Exchange')!
+    expect(exchangeLabel.querySelector('select')!.value).toBe('BSE')
+  } finally { await view.close() }
+})
+
+it('labels saved NSE pricing without rewriting the displayed imported exchange', async () => {
+  state.positions = [{ ...bseHolding, pricingListing: { ...nseCandidate, source: 'nse-master', verifiedAt: Date.now() } }]
+  const view = await mountNseReview()
+  try {
+    expect(view.container.textContent).toContain('Priced via NSE')
+    expect(view.container.textContent).toContain('Imported exchange: BSE')
+    expect(view.container.querySelector('.listing-facts')!.textContent).toContain('SBIN.NS')
+    expect([...view.container.querySelectorAll('button')].some((button) => button.textContent === 'Auto-approve NSE matches')).toBe(false)
+  } finally { await view.close() }
 })

@@ -108,6 +108,17 @@ describe('Holding Price History', () => {
     expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
   })
 
+  it('keeps a loaded chart visible while revalidating after returning to the page', async () => {
+    history.mockResolvedValueOnce([{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 120 }])
+    await renderPanel(defaultPosition)
+    await act(async () => { root.render(<HistoryPanel scope="all" position={defaultPosition} active={false} />) })
+    history.mockImplementationOnce(() => new Promise(() => {}))
+    await act(async () => { root.render(<HistoryPanel scope="all" position={defaultPosition} active />) })
+    expect(history).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
+    expect(container.querySelector('.history-last')?.textContent).toContain('120.00')
+  })
+
   it('cancels changed provider, range and consent requests for the selected holding', async () => {
     history.mockImplementation(() => new Promise(() => {}))
     await renderPanel(defaultPosition)

@@ -236,12 +236,13 @@ describe('overview valuation and visible work', () => {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       const card = container.querySelector('.overview-meta')!
       expect(card.textContent).not.toContain('Net position')
-      expect(card.querySelector('.market-status-copy')?.textContent).toBe('Market Closed - showing prices as of 01 Oct, 15:30:02 IST')
-      expect(card.querySelector('.market-status-copy')?.getAttribute('title')).toBe('best-effort quotes')
+      expect(card.querySelector('.market-status-copy')?.textContent).toBe('Market closed')
+      expect(card.querySelector('.market-refresh-details')).toBeNull()
+      expect(container.querySelector('.quote-freshness')).toBeNull()
       expect(card.querySelector('.market-status-copy')?.children).toHaveLength(0)
       expect([...card.querySelectorAll('.market-session time')].map((node) => node.getAttribute('datetime'))).toEqual(['2026-10-01T10:00:00.000Z', '2026-10-05T03:45:00.000Z'])
-      expect(card.querySelector('details')?.open).toBe(false)
-      expect(card.querySelector('summary')?.textContent).toBe('Market calendarSessions & holidays')
+      expect(card.querySelector<HTMLDetailsElement>('.market-calendar-details')?.open).toBe(false)
+      expect(card.querySelector('.market-calendar-details summary')?.textContent).toBe('Market calendarSessions & holidays')
       expect([...card.querySelectorAll('.market-session time')].every((node) => node.closest('details'))).toBe(true)
       expect(card.querySelector('[aria-label="Next market holiday"]')?.textContent).toBe('Upcoming Holiday - Tue 20 Oct, Dussehra in 16 days')
       expect(card.querySelector('.market-holiday time')?.getAttribute('datetime')).toBe('2026-10-20')
@@ -276,14 +277,15 @@ describe('overview valuation and visible work', () => {
       expect(container.textContent).toContain('1 holding unpriced')
       expect(container.textContent).toContain('Priced holdings P&L')
       expect(container.querySelector('.scoreboard')?.textContent).toContain('+20.00% on priced cost')
-      expect([...container.querySelectorAll('.performer-half .score-value')].map((node) => node.textContent)).toEqual(['HOLD0', 'HOLD4998'])
+      expect(container.querySelector('.score--session .score-value')?.textContent).toBe('Unavailable')
+      expect(container.querySelector('.score--session')?.textContent).toContain('Awaiting updates')
       expect(snapshot.pnl).toBe(99_980)
       expect(container.querySelectorAll('.ticker-item')).toHaveLength(48)
       expect(state.format.mock.calls.length).toBeLessThan(1500)
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('keeps summary totals, daily move and performer returns accurate when values are revealed or hidden', async () => {
+  it('moves the session summary into the scoreboard, keeps totals accurate and masks private values', async () => {
     const positions: Position[] = [
       { id: 'winner', ticker: 'WIN', name: 'Winner', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
       { id: 'loser', ticker: 'LOSS', name: 'Loser', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 90 },
@@ -297,15 +299,23 @@ describe('overview valuation and visible work', () => {
     state.store = { positions, rawPositions: positions, folios, snapshot, liveQuotes: quotes, settings: { ...loadSettings(), currency: 'INR', hideValues: false, allowExternalData: true }, setSettings: vi.fn(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
     const container = document.createElement('div')
     const root = createRoot(container)
+    const onGoTo = vi.fn()
     try {
-      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      await act(async () => root.render(<Overview onGoTo={onGoTo} onRequestImport={vi.fn()} />))
       const summary = container.querySelector('[aria-label="Portfolio summary"]')!
-      expect([...summary.querySelectorAll('.score > .score-value')].map((node) => node.textContent)).toEqual(['₹210.00', '₹200.00', '+₹10.00'])
-      expect(summary.querySelector('.current-value-move')?.getAttribute('aria-label')).toBe('Latest session · 01 Oct 2026 portfolio move: −₹7.00')
-      expect(container.querySelector('.daily-brief-copy strong')?.textContent).toBe('Your portfolio lost ₹7.00 in this session.')
-      expect(container.querySelector('.daily-brief-copy .hint')?.textContent).toBe('Open Insights to understand more.')
-      expect(container.querySelector('.daily-brief')?.textContent).not.toContain('Today')
-      expect([...summary.querySelectorAll('.performer-half')].map((node) => node.textContent)).toEqual(['Best performerWIN+20.00%', 'Worst performerLOSS-10.00%'])
+      const session = summary.querySelector('[aria-label="Session summary"]')!
+      expect([...summary.querySelectorAll('.score > .score-value')].map((node) => node.textContent)).toEqual(['₹210.00', '−₹7.00', '₹200.00', '+₹10.00'])
+      expect(summary.children[1]).toBe(session)
+      expect(session.querySelector('.score-value')?.getAttribute('aria-label')).toBe('Latest session · 01 Oct 2026 portfolio move: −₹7.00')
+      expect(session.querySelector('.score-value')?.classList.contains('down')).toBe(true)
+      expect(session.querySelector('time')?.dateTime).toBe('2026-10-01')
+      expect(session.textContent).toBe('Session move−₹7.0001 Oct 2026')
+      expect(session.querySelector('.score-label button')?.getAttribute('aria-label')).toBe('Open session insights')
+      expect(session.lastElementChild?.classList.contains('score-session-basis')).toBe(true)
+      expect(container.querySelector('.daily-brief, .performer-half, .score-move')).toBeNull()
+      expect(summary.textContent).not.toMatch(/Best performer|Worst performer|Today/)
+      await act(async () => session.querySelector<HTMLButtonElement>('button')!.click())
+      expect(onGoTo).toHaveBeenCalledExactlyOnceWith('insights')
       expect(summary.textContent).not.toContain('Total market exposure')
       expect(summary.textContent).not.toContain('Cost basis deployed')
       expect(summary.textContent).not.toContain('on cost')
@@ -313,34 +323,34 @@ describe('overview valuation and visible work', () => {
       const gainQuotes = { ...quotes, [quoteKey(positions[0])]: { ...quotes[quoteKey(positions[0])], change: 7 } }
       state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: gainQuotes }) }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(container.querySelector('.daily-brief-copy strong')?.textContent).toBe('Your portfolio gained ₹8.00 in this session.')
-      expect(container.querySelector('.daily-brief-stat strong')?.textContent).toBe('+₹8.00')
+      expect(session.querySelector('.score-value')?.textContent).toBe('+₹8.00')
+      expect(session.querySelector('.score-value')?.classList.contains('up')).toBe(true)
 
       const flatQuotes = Object.fromEntries(Object.entries(quotes).map(([key, quote]) => [key, { ...quote, change: 0 }]))
       state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: flatQuotes }) }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(container.querySelector('.daily-brief-copy strong')?.textContent).toBe('Your portfolio is unchanged in this session.')
-      expect(container.querySelector('.daily-brief-stat strong')?.textContent).toBe('+₹0.00')
+      expect(session.querySelector('.score-value')?.textContent).toBe('+₹0.00')
+      expect(session.querySelector('.score-value')?.classList.contains('up')).toBe(false)
+      expect(session.querySelector('.score-value')?.classList.contains('down')).toBe(false)
 
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       expect([...summary.querySelectorAll('.score-value')].every((node) => node.textContent === '••••••')).toBe(true)
-      expect(summary.querySelector('.current-value-move')?.getAttribute('aria-label')).toBe('Portfolio session move hidden')
-      expect(summary.querySelector('.current-value-move-arrow')?.textContent).toBe('')
-      expect([...summary.querySelectorAll('.performer-half .score-value')].every((node) => node.getAttribute('title') === '••••••')).toBe(true)
+      expect(session.querySelector('.score-value')?.getAttribute('aria-label')).toBe('Session movement hidden')
+      expect(session.querySelector('.score-session-basis')?.getAttribute('title')).toBeNull()
       expect(summary.textContent).not.toMatch(/₹|WIN|LOSS|20\.00|10\.00/)
       const labels = [...container.querySelectorAll('[title], [aria-label]')].map(element => `${element.getAttribute('title') || ''} ${element.getAttribute('aria-label') || ''}`).join(' ')
       expect(labels).not.toMatch(/WIN|LOSS/)
-      expect(container.querySelector('.daily-brief-copy strong')?.textContent).toBe('Session movement hidden.')
-      expect(container.querySelector('.daily-brief')?.textContent).not.toMatch(/gained|lost|₹/)
+      expect(session.textContent).not.toMatch(/gained|lost|₹/)
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('does not describe a partial session change as a portfolio gain', async () => {
-    const positions: Position[] = ['A', 'B'].map((ticker) => ({
+  it('labels incomplete session coverage without presenting it as a portfolio-wide move', async () => {
+    const positions: Position[] = ['A', 'B', 'FUND'].map((ticker) => ({
       id: ticker, ticker, name: ticker, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110,
     }))
-    positions[1] = { ...positions[1], type: 'mutual-fund', mfScheme: { code: 123, name: 'B', source: 'confirmed' } }
+    positions[1] = { ...positions[1], type: 'etf' }
+    positions[2] = { ...positions[2], type: 'mutual-fund', mfScheme: { code: 123, name: 'FUND', source: 'confirmed' } }
     const folios = [{ id: 'f', name: 'Portfolio', importedAt: 1, positions }]
     const quotes = { [quoteKey(positions[0])]: { price: 110, change: 10, at: Date.parse('2026-10-01T10:00:00Z'), source: 'yahoo' as const } }
     const snapshot = investmentWorkspace.readSnapshot({ folios, quotes })
@@ -349,17 +359,26 @@ describe('overview valuation and visible work', () => {
     const root = createRoot(container)
     try {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(container.querySelector('.current-value-move')).toBeNull()
-      const brief = container.querySelector('.daily-brief')!
-      expect(brief.textContent).toContain('Reporting holdings gained ₹10.00')
-      expect(brief.querySelector('.daily-brief-copy .hint')?.textContent).toContain('1 of 2 holdings included')
-      expect(brief.textContent).toContain('1 fund awaiting session updates')
+      const brief = container.querySelector('.score--session')!
+      expect(brief.querySelector('.score-label')?.textContent).toBe('Reported move')
+      expect(brief.textContent).toContain('1 of 2 stocks + ETFs')
+      expect(brief.querySelector('.score-session-basis')?.getAttribute('title')).toContain('Remaining updates pending')
       expect(brief.textContent).toContain('01 Oct 2026')
       expect(brief.textContent).not.toMatch(/tailwind|Today|Your portfolio gained/)
-      expect(brief.querySelector('.daily-brief-stat strong')?.textContent).toBe('+₹10.00')
+      expect(brief.querySelector('.score-value')?.textContent).toBe('+₹10.00')
+      expect(brief.querySelector('.score-value')?.getAttribute('aria-label')).toContain('reported holdings move')
+      const equityComplete = { ...quotes, [quoteKey(positions[1])]: { ...quotes[quoteKey(positions[0])], change: -1 } }
+      state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: equityComplete }) }
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(brief.querySelector('.score-label')?.textContent).toBe('Session move')
+      expect(brief.textContent).toContain('2 of 2 stocks + ETFs')
+      expect(brief.querySelector('.score-value')?.textContent).toBe('+₹9.00')
+      expect(brief.querySelector('.score-session-basis')?.getAttribute('title')).not.toContain('pending')
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(brief.querySelector('.daily-brief-stat strong')?.textContent).toBe('••••••')
+      expect(brief.querySelector('.score-value')?.textContent).toBe('••••••')
+      expect(brief.textContent).not.toContain('1 of 2 stocks + ETFs')
+      expect(brief.textContent).not.toContain('2 of 2 stocks + ETFs')
       expect(brief.textContent).not.toMatch(/gained|lost|₹/)
     } finally { await act(async () => root.unmount()) }
   })

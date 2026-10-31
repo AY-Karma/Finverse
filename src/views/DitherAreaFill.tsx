@@ -17,10 +17,11 @@ interface DitherAreaFillProps {
 export const DitherAreaFill = memo(function DitherAreaFill({ points, x, y, width, height, color }: DitherAreaFillProps) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const bitmap = useRef<ImageData | null>(null)
+  const fill = useRef<SVGImageElement>(null)
 
   useEffect(() => {
-    const element = canvas.current
-    if (!element || width <= 0 || height <= 0) return
+    if (width <= 0 || height <= 0) return
+    const element = canvas.current ??= document.createElement('canvas')
     const context = element.getContext('2d')
     if (!context) return
     const { cols, rows } = backingSize(width, height)
@@ -54,11 +55,11 @@ export const DitherAreaFill = memo(function DitherAreaFill({ points, x, y, width
       }
     }
     context.putImageData(image, 0, 0)
+    fill.current?.setAttribute('href', element.toDataURL())
   }, [points, x, y, width, height, color])
 
-  return <foreignObject x={x} y={y} width={width} height={height} pointerEvents="none" aria-hidden="true">
-    <canvas ref={canvas} className="dither-area-fill" />
-  </foreignObject>
+  return <image ref={fill} className="dither-area-fill" x={x} y={y} width={width} height={height}
+    preserveAspectRatio="none" pointerEvents="none" aria-hidden="true" />
 }, (previous, next) => previous.x === next.x && previous.y === next.y
   && previous.width === next.width && previous.height === next.height && previous.color === next.color
   && previous.points.length === next.points.length && previous.points.every((point, index) => {

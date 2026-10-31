@@ -5,6 +5,8 @@ import { parseMonitorReadingState } from './monitorReading'
 import { combinePositions } from './valuation'
 import { migrateFolioIdentities } from './instruments'
 import { hasCompatibleFundScheme } from './fundSchemes'
+import { isNsePricingListing } from './nsePricingProtocol'
+import { hasVerifiedNsePricing } from './instruments'
 import { remapMonitorReferences } from './workspaceReferences'
 import { writeWorkspaceRecords, type WorkspaceRecords } from './workspaceStorage'
 
@@ -101,6 +103,11 @@ function parsePosition(value: unknown): Position {
     if (!code) return fail('fund scheme code')
     Object.assign(position, { mfScheme: { code, name: text(mapping.name, 'fund scheme name'), source: choice(mapping.source, ['exact', 'confirmed'], 'fund mapping source') } })
     if (!position.reportedCurrency && !hasCompatibleFundScheme(position)) return fail('fund mapping that conflicts with its plan, option or native currency')
+  }
+  if (row.pricingListing !== undefined) {
+    if (!isNsePricingListing(row.pricingListing)) return fail('NSE pricing preference')
+    position.pricingListing = { ...row.pricingListing }
+    if (!hasVerifiedNsePricing(position)) return fail('NSE pricing preference that conflicts with its security or native currency')
   }
   return position
 }

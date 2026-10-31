@@ -150,7 +150,8 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
 
   useEffect(() => {
     const requestedHolding = holdingRef.current
-    if (!active || !settings.allowExternalData || !requestedHolding) {
+    if (!active) return
+    if (!settings.allowExternalData || !requestedHolding) {
       setResult(null)
       return
     }
@@ -160,7 +161,7 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
     const label = instrumentLabel(requestedHolding)
     const isMf = requestedHolding.type === 'mutual-fund'
     const usedLabel = isMf ? 'mfapi.in' : resolveYahooSymbol(requestedHolding) ?? label
-    setResult({ key, points: [], usedLabel, loading: true, error: null })
+    setResult((previous) => ({ key, points: previous?.key === key ? previous.points : [], usedLabel, loading: true, error: null }))
     const to = new Date()
     const from = new Date(to.getTime() - rangeDays * 24 * 60 * 60 * 1000)
     const run = async () => {

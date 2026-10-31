@@ -55,9 +55,10 @@ it('requires explicit confirmation, blocks Growth for an IDCW holding and retain
     await act(async () => root.render(<FundSchemeReview />))
     await act(async () => button('Find scheme').click())
     expect(state.confirmFundScheme).not.toHaveBeenCalled()
-    expect(container.querySelector<HTMLOptionElement>('option[value="1"]')!.disabled).toBe(true)
-    const select = container.querySelector('select')!
-    await act(async () => { select.value = '2'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!.click())
+    const options = [...container.querySelectorAll<HTMLElement>('[role="option"]')]
+    expect(options.find((option) => option.textContent?.includes(growth.schemeName))!.getAttribute('aria-disabled')).toBe('true')
+    await act(async () => options.find((option) => option.textContent?.includes(idcw.schemeName))!.click())
     await act(async () => button('Confirm scheme').click())
     expect(container.textContent).toContain('Scheme not saved')
     expect(container.querySelector('[aria-label="Review fund scheme"]')).not.toBeNull()

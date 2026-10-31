@@ -9,24 +9,27 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
 export function portfolioDataLabels(snapshot: InvestmentSnapshot) {
   const total = snapshot.positions.length
   const supportedPositions = snapshot.positions.filter(hasSupportedValuationCurrency)
-  const sessionTotal = supportedPositions.length
-  const sessionHoldings = sessionTotal < total ? 'INR holdings' : 'holdings'
+  const sessionTotal = snapshot.sessionHoldingCount
+  const publishedFunds = snapshot.contributions.filter((holding) => holding.type === 'mutual-fund' && holding.dailyChange != null).length
+  const hasFunds = supportedPositions.some((holding) => holding.type === 'mutual-fund')
+  const hasEquities = supportedPositions.some((holding) => holding.type === 'stock' || holding.type === 'etf')
+  const sessionHoldings = hasFunds ? publishedFunds ? 'session holdings' : 'stocks + ETFs'
+    : sessionTotal < total ? 'INR holdings' : 'holdings'
+  const sessionScope = publishedFunds ? hasEquities ? 'Stocks + ETFs + published NAVs' : 'Published NAVs' : 'Stocks + ETFs'
   const date = snapshot.dailyChangeDate
     ? DATE_FORMATTER.format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`)) : null
   const sessionValue = snapshot.dailyChange ?? snapshot.reportedDailyChange
   const isPartialSession = snapshot.dailyChange == null && sessionValue != null
   const sessionLabel = `${date ? `Latest session · ${date}` : 'Session move'}${isPartialSession ? ' · Partial' : ''}`
-  const pendingFunds = supportedPositions.filter((holding) => holding.type === 'mutual-fund').length
-    - snapshot.contributions.filter((holding) => holding.type === 'mutual-fund' && holding.dailyChange != null).length
   const coverageLabel = snapshot.dailyChangeCount
     ? isPartialSession
-      ? `${snapshot.dailyChangeCount} of ${sessionTotal} ${sessionHoldings} included${pendingFunds ? ` · ${pendingFunds} fund${pendingFunds === 1 ? '' : 's'} awaiting session updates` : ' · Remaining updates pending'}`
+      ? `${snapshot.dailyChangeCount} of ${sessionTotal} ${sessionHoldings} included · Remaining updates pending`
       : `${snapshot.dailyChangeCount} of ${sessionTotal} ${sessionHoldings} report changes`
-    : 'No change amounts reported'
+    : !hasEquities && hasFunds ? 'Awaiting published session NAVs' : 'No change amounts reported'
 
   if (snapshot.quotedCount === 0) {
     return {
-      sessionLabel, coverageLabel, sessionValue, isPartialSession,
+      sessionLabel, coverageLabel, sessionValue, isPartialSession, sessionTotal, sessionHoldings, sessionScope,
       healthLabel: snapshot.pricedCount ? 'Imported only' : 'No prices',
       healthDetail: `${snapshot.pricedCount} of ${total} holdings have imported prices · Freshness unknown`,
     }
@@ -36,7 +39,7 @@ export function portfolioDataLabels(snapshot: InvestmentSnapshot) {
   const oldest = DATE_FORMATTER.format(new Date(Math.min(...times)))
   const latest = DATE_FORMATTER.format(new Date(Math.max(...times)))
   return {
-    sessionLabel, coverageLabel, sessionValue, isPartialSession,
+    sessionLabel, coverageLabel, sessionValue, isPartialSession, sessionTotal, sessionHoldings, sessionScope,
     healthLabel: snapshot.quotedCount < total ? 'Partial quotes' : snapshot.staleQuotes > 0 ? 'Older quotes' : 'Quoted',
     healthDetail: `${snapshot.quotedCount} of ${total} holdings quoted · As of ${oldest === latest ? latest : `${oldest} to ${latest}`}${snapshot.staleQuotes ? ` · ${snapshot.staleQuotes} older than 24h` : ''}`,
   }

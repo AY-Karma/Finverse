@@ -1,6 +1,7 @@
 import type { AssetType, Exchange, Folio, Position } from './types'
 import { hasCompatibleFundScheme } from './fundSchemes'
 import { isMarketSymbol } from './marketDataProtocol'
+import { isNsePricingListing } from './nsePricingProtocol'
 
 const NSE_SERIES_SUFFIX = /-(EQ|BE|SM|ST|T|BL|Z|E|B|N|W)$/i
 const EXCHANGES: Exchange[] = ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER']
@@ -68,6 +69,7 @@ function normalizeListing(position: Position): Position {
 
 function listingKey(position: Position): string {
   if (position.identityIssue) return `EQ:v2:unresolved:${position.id}`
+  if (hasVerifiedNsePricing(position)) position = { ...position, ...position.pricingListing }
   // ISIN identifies the security; venue/provider/currency identify the listing used for pricing.
   return ['EQ:v2', position.type, position.exchange || '', position.currency || '', position.providerSymbol || '', position.isin || '']
     .map((part, index) => index === 0 ? part : encodeURIComponent(part)).join(':')
@@ -85,7 +87,18 @@ export function listingIdentity(position: Position): string {
 export function instrumentKey(position: Position): string { return listingIdentity(position) }
 
 export function needsInstrumentReview(position: Position): boolean {
+  if (hasVerifiedNsePricing(position)) return false
   return !!position.identityIssue || (position.type !== 'mutual-fund' && position.exchangeSource !== 'explicit')
+}
+
+export function hasVerifiedNsePricing(position: Position): boolean {
+  return isNsePricingListing(position.pricingListing) && position.type === position.pricingListing.type
+    && position.isin?.trim().toUpperCase() === position.pricingListing.isin && hasInrDenomination(position)
+    && (position.exchange === 'NSE' || position.exchange === 'BSE')
+}
+
+export function pricingProviderSymbol(position: Position): string | undefined {
+  return hasVerifiedNsePricing(position) ? position.pricingListing!.providerSymbol : position.providerSymbol
 }
 
 export function hasInrDenomination(position: Pick<Position, 'currency' | 'reportedCurrency'>): boolean {
@@ -109,10 +122,13 @@ export function normalizePosition(position: Position): Position {
   position = { ...position, currency: reportedCurrency ? undefined : 'INR', reportedCurrency }
   if (position.type !== 'mutual-fund') {
     const normalized = normalizeListing(position)
+    if (hasVerifiedNsePricing(normalized)) normalized.identityIssue = undefined
+    else normalized.pricingListing = undefined
     return { ...normalized, instrumentKey: listingKey(normalized) }
   }
   return {
     ...position, ticker: clean(position.ticker), instrumentKey: listingIdentity(position),
+    pricingListing: undefined,
     mfScheme: !hasForeignExchange(position) && hasCompatibleFundScheme(position) ? position.mfScheme : undefined,
     identityIssue: reportedCurrency ? `The reported currency ${reportedCurrency} is unsupported. Imported amounts are retained for review.`
       : hasForeignExchange(position) ? 'Only NSE and BSE listings are supported.' : position.identityIssue,

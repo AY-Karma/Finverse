@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { Activity, act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { investmentWorkspace } from '../investmentWorkspace'
@@ -47,6 +47,25 @@ afterEach(async () => {
   if (root) await act(async () => root!.unmount())
   root = undefined
   vi.clearAllMocks()
+  vi.restoreAllMocks()
+})
+
+it('reuses loaded history when returning to the page and refreshes it after five minutes', async () => {
+  const now = vi.spyOn(Date, 'now')
+  const startedAt = Date.now()
+  now.mockReturnValue(startedAt)
+  await renderPerformance()
+  const show = (visible: boolean) => act(async () => root!.render(<Activity mode={visible ? 'visible' : 'hidden'}><PortfolioPerformance /></Activity>))
+  await show(true)
+  const initialCalls = state.build.mock.calls.length
+  await show(false)
+  await show(true)
+  expect(state.build).toHaveBeenCalledTimes(initialCalls)
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  await show(false)
+  now.mockReturnValue(startedAt + 5 * 60_000 + 1)
+  await show(true)
+  expect(state.build).toHaveBeenCalledTimes(initialCalls + 1)
 })
 
 it('keeps the chart and observation readout current without refetching history', async () => {
@@ -67,6 +86,78 @@ it('keeps the chart and observation readout current without refetching history',
   await rerender()
   expect(latestValue()).toBe('₹180.00')
   expect(state.build).toHaveBeenCalledTimes(1)
+})
+
+it('restores each loaded holding scope immediately without rebuilding its history', async () => {
+  const fund: Position = { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 50, invested: 50, lastPrice: 60 }
+  const positions = [...defaultPositions, fund]
+  await renderPerformance(points([200, 220]), { positions })
+  state.build.mockImplementation(async (selected: Position[]) => ({
+    points: points(selected[0].type === 'mutual-fund' ? [50, 60] : [150, 160]),
+    coveredPositions: selected, holdingsIncluded: selected.length, holdingsTotal: selected.length,
+  }))
+  await rerender('equity')
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('160')
+  await rerender('mutual')
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('60')
+  expect(state.build).toHaveBeenCalledTimes(3)
+  state.build.mockImplementation(() => new Promise<PortfolioBackcastHistory>(() => {}))
+  for (const [scope, expected] of [['all', '220'], ['equity', '160'], ['mutual', '60']] as const) {
+    await rerender(scope)
+    expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe(expected)
+    expect(container.textContent).not.toContain('Building your historical series')
+  }
+  expect(state.build).toHaveBeenCalledTimes(3)
+})
+
+it('retains a loaded scope when visiting an empty holding type', async () => {
+  await renderPerformance()
+  await rerender('mutual')
+  expect(container.textContent).toContain('No holdings in this view')
+  await rerender('all')
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(state.build).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the matching cached chart visible while refreshing an expired scope', async () => {
+  const startedAt = Date.now()
+  const now = vi.spyOn(Date, 'now').mockReturnValue(startedAt)
+  const fund: Position = { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 50, invested: 50, lastPrice: 60 }
+  await renderPerformance(points(), { positions: [...defaultPositions, fund] })
+  await rerender('mutual')
+  now.mockReturnValue(startedAt + 5 * 60_000 + 1)
+  let resolve!: (history: PortfolioBackcastHistory) => void
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcastHistory>((done) => { resolve = done }))
+  await rerender('all')
+  expect(state.build).toHaveBeenCalledTimes(3)
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(container.textContent).not.toContain('Building your historical series')
+  const positions = state.store.snapshot.positions
+  await act(async () => resolve({ points: points([200, 250]), coveredPositions: positions, holdingsIncluded: 2, holdingsTotal: 2 }))
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('250')
+})
+
+it('rebuilds a cached scope after its holding quantity changes', async () => {
+  await renderPerformance()
+  const positions = state.store.snapshot.positions.map((position) => ({ ...position, quantity: 2 }))
+  state.store.snapshot = { ...state.store.snapshot, positions }
+  state.build.mockResolvedValueOnce({ points: points([400, 440]), coveredPositions: positions, holdingsIncluded: 1, holdingsTotal: 1 })
+  await rerender()
+  expect(state.build).toHaveBeenCalledTimes(2)
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('440')
+})
+
+it('does not retain a cancelled scope result over the next completed request', async () => {
+  let resolve!: (history: PortfolioBackcastHistory) => void
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcastHistory>((done) => { resolve = done }))
+  await renderPerformance()
+  const signal = state.build.mock.calls[0][3] as AbortSignal
+  await rerender('mutual')
+  expect(signal.aborted).toBe(true)
+  await act(async () => resolve({ points: points([800, 900]), coveredPositions: defaultPositions, holdingsIncluded: 1, holdingsTotal: 1 }))
+  await rerender('all')
+  expect(state.build).toHaveBeenCalledTimes(2)
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
 })
 
 it('lets saved balances remain available offline with the cash-flow explanation', async () => {

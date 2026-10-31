@@ -1,5 +1,7 @@
 import type { Folio, LiveQuote, PortfolioSnapshot, Position } from './types'
 import { assetTypeLabel, instrumentLabel, normalizePosition } from './instruments'
+import { hasCompatibleFundScheme } from './fundSchemes'
+import { isRegularMarketOpen } from './marketCalendar'
 import { combinePositions, computePortfolioStats, effectivePrice, hasSupportedValuationCurrency, positionPnl, positionsWithStatementDates, positionValue, quoteKey } from './valuation'
 
 interface Contribution {
@@ -40,11 +42,12 @@ export interface InvestmentSnapshot {
   pnlPct: number
   dailyChange: number | null
   dailyChangePct: number | null
-  /** Subtotal from supported INR holdings reporting a change on the latest session date. */
+  /** Subtotal from stocks, ETFs and published same-session NAVs reporting a change. */
   reportedDailyChange: number | null
-  /** Provider date in IST. Aggregate movement requires every supported holding on this date. */
+  /** Provider date in IST. Older NAVs never mix into a newer session. */
   dailyChangeDate: string | null
   dailyChangeCount: number
+  sessionHoldingCount: number
   contributions: Contribution[]
   sectors: SectorAllocation[]
   topFiveWeight: number
@@ -114,12 +117,12 @@ function quoteIsStale(quote: LiveQuote): boolean {
   return Date.now() - quote.at > 24 * 60 * 60 * 1000
 }
 
-function buildContributions(positions: Position[], quotes: Record<string, LiveQuote>, currentValue: number, sessionDate: string | null): Contribution[] {
+function buildContributions(positions: Position[], quotes: Record<string, LiveQuote>, currentValue: number, sessionDate: string | null, sessionKeys: Set<string>): Contribution[] {
   return positions
     .map((position) => {
       const value = positionValue(position, quotes)
       const quote = hasSupportedValuationCurrency(position) ? quotes[quoteKey(position)] : undefined
-      const inSession = quote != null && quoteDate(quote.at) === sessionDate
+      const inSession = sessionKeys.has(quoteKey(position)) && quote != null && quoteDate(quote.at) === sessionDate
       const dailyChange = inSession ? quoteChange(position, quotes) : null
       return {
         symbol: instrumentLabel(position),
@@ -184,17 +187,28 @@ export const investmentWorkspace: InvestmentWorkspace = {
     }))
     const quoteValues = positions.flatMap((position) => quotes[quoteKey(position)] ?? [])
     const supportedPositions = positions.filter(hasSupportedValuationCurrency)
-    const supportedQuotes = supportedPositions.flatMap((position) => quotes[quoteKey(position)] ?? [])
-    const changeTimes = supportedQuotes.filter((quote) => Number.isFinite(quote.change) || Number.isFinite(quote.changePct)).map((quote) => quote.at)
-    const dailyChangeDate = changeTimes.length ? quoteDate(Math.max(...changeTimes)) : null
+    const now = new Date()
+    const marketOpen = isRegularMarketOpen(now)
+    const today = quoteDate(now.getTime())
+    const equities = supportedPositions.filter((position) => position.type === 'stock' || position.type === 'etf')
+    const publishedFunds = supportedPositions.filter((position) => {
+      const quote = quotes[quoteKey(position)]
+      return hasCompatibleFundScheme(position) && quote?.source === 'nav' && Number.isFinite(quote.change)
+        && (!marketOpen || quoteDate(quote.at) === today)
+    })
+    const sessionTimes = [...equities, ...publishedFunds].flatMap((position) => quotes[quoteKey(position)]?.at ?? [])
+    const dailyChangeDate = sessionTimes.length ? quoteDate(Math.max(...sessionTimes)) : null
+    const sessionPositions = [...equities, ...publishedFunds.filter((position) => quoteDate(quotes[quoteKey(position)].at) === dailyChangeDate)]
+    const sessionKeys = new Set(sessionPositions.map(quoteKey))
     const stats = computePortfolioStats(positions, quotes)
-    const contributions = buildContributions(positions, quotes, stats.currentValue, dailyChangeDate)
+    const contributions = buildContributions(positions, quotes, stats.currentValue, dailyChangeDate, sessionKeys)
     const dailyChangeValues = contributions.map((item) => item.dailyChange).filter((value): value is number => value != null)
     const dailyChangeCount = dailyChangeValues.length
     const reportedDailyChange = dailyChangeCount > 0 ? dailyChangeValues.reduce((sum, value) => sum + value, 0) : null
-    const dailyChange = supportedPositions.length > 0 && dailyChangeCount === supportedPositions.length
+    const dailyChange = sessionPositions.length > 0 && dailyChangeCount === sessionPositions.length
       ? reportedDailyChange : null
-    const previousValue = dailyChange == null ? null : stats.currentValue - dailyChange
+    const sessionValue = sessionPositions.reduce((sum, position) => sum + positionValue(position, quotes), 0)
+    const previousValue = dailyChange == null ? null : sessionValue - dailyChange
     return {
       folios: input.folios,
       rawPositions,
@@ -214,6 +228,7 @@ export const investmentWorkspace: InvestmentWorkspace = {
       reportedDailyChange,
       dailyChangeDate,
       dailyChangeCount,
+      sessionHoldingCount: sessionPositions.length,
       contributions,
       sectors: buildSectors(contributions, stats.currentValue),
       topFiveWeight: [...contributions].sort((a, b) => b.value - a.value).slice(0, 5).reduce((sum, item) => sum + item.weight, 0),
@@ -236,12 +251,13 @@ export function importIdentitySummary(positions: Position[]): { normalized: Posi
 }
 
 export function exportPortfolioCsv(positions: Position[]): string {
-  const headers = ['Symbol', 'Name', 'Type', 'Exchange', 'ISIN', 'Quantity', 'Average cost', 'Last price', 'Invested', 'Sector', 'Industry', 'Currency', 'Provider symbol', 'Exchange source', 'Identity issue', 'Reported exchange', 'Reported currency', 'MF scheme code', 'MF scheme name', 'MF mapping source']
+  const headers = ['Symbol', 'Name', 'Type', 'Exchange', 'ISIN', 'Quantity', 'Average cost', 'Last price', 'Invested', 'Sector', 'Industry', 'Currency', 'Provider symbol', 'Exchange source', 'Identity issue', 'Reported exchange', 'Reported currency', 'MF scheme code', 'MF scheme name', 'MF mapping source', 'Pricing exchange', 'Pricing symbol', 'Pricing ISIN', 'Pricing asset type', 'Pricing verification source', 'Pricing verified at']
   const cells = (position: Position): (string | number)[] => [
     instrumentLabel(position), position.name, assetTypeLabel(position.type), position.exchange ?? '', position.isin ?? '',
     position.quantity, position.buyPrice, position.lastPrice ?? '', position.invested, position.sector ?? position.category ?? '',
     position.industry ?? '', position.currency ?? '', position.providerSymbol ?? '', position.exchangeSource ?? '', position.identityIssue ?? '',
     position.reportedExchange ?? '', position.reportedCurrency ?? '', position.mfScheme?.code ?? '', position.mfScheme?.name ?? '', position.mfScheme?.source ?? '',
+    position.pricingListing?.exchange ?? '', position.pricingListing?.providerSymbol ?? '', position.pricingListing?.isin ?? '', position.pricingListing?.type ?? '', position.pricingListing?.source ?? '', position.pricingListing?.verifiedAt ?? '',
   ]
   const escape = (value: string | number) => {
     const text = String(value)

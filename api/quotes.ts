@@ -52,7 +52,7 @@ const RESPONSE_HEADERS = {
 
 const CACHE_HEADERS = {
   ...RESPONSE_HEADERS,
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=240',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=15, must-revalidate',
 }
 
 function json(data: unknown, status: number, cache = false): Response {
@@ -290,7 +290,7 @@ export function createQuoteHandler(
     const parsed = parseSymbols(request)
     if ('error' in parsed) return json({ error: parsed.error }, 400)
 
-    return budget(parsed.symbols.join(','), 60_000, async (signal) => {
+    return budget(parsed.symbols.join(','), 15_000, async (signal) => {
       const fetchedAt = now()
       const yahoo = await fetchYahooQuotes(parsed.symbols, fetcher, signal)
       const quotes = yahoo.error

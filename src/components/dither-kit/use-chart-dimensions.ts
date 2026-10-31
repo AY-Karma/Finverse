@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react"
+import { observeSettledResize } from '../../observeSettledResize'
 
 export type Dimensions = { width: number; height: number }
 
@@ -28,10 +29,7 @@ export function useChartDimensions<T extends HTMLElement>() {
     }
 
     measure()
-    if (typeof ResizeObserver === "undefined") return
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
+    return observeSettledResize([el], measure)
   }, [])
 
   return { ref, size }

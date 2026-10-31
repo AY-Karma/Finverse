@@ -20,7 +20,7 @@ export function SessionContributors({ snapshot, formatValue }: {
     .sort((a, b) => Math.abs(b.dailyContribution) - Math.abs(a.dailyContribution))
   const topFive = ranked.slice(0, 5)
   const complete = snapshot.dailyChange != null && Number.isFinite(snapshot.dailyChange)
-    && reported.length === snapshot.positions.length
+    && reported.length === snapshot.sessionHoldingCount
   const reportedTotal = reported.reduce((sum, item) => sum + item.dailyContribution, 0)
   const total = complete ? snapshot.dailyChange ?? reportedTotal : reportedTotal
   const otherCount = reported.length - topFive.length
@@ -37,8 +37,8 @@ export function SessionContributors({ snapshot, formatValue }: {
 
   return <div className="session-contributors">
     <p className="session-contributors-note">{complete
-      ? 'The card adds the change across all your holdings. The list shows up to five of the largest impacts, including rises and falls.'
-      : 'Only holdings reporting a change for this session are shown. The whole-portfolio move is unavailable until every holding reports.'}</p>
+      ? 'The card adds stock and ETF moves, plus NAV changes published for this session. The list shows up to five of the largest impacts.'
+      : 'Only holdings reporting a change for this session are shown. The session move is incomplete until every eligible holding reports.'}</p>
     {topFive.length > 0 && <ol className="session-contributors-list" aria-label="Largest session contributions by amount">
       {topFive.map((item) => {
         const position = snapshot.positions.find((holding) => holding.type === item.type && instrumentLabel(holding) === item.symbol)
@@ -63,7 +63,7 @@ export function SessionContributors({ snapshot, formatValue }: {
       <strong className={remainder > 0 ? 'up' : remainder < 0 ? 'down' : ''}>{signed(remainder)}</strong>
     </div>}
     <div className="session-contributors-total">
-      <span>{complete ? 'All holdings combined' : 'Reported holdings combined'}</span>
+      <span>{complete ? 'Session holdings combined' : 'Reported holdings combined'}</span>
       <strong className={total > 0 ? 'up' : total < 0 ? 'down' : ''}>{signed(total)}</strong>
     </div>
   </div>

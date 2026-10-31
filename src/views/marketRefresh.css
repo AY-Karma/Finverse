@@ -1,0 +1,6 @@
+.market-refresh-status { display: grid; gap: 5px; min-width: 0; }
+.market-refresh-status .market-status { grid-template-columns: 8px minmax(0, 1fr); }
+.market-refresh-next { color: var(--ink-subtle); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 560px) {
+  .market-refresh-status .market-status { gap: 8px; }
+}

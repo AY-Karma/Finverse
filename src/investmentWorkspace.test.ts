@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Folio, LiveQuote, Position } from './types'
 import { exportPortfolioCsv, importIdentitySummary, investmentWorkspace } from './investmentWorkspace'
 import { sanitizeFolios } from './store'
@@ -123,6 +123,70 @@ describe('quote coverage and session movement', () => {
       quotes: { [quoteKey(apple)]: appleQuote },
     })
     expect(unsupportedOnly).toMatchObject({ dailyChange: null, dailyChangeDate: null, reportedDailyChange: null, dailyChangeCount: 0 })
+  })
+})
+
+describe('session movement publication basis', () => {
+  const stock: Position = { id: 'stock', ticker: 'STOCK', name: 'Stock', type: 'stock', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120 }
+  const etf: Position = { id: 'etf', ticker: 'ETF', name: 'ETF', type: 'etf', quantity: 3, buyPrice: 40, invested: 120, lastPrice: 50 }
+  const fund: Position = { id: 'fund', ticker: 'Fund Direct Growth', name: 'Fund Direct Growth', type: 'mutual-fund', quantity: 20, buyPrice: 100, invested: 2000, lastPrice: 150, mfScheme: { code: 999, name: 'Fund Direct Growth', source: 'confirmed' } }
+  const equityQuotes = {
+    [quoteKey(stock)]: { price: 120, change: 2, at: Date.parse('2026-10-30T12:00:00+05:30'), source: 'yahoo' as const },
+    [quoteKey(etf)]: { price: 50, change: -1, at: Date.parse('2026-10-30T12:00:00+05:30'), source: 'yahoo' as const },
+  }
+  const nav = (date: string): LiveQuote => ({ price: 150, change: 3, at: Date.parse(`${date}T00:00:00+05:30`), fetchedAt: Date.parse('2026-10-30T12:00:00+05:30'), source: 'nav' })
+  const read = (quotes: Record<string, LiveQuote>, positions = [stock, etf, fund]) => investmentWorkspace.readSnapshot({ folios: [{ id: 'mixed', name: 'Mixed', importedAt: 1, positions }], quotes })
+
+  it('keeps unpublished NAVs out of movement, coverage and percentage while retaining fund valuation', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-30T12:00:00+05:30'))
+    try {
+      const snapshot = read({ ...equityQuotes, [quoteKey(fund)]: nav('2026-10-29') })
+      expect(snapshot).toMatchObject({ dailyChange: 17, reportedDailyChange: 17, dailyChangeCount: 2, sessionHoldingCount: 2, dailyChangeDate: '2026-10-30', currentValue: 4350, invested: 3120, pnl: 1230 })
+      expect(snapshot.dailyChangePct).toBeCloseTo(17 / (1350 - 17) * 100)
+      expect(snapshot.contributions.find((item) => item.type === 'mutual-fund')).toMatchObject({ value: 3000, pnl: 1000, dailyChange: null, dailyPriceChange: null })
+      expect(portfolioDataLabels(snapshot)).toMatchObject({ sessionTotal: 2, isPartialSession: false, sessionScope: 'Stocks + ETFs', coverageLabel: '2 of 2 stocks + ETFs report changes' })
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['12:00', '18:00'])('includes NAVs as soon as their session is published, at %s IST', (time) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(`2026-10-30T${time}:00+05:30`))
+    try {
+      const snapshot = read({ ...equityQuotes, [quoteKey(fund)]: nav('2026-10-30') })
+      expect(snapshot).toMatchObject({ dailyChange: 77, dailyChangeCount: 3, sessionHoldingCount: 3, currentValue: 4350 })
+      expect(snapshot.dailyChangePct).toBeCloseTo(77 / (4350 - 77) * 100)
+      expect(portfolioDataLabels(snapshot)).toMatchObject({ sessionTotal: 3, isPartialSession: false, sessionScope: 'Stocks + ETFs + published NAVs' })
+    } finally { vi.useRealTimers() }
+  })
+
+  it('lets a newly published session advance past stale equities without mixing their earlier changes', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-02T18:00:00+05:30'))
+    try {
+      const snapshot = read({ ...equityQuotes, [quoteKey(fund)]: nav('2026-11-02') })
+      expect(snapshot).toMatchObject({ dailyChange: null, reportedDailyChange: 60, dailyChangeCount: 1, sessionHoldingCount: 3, dailyChangeDate: '2026-11-02' })
+      expect(snapshot.contributions.find((item) => item.type === 'stock')?.dailyChange).toBeNull()
+      expect(portfolioDataLabels(snapshot).isPartialSession).toBe(true)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('does not show yesterday\'s NAV as an all-fund live move, but shows the latest published session over a weekend', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-10-30T12:00:00+05:30'))
+      const pending = read({ [quoteKey(fund)]: nav('2026-10-29') }, [fund])
+      expect(pending).toMatchObject({ dailyChange: null, reportedDailyChange: null, dailyChangeDate: null, dailyChangeCount: 0, sessionHoldingCount: 0, currentValue: 3000 })
+      expect(portfolioDataLabels(pending).coverageLabel).toBe('Awaiting published session NAVs')
+      vi.setSystemTime(new Date('2026-10-31T12:00:00+05:30'))
+      expect(read({ [quoteKey(fund)]: nav('2026-10-30') }, [fund])).toMatchObject({ dailyChange: 60, dailyChangeDate: '2026-10-30', dailyChangeCount: 1, sessionHoldingCount: 1 })
+    } finally { vi.useRealTimers() }
+  })
+
+  it('uses newer price-only stock observations instead of falling back to old NAV changes', () => {
+    const quotes = Object.fromEntries(Object.entries(equityQuotes).map(([key, quote]) => [key, { ...quote, change: undefined }]))
+    const snapshot = read({ ...quotes, [quoteKey(fund)]: nav('2026-10-29') })
+    expect(snapshot).toMatchObject({ dailyChangeDate: '2026-10-30', dailyChangeCount: 0, reportedDailyChange: null, sessionHoldingCount: 2 })
   })
 })
 

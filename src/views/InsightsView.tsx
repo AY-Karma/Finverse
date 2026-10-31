@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
@@ -7,7 +7,7 @@ import { useStore } from '../useStore'
 import { usePortfolioBackcast } from '../usePortfolioBackcast'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { assetTypeLabel } from '../instruments'
-import { dateFormatter } from '../formatters'
+import { dateFormatter, numberFormatter } from '../formatters'
 import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { PortfolioWelcome } from './PortfolioWelcome'
@@ -22,6 +22,7 @@ import './insights.css'
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
 const EXPO_PALETTE: DitherColor[] = ['purple', 'green', 'blue', 'orange', 'pink', 'red', 'grey']
+const BENCHMARK_REUSE_MS = 5 * 60_000
 
 type BenchmarkPoint = { ts: number; portfolio: number; benchmark?: number }
 type ExposureHighlight = { label: string; color: string }
@@ -34,6 +35,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [benchmarkLoading, setBenchmarkLoading] = useState(false)
   const [benchmarkError, setBenchmarkError] = useState(false)
   const [benchmarkReload, setBenchmarkReload] = useState(0)
+  const reusableBenchmark = useRef<{ key: string; at: number; points: typeof benchmarkPoints } | null>(null)
   const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
   const [hoveredSector, setHoveredSector] = useState<string | null>(null)
   const [focusedSector, setFocusedSector] = useState<string | null>(null)
@@ -48,7 +50,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     dailyPriceChange: item.dailyPriceChange,
     dailyPriceChangePct: item.dailyPriceChangePct,
   })), contributionDisplay), [contributionDisplay, snapshot.contributions])
-  const exposure = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 16), [snapshot.contributions])
+  const exposure = useMemo(() => snapshot.contributions.filter((item) => item.priced && item.value > 0).sort((a, b) => b.value - a.value), [snapshot.contributions])
+  const unmappedExposure = useMemo(() => snapshot.contributions.filter((item) => !item.priced || item.value <= 0), [snapshot.contributions])
   const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
   const analyticsHistory = backcastHistory
   const trackedAvailable = snapshot.history.length >= 2
@@ -62,7 +65,16 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   useEffect(() => {
     const symbol = selectedBenchmark.symbol
     if (!settings.allowExternalData || snapshot.positions.length === 0 || !symbol) {
+      reusableBenchmark.current = null
       setBenchmarkPoints([])
+      setBenchmarkError(false)
+      setBenchmarkLoading(false)
+      return
+    }
+    const requestKey = JSON.stringify([symbol, backcastDays, backcastKey, benchmarkReload])
+    const cached = reusableBenchmark.current
+    if (cached?.key === requestKey && Date.now() - cached.at < BENCHMARK_REUSE_MS) {
+      setBenchmarkPoints(cached.points)
       setBenchmarkError(false)
       setBenchmarkLoading(false)
       return
@@ -84,12 +96,14 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       }
       if (!alive) return
       if (points.length >= 2) {
+        reusableBenchmark.current = { key: requestKey, at: Date.now(), points }
         setBenchmarkPoints(points)
         setBenchmarkError(false)
         setBenchmarkLoading(false)
       } else if (attempt < 2) {
         retryTimer = setTimeout(() => { void load(attempt + 1) }, attempt === 0 ? 600 : 1500)
       } else {
+        reusableBenchmark.current = null
         setBenchmarkPoints([])
         setBenchmarkError(true)
         setBenchmarkLoading(false)
@@ -166,10 +180,10 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
           <span className="score-label insight-kpi-label"><span>{dataLabels.sessionLabel}</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: !hide && dataLabels.sessionValue != null && dataLabels.sessionValue < 0 ? 'red' : 'blue' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
-          <span className="hint">{snapshot.dailyChangePct != null && <>{mask(formatPercent(snapshot.dailyChangePct))} · </>}{dataLabels.coverageLabel}</span>
+          <span className="hint">{hide ? 'Session values hidden' : <>{snapshot.dailyChangePct != null && <>{formatPercent(snapshot.dailyChangePct)} · </>}{dataLabels.coverageLabel}</>}</span>
         </button>
         {openKpi === 'session' && <div className="insight-kpi-detail enter" id="session-detail" role="region" aria-labelledby="session-kpi">
-          <div><span className="score-label">What contributed to the session move</span><strong>{dataLabels.sessionLabel}</strong><p className="hint">{dataLabels.coverageLabel}. Each amount is the price change multiplied by the quantity you hold.</p></div>
+          <div><span className="score-label">What contributed to the session move</span><strong>{dataLabels.sessionLabel}</strong><p className="hint">{dataLabels.sessionScope} · {dataLabels.coverageLabel}. Each amount is the price change multiplied by the quantity you hold.</p></div>
           {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
         </div>}
         <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">
@@ -274,7 +288,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
         <section className="panel insight-panel insight-panel--allocation">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">02 · Exposure</span></div></div>
-          {hide ? <HiddenValuesState /> : <AllocationMap items={exposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} formatValue={value} highlight={exposureHighlight} />}
+          {hide ? <HiddenValuesState /> : <AllocationMap items={exposure} unmapped={unmappedExposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} formatValue={value} highlight={exposureHighlight} />}
         </section>
 
         <section className="panel insight-panel insight-panel--exposure">
@@ -290,7 +304,9 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
         <section className="panel insight-panel insight-panel--wide insight-panel--risk">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · At a glance</span></div></div>
-          {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile current={risk.current} worst={risk.worst} volatility={risk.volatility} concentration={snapshot.topFiveWeight} hideValues={hide} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : backcastLoading ? 'Historical prices are loading to build your risk profile.' : 'Historical risk is unavailable. Tracked balance changes include account changes and cash flows.'}</div>}
+          {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile risk={risk} hideValues={hide}
+            historyStart={analyticsHistory[0].at} historyEnd={analyticsHistory[analyticsHistory.length - 1].at}
+            coverage={backcast && backcast.holdingsIncluded < backcast.holdingsTotal ? `History covers ${backcast.holdingsIncluded} of ${backcast.holdingsTotal} holdings · ${backcast.coveragePct.toFixed(0)}% of priced INR value.` : null} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : backcastLoading ? 'Historical prices are loading to build your risk profile.' : 'Historical risk is unavailable. Tracked balance changes include account changes and cash flows.'}</div>}
         </section>
       </div>
       <Suspense fallback={<div className="panel history-panel-placeholder" role="status">Preparing price history…</div>}>
@@ -362,12 +378,14 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
 
 function AllocationMap({
   items,
+  unmapped,
   selected,
   onSelect,
   formatValue,
   highlight,
 }: {
   items: { symbol: string; value: number; weight: number; pnl: number | null; sector: string }[]
+  unmapped: { symbol: string; priced: boolean }[]
   selected: string | null
   onSelect: (symbol: string) => void
   formatValue: (amount: number) => string
@@ -387,6 +405,10 @@ function AllocationMap({
         </button>
       })}
     </div>
+    {unmapped.length > 0 && <div className="allocation-unmapped">
+      <span className="score-label">Outside treemap</span>
+      <ul>{unmapped.map((item) => <li key={item.symbol}><strong>{item.symbol}</strong><span>{item.priced ? 'No positive value' : 'Unpriced'}</span></li>)}</ul>
+    </div>}
     {active && <div className="allocation-detail" aria-live="polite"><div><span className="score-label">Selected holding</span><strong>{active.symbol}</strong></div><div><span className="score-label">Portfolio weight</span><strong>{active.weight.toFixed(1)}%</strong></div><div><span className="score-label">Current value</span><strong>{formatValue(active.value)}</strong></div><div><span className="score-label">P&L</span><strong className={active.pnl == null ? undefined : active.pnl < 0 ? 'down' : 'up'}>{active.pnl == null ? '—' : formatValue(active.pnl)}</strong></div></div>}
   </div>
 }
@@ -424,16 +446,18 @@ function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus 
   return 'lower'
 }
 
-function RiskProfile({ current, worst, volatility, concentration, hideValues }: { current: number; worst: number; volatility: number | null; concentration: number; hideValues: boolean }) {
+function RiskProfile({ risk, hideValues, coverage, historyStart, historyEnd }: { risk: ReturnType<typeof calculatePortfolioRisk>; hideValues: boolean; coverage: string | null; historyStart: number; historyEnd: number }) {
   const [openDefinition, setOpenDefinition] = useState<string | null>(null)
+  const { current, volatility } = risk
   const mask = (text: string) => hideValues ? '••••' : text
+  const amount = (value: number) => mask(numberFormatter({ style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value))
+  const date = (at: number) => dateFormatter({ day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(at)
   const historyBasis = "Today's holdings at past prices. Uses every historical observation."
   const riskRows = [
     {
       id: 'below-high',
       label: 'Current drop from peak',
       value: Math.abs(current),
-      summary: "How far the portfolio's latest value is below its peak.",
       scaleMax: 30,
       watchAt: 10,
       highAt: 20,
@@ -442,16 +466,17 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
       basis: historyBasis,
     },
     {
-      id: 'largest-drop',
-      label: 'Worst past drop',
-      value: Math.abs(worst),
-      summary: 'The biggest fall in portfolio value after an earlier peak.',
-      scaleMax: 30,
-      watchAt: 10,
-      highAt: 20,
-      formula: 'Value = largest (earlier high - later low) ÷ earlier high × 100.',
-      definition: 'Finds the deepest fall from a peak to a later low. The portfolio may have recovered since.',
-      basis: historyBasis,
+      id: 'time-below-peak',
+      label: 'Time below peak',
+      value: risk.daysBelowPeak,
+      scaleMax: 180,
+      unit: ' days',
+      watchAt: 30,
+      highAt: 90,
+      reading: risk.daysBelowPeak == null ? 'Unavailable' : `${risk.daysBelowPeak} ${risk.daysBelowPeak === 1 ? 'day' : 'days'}`,
+      formula: 'Value = latest observation date − most recent peak date, in calendar days.',
+      definition: 'Shows how long the latest value has been below its high within the loaded history. Equal highs reset the date; recovery shows 0 days. Earlier unseen peaks are not included.',
+      basis: `${historyBasis} Meter scale: 0 to 180 days; longer periods fill the meter.`,
     },
     {
       id: 'yearly-movement',
@@ -466,16 +491,18 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
       basis: "Today's holdings at past prices. Longer gaps and the latest app valuation are excluded.",
     },
     {
-      id: 'top-five-share',
-      label: 'Top five holdings',
-      value: concentration,
-      summary: 'How much of the portfolio is in its five largest holdings.',
+      id: 'down-sessions',
+      label: 'Down sessions',
+      value: risk.downSessionPct,
+      reading: `${risk.downSessions} of ${risk.observedSessions}`,
+      detail: risk.downSessionPct == null ? undefined : `${risk.downSessionPct.toFixed(1)}%`,
+      summary: 'Observed sessions that closed lower.',
       scaleMax: 100,
-      watchAt: 50,
-      highAt: 75,
-      formula: 'Value = five largest position values ÷ total portfolio value × 100.',
-      definition: 'Adds the current value of the five largest positions, then compares it with the portfolio total. Five or fewer positions means 100%.',
-      basis: 'Uses current position values.',
+      watchAt: 45,
+      highAt: 55,
+      formula: 'Share = falling close changes ÷ all eligible close changes × 100.',
+      definition: 'Counts falls between consecutive market closes. Gains and flat sessions stay in the total. Missing-session gaps and the current live valuation are excluded. This is observed frequency, not a forecast.',
+      basis: "Today's holdings at past prices. Uses eligible close changes within the loaded history.",
     },
   ].map((row) => ({
     ...row,
@@ -488,11 +515,19 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
         {riskRows.map((row) => {
           const tooltipId = `risk-definition-${row.id}`
           const isOpen = openDefinition === row.id
-          const statusLabel = row.status == null ? 'Unavailable' : row.status === 'lower' ? 'Lower concern' : row.status === 'watch' ? 'Watch' : 'High concern'
+          const statusLabel = row.status == null ? 'Unavailable' : row.status === 'lower' ? 'Good' : row.status === 'watch' ? 'To watch' : 'High'
           const displayedStatus = hideValues || row.status == null ? 'hidden' : row.status
-          const reading = row.value == null ? 'Unavailable' : `${row.value.toFixed(1)}%`
+          const reading = row.value == null ? 'Unavailable' : row.reading ?? `${row.value.toFixed(1)}%`
+          const unit = row.unit ?? '%'
+          const readingContent = <div className="risk-reading">
+            <strong>{mask(row.value == null ? '—' : reading)}</strong>
+            <div className="risk-reading-meta">
+              {!hideValues && row.detail && <span className="risk-observation">{row.detail}</span>}
+              <span className={`risk-status risk-status--${displayedStatus}`}>{hideValues ? 'Hidden' : statusLabel}</span>
+            </div>
+          </div>
           return (
-            <article className={`risk-bar risk-bar--${displayedStatus}`} key={row.id}>
+            <article className={`risk-bar risk-bar--${displayedStatus}`} key={row.id} data-risk={row.id}>
               <div className="risk-bar-head">
                 <div>
                   <span className="risk-label">
@@ -510,20 +545,44 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
                         <strong>{row.label}</strong>
                         <span>{row.definition}</span>
                         <span><b>Formula</b> {row.formula}</span>
-                        <span><b>Guide</b> Watch at {row.watchAt}% · High at {row.highAt}%</span>
-                        <small>Bar scale 0–{row.scaleMax}%. {row.basis} Screening guide only.</small>
+                        <span><b>App guide</b> Good below {row.watchAt}{unit} · To watch from {row.watchAt}{unit} · High from {row.highAt}{unit}</span>
+                        <small>{row.basis} App-defined screening bands.</small>
                       </span>
                     </button>
                   </span>
-                  <span className="risk-summary">{row.summary}</span>
+                  {row.id !== 'below-high' && row.id !== 'time-below-peak' && <span className="risk-summary">{row.summary}</span>}
                 </div>
-                <div className="risk-reading">
-                  <strong>{mask(row.value == null ? '—' : reading)}</strong>
-                  <span className={`risk-status risk-status--${displayedStatus}`}>{hideValues ? 'Hidden' : statusLabel}</span>
-                </div>
+                {row.id !== 'time-below-peak' && readingContent}
               </div>
 
-              <div className="risk-track" role="img" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${reading}, ${statusLabel}. Bar scale 0 to ${row.scaleMax}%.`}>
+              {row.id === 'below-high' && <div className="risk-breakdown">
+                <dl className="risk-calculation" aria-label="Current drop calculation">
+                  <div className="risk-calculation-stat"><dt>Peak value</dt><dd><strong>{amount(risk.peakValue)}</strong></dd></div>
+                  <div className="risk-calculation-stat"><dt>Latest value</dt><dd><strong>{amount(risk.currentValue)}</strong></dd></div>
+                  <div className={`risk-calculation-stat risk-calculation-result${!hideValues && risk.peakValue > risk.currentValue ? ' risk-calculation-result--loss' : ''}`}>
+                    <dt><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 4 8 8M6 12h6V6" /></svg>Below peak</dt>
+                    <dd><strong>{amount(risk.peakValue - risk.currentValue)}</strong></dd>
+                  </div>
+                </dl>
+                {!hideValues && coverage && <small className="risk-calculation-basis">{coverage}</small>}
+              </div>}
+
+              {row.id === 'time-below-peak' && <div className="risk-time-breakdown">
+                <div className="risk-timeline" role="group" aria-label="Time below peak calculation">
+                  <dl className="risk-timeline-date">
+                    <dt>Last observed peak</dt>
+                    <dd><strong>{hideValues ? mask('') : risk.peakAt == null ? 'Unavailable' : <time dateTime={new Date(risk.peakAt).toISOString()}>{date(risk.peakAt)}</time>}</strong></dd>
+                  </dl>
+                  <div className="risk-timeline-reading">{readingContent}</div>
+                  <dl className="risk-timeline-date">
+                    <dt>Latest reading</dt>
+                    <dd><strong>{hideValues ? mask('') : <time dateTime={new Date(historyEnd).toISOString()}>{date(historyEnd)}</time>}</strong></dd>
+                  </dl>
+                </div>
+                {!hideValues && risk.daysBelowPeak === 0 && <p className="risk-summary risk-recovery-note">Latest value is at its observed peak.</p>}
+              </div>}
+
+              <div className="risk-track" role="img" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${reading}, ${statusLabel}. Bar scale 0 to ${row.scaleMax}${unit}.`}>
                 <span className="risk-track-zone risk-track-zone--lower" style={{ width: `${row.watchAt / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--watch" style={{ width: `${(row.highAt - row.watchAt) / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--high" style={{ width: `${(row.scaleMax - row.highAt) / row.scaleMax * 100}%` }} />
@@ -534,6 +593,7 @@ function RiskProfile({ current, worst, volatility, concentration, hideValues }: 
           )
         })}
       </div>
+      {!hideValues && <small className="risk-history-basis">Current holdings at past prices · {date(historyStart)} to {date(historyEnd)}</small>}
     </div>
   )
 }

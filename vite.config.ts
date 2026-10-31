@@ -5,6 +5,7 @@ import { handleHistoryRequest } from './api/history'
 import { handleQuoteRequest } from './api/quotes'
 import { handleNewsRequest } from './api/news'
 import { handleEventsRequest } from './api/events'
+import { handleNseListingsRequest } from './api/nseListings'
 
 function localMarketDataApi(): Plugin {
   const handlers = new Map([
@@ -12,6 +13,7 @@ function localMarketDataApi(): Plugin {
     ['/api/history', handleHistoryRequest],
     ['/api/news', handleNewsRequest],
     ['/api/events', handleEventsRequest],
+    ['/api/nseListings', handleNseListingsRequest],
   ])
   return {
     name: 'finverse-local-market-data-api',
@@ -41,6 +43,7 @@ function localMarketDataApi(): Plugin {
 
 export default defineConfig({
   plugins: [react(), localMarketDataApi()],
+  optimizeDeps: { entries: ['index.html'] },
   build: {
     rollupOptions: {
       output: {

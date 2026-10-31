@@ -52,6 +52,29 @@ describe('market status text', () => {
 })
 
 describe('market data client', () => {
+  it.each(['equity', 'fund'])('starts independent quote requests while the %s provider is pending', async (slowProvider) => {
+    const equity = normalizePosition({ ...position('INFY'), exchangeSource: 'explicit', identityVersion: 2 })
+    const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', mfScheme: { code: 709, name: 'Fund Direct Growth', source: 'confirmed' } }
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetcher = vi.fn<typeof fetch>(async (url) => {
+      const isEquity = String(url).startsWith('/api/quotes')
+      if (isEquity === (slowProvider === 'equity')) await gate
+      return isEquity
+        ? Response.json({ fetchedAt: '2026-10-30T06:00:00Z', quotes: [{ symbol: 'INFY.NS', price: 120, change: 10, changePct: 9.09, marketTime: '2026-10-30T06:00:00Z', source: 'yahoo' }] })
+        : Response.json({ data: [{ date: '30-10-2026', nav: '120' }, { date: '29-10-2026', nav: '110' }] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const pending = fetchLiveQuotes([equity, fund], {})
+    try {
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2), { timeout: 100 })
+    } finally {
+      release()
+      await pending
+    }
+    expect(await pending).toMatchObject({ updated: 2, failed: 0 })
+  })
+
   it('queues excess distinct history requests and removes cancelled waiters before fetching', async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
@@ -218,6 +241,98 @@ describe('market data client', () => {
     expect([...stored.keys()]).toEqual(['finverse:history:v2:TCS.NS'])
   })
 
+  it.each(['equity', 'fund'])('briefly reuses cached %s history after an empty weekend extension, then checks for publication', async (provider) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-31T06:00:00Z'))
+    try {
+      const identity = provider === 'equity' ? 'WEEKEND.NS' : 'mfapi:812'
+      const stored = stubFridayHistory(identity)
+      const key = `finverse:history:v2:${identity}`
+      const original = stored.get(key)
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(provider === 'equity' ? { points: [] } : { data: [] }))
+        .mockResolvedValueOnce(Response.json(provider === 'equity'
+          ? { points: [{ date: '2026-10-31', close: 102 }] }
+          : { data: [{ date: '31-10-2026', nav: '102' }] }))
+      vi.stubGlobal('fetch', fetcher)
+      const from = new Date('2026-10-29T12:00:00+05:30')
+      const to = new Date('2026-10-31T12:00:00+05:30')
+      const fund: Position = { ...position('Weekend Fund'), type: 'mutual-fund', mfScheme: { code: 812, name: 'Weekend Fund Direct Growth', source: 'confirmed' } }
+      const load = () => provider === 'equity' ? fetchHistory(identity, from, to) : fetchNavHistory(fund, from, to)
+
+      expect(await load()).toHaveLength(2)
+      expect(await load()).toHaveLength(2)
+      expect(fetcher).toHaveBeenCalledTimes(1)
+      expect(String(fetcher.mock.calls[0][0])).toContain(provider === 'equity'
+        ? 'from=2026-10-31&to=2026-10-31'
+        : 'startDate=2026-10-31&endDate=2026-10-31')
+      expect(stored.get(key)).toBe(original)
+      vi.setSystemTime(Date.now() + 59_999)
+      expect(await load()).toHaveLength(2)
+      expect(fetcher).toHaveBeenCalledTimes(1)
+      vi.setSystemTime(Date.now() + 1)
+      expect(await load()).toHaveLength(3)
+      expect(fetcher).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['http', 'network'])('immediately retries a failed incremental history request: %s', async (failure) => {
+    stubFridayHistory(`FAILED-${failure}.NS`)
+    const fetcher = vi.fn<typeof fetch>()
+    if (failure === 'http') fetcher.mockResolvedValueOnce(new Response(null, { status: 503 }))
+    else fetcher.mockRejectedValueOnce(new Error('offline'))
+    fetcher.mockResolvedValueOnce(Response.json({ points: [{ date: '2026-10-31', close: 102 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-10-29T12:00:00+05:30')
+    const to = new Date('2026-10-31T12:00:00+05:30')
+
+    expect(await fetchHistory(`FAILED-${failure}.NS`, from, to)).toHaveLength(2)
+    expect(await fetchHistory(`FAILED-${failure}.NS`, from, to)).toHaveLength(3)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let an aborted empty extension suppress the next history request', async () => {
+    stubFridayHistory('ABORT-EMPTY.NS')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetcher = vi.fn<typeof fetch>()
+      .mockImplementationOnce(async () => { await gate; return Response.json({ points: [] }) })
+      .mockResolvedValueOnce(Response.json({ points: [{ date: '2026-10-31', close: 102 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-10-29T12:00:00+05:30')
+    const to = new Date('2026-10-31T12:00:00+05:30')
+    const controller = new AbortController()
+    const pending = fetchHistory('ABORT-EMPTY.NS', from, to, controller.signal)
+    const failure = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+    controller.abort()
+    release()
+    await failure
+    await vi.waitFor(async () => {
+      expect(await fetchHistory('ABORT-EMPTY.NS', from, to)).toHaveLength(3)
+    })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('isolates empty extension cooldowns by storage, history identity and date range', async () => {
+    stubFridayHistory('ISOLATED.NS')
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ points: [] }))
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-10-29T12:00:00+05:30')
+    const to = new Date('2026-10-31T12:00:00+05:30')
+    await fetchHistory('ISOLATED.NS', from, to)
+    await fetchHistory('ISOLATED.NS', from, to)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await fetchHistory('ISOLATED.NS', from, new Date('2026-11-01T12:00:00+05:30'))
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    const stored = stubFridayHistory('ISOLATED.NS')
+    await fetchHistory('ISOLATED.NS', from, to)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    stored.set('finverse:history:v2:OTHER.NS', stored.get('finverse:history:v2:ISOLATED.NS')!)
+    await fetchHistory('OTHER.NS', from, to)
+    expect(fetcher).toHaveBeenCalledTimes(4)
+  })
+
   it('uses the same-origin quote endpoint and preserves the market timestamp', async () => {
     const marketTime = '2026-08-24T09:45:02.000Z'
     const fetcher = vi.fn<typeof fetch>(async () =>
@@ -293,6 +408,77 @@ describe('market data client', () => {
       price: 1309.8,
       at: Date.parse('2026-08-24T09:45:02.000Z'),
     })
+  })
+
+  it.each([false, true])('reuses recent NAV checks, keeps equity refreshes running and rechecks after close (previous NAV: %s)', async (hasPrevious) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-25T06:00:00Z'))
+    try {
+      const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', mfScheme: { code: 83, name: 'Fund Direct Growth', source: 'confirmed' } }
+      const stock = position('TCS')
+      const oldNav: LiveQuote = { price: 119, at: Date.parse('2026-09-23T00:00:00+05:30'), fetchedAt: Date.parse('2026-09-24T06:00:00Z'), source: 'nav' }
+      let navDate = '24-09-2026'
+      const fetcher = vi.fn<typeof fetch>(async (url) => String(url).startsWith('/api/quotes')
+        ? Response.json({ fetchedAt: new Date().toISOString(), quotes: [{ symbol: 'TCS.NS', price: 200, change: 2, changePct: 1, marketTime: new Date().toISOString(), source: 'yahoo' }] })
+        : Response.json({ data: [{ date: navDate, nav: '120' }] }))
+      vi.stubGlobal('fetch', fetcher)
+
+      const initial = await fetchLiveQuotes([stock, fund], hasPrevious ? { [quoteKey(fund)]: oldNav } : {})
+      expect(initial).toMatchObject({ updated: 2, failed: 0 })
+      expect(initial.quotes[quoteKey(fund)].at).toBe(Date.parse('2026-09-24T00:00:00+05:30'))
+      expect(fetcher).toHaveBeenCalledTimes(2)
+
+      vi.setSystemTime(new Date('2026-09-25T06:05:00Z'))
+      const repeated = await fetchLiveQuotes([stock, fund], initial.quotes)
+      expect(repeated).toMatchObject({ updated: 1, skipped: 1, failed: 0 })
+      expect(repeated.quotes[quoteKey(fund)]).toEqual(initial.quotes[quoteKey(fund)])
+      expect(fetcher).toHaveBeenCalledTimes(3)
+      expect(String(fetcher.mock.calls[2][0])).toContain('/api/quotes')
+
+      vi.setSystemTime(new Date('2026-09-25T18:00:00Z'))
+      navDate = '25-09-2026'
+      const evening = await fetchLiveQuotes([fund], repeated.quotes)
+      expect(evening.updated).toBe(1)
+      expect(evening.quotes[quoteKey(fund)].at).toBe(Date.parse('2026-09-25T00:00:00+05:30'))
+      expect(fetcher).toHaveBeenCalledTimes(4)
+
+      vi.setSystemTime(new Date('2026-09-28T06:00:00Z'))
+      expect((await fetchLiveQuotes([fund], evening.quotes)).updated).toBe(1)
+      expect(fetcher).toHaveBeenCalledTimes(5)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('checks pending NAVs on the 15-minute cadence and adds a newly published same-session move', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-25T06:00:00Z'))
+    try {
+      const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', mfScheme: { code: 881, name: 'Fund Direct Growth', source: 'confirmed' } }
+      const stock = position('INFY')
+      let published = false
+      const fetcher = vi.fn<typeof fetch>(async (url) => String(url).startsWith('/api/quotes')
+        ? Response.json({ fetchedAt: new Date().toISOString(), quotes: [{ symbol: 'INFY.NS', price: 200, change: 2, marketTime: new Date().toISOString(), source: 'yahoo' }] })
+        : Response.json({ data: published
+          ? [{ date: '25-09-2026', nav: '125' }, { date: '24-09-2026', nav: '120' }]
+          : [{ date: '24-09-2026', nav: '120' }, { date: '23-09-2026', nav: '119' }] }))
+      vi.stubGlobal('fetch', fetcher)
+      const holdings = [stock, fund]
+      const folios = [{ id: 'cadence', name: 'Cadence', importedAt: Date.now(), positions: holdings }]
+      const initial = await fetchLiveQuotes(holdings, {})
+      expect(investmentWorkspace.readSnapshot({ folios, quotes: initial.quotes })).toMatchObject({ dailyChange: 2, dailyChangeCount: 1, sessionHoldingCount: 1 })
+      published = true
+      vi.setSystemTime(new Date('2026-09-25T06:14:59Z'))
+      const early = await fetchLiveQuotes(holdings, initial.quotes)
+      expect(early).toMatchObject({ updated: 1, skipped: 1 })
+      expect(fetcher).toHaveBeenCalledTimes(3)
+      vi.setSystemTime(new Date('2026-09-25T06:15:00Z'))
+      const updated = await fetchLiveQuotes(holdings, early.quotes)
+      expect(updated).toMatchObject({ updated: 2, failed: 0 })
+      expect(updated.quotes[quoteKey(fund)]).toMatchObject({ at: Date.parse('2026-09-25T00:00:00+05:30'), change: 5 })
+      expect(investmentWorkspace.readSnapshot({ folios, quotes: updated.quotes })).toMatchObject({ dailyChange: 7, dailyChangeCount: 2, sessionHoldingCount: 2 })
+      vi.setSystemTime(new Date('2026-09-25T07:00:00Z'))
+      expect(await fetchLiveQuotes(holdings, updated.quotes)).toMatchObject({ updated: 1, skipped: 1 })
+      expect(fetcher).toHaveBeenCalledTimes(6)
+    } finally { vi.useRealTimers() }
   })
 
   it('does not wait after a current daily NAV that needs no request', async () => {
@@ -442,6 +628,18 @@ describe('market data client', () => {
     expect(stored.has(`finverse:history:v2:${quoteKey(conflicting)}`)).toBe(true)
   })
 })
+
+function stubFridayHistory(identity: string): Map<string, string> {
+  const stored = new Map([[`finverse:history:v2:${identity}`, JSON.stringify({
+    from: '2026-10-29', to: '2026-10-30', at: Date.now(),
+    points: [{ date: '2026-10-29', close: 99 }, { date: '2026-10-30', close: 100 }],
+  })]])
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => stored.set(key, value),
+  })
+  return stored
+}
 
 function position(ticker: string): Position {
   return {

@@ -5,7 +5,6 @@
   --mp-negative: var(--semantic-danger);
   --mp-amber: color-mix(in srgb, var(--chart-benchmark) 80%, var(--ink));
   min-width: 0;
-  padding-bottom: 24px;
   color: var(--ink);
   font-size: 15px;
   line-height: 1.55;
