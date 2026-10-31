@@ -6,6 +6,7 @@ import type { Folio, LiveQuote, Position } from '../types'
 import type { ImportPreview } from '../useStore'
 import { normalizePosition } from '../instruments'
 import { PRIVATE_VALUE_MASK } from '../privacy'
+import { investmentWorkspace } from '../investmentWorkspace'
 import { ImportView } from './ImportView'
 
 const state = vi.hoisted(() => ({
@@ -74,6 +75,28 @@ async function renderImport(onImported?: () => void, targetAccountId?: string) {
 }
 
 describe('statement import review', () => {
+  it('keeps alias typing out of portfolio calculations and saves the latest alias', async () => {
+    const parsed = preview()
+    state.folios = [account()]
+    state.previewFile.mockResolvedValue(parsed)
+    const view = await renderImport()
+    await view.upload()
+    const snapshot = vi.spyOn(investmentWorkspace, 'readSnapshot')
+    try {
+      await view.change('Account alias, optional', 'CPU')
+      await view.change('Account alias, optional', 'CPU audit')
+      expect(view.field('Account alias, optional').value).toBe('CPU audit')
+      expect(snapshot).not.toHaveBeenCalled()
+      await view.change('Import operation', 'replace')
+      await view.change('Import operation', 'add')
+      expect(view.field('Account alias, optional').value).toBe('CPU audit')
+      await act(async () => view.button('Add to portfolio').click())
+      expect(state.commitImport).toHaveBeenCalledExactlyOnceWith(parsed, expect.objectContaining({ accountAlias: 'CPU audit' }))
+      await view.upload()
+      expect(view.field('Account alias, optional').value).toBe('')
+    } finally { snapshot.mockRestore() }
+  })
+
   it('preselects the requested folio for replacement while still requiring a complete statement', async () => {
     state.folios = [account()]
     state.previewFile.mockResolvedValue(preview())

@@ -517,6 +517,16 @@ it('shows and selects imported holdings beyond the sixteenth allocation tile', a
   expect(container.querySelector('.allocation-detail')?.textContent).toContain('HOLDING17')
 })
 
+it('keeps allocation selection local so hovering a holding does not rerender the benchmark chart', async () => {
+  await renderInsights([{ at: Date.UTC(2026, 0, 1), value: 100, invested: 100 }, { at: Date.UTC(2026, 2, 1), value: 110, invested: 100 }], [], exposurePositions)
+  state.chart.mockClear()
+  const tiles = container.querySelectorAll<HTMLButtonElement>('.allocation-tile')
+  await act(async () => tiles[1].dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  expect(tiles[1].getAttribute('aria-pressed')).toBe('true')
+  expect(container.querySelector('.allocation-detail')?.textContent).toContain(tiles[1].querySelector('strong')!.textContent)
+  expect(state.chart).not.toHaveBeenCalled()
+})
+
 it('keeps unpriced and zero-value imports visible outside weighted allocation tiles', async () => {
   const base: Position = { id: 'priced', ticker: 'PRICED', name: 'Priced', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }
   await renderInsights([], [], [

@@ -38,6 +38,33 @@ describe('watch observations', () => {
   const now = Date.now()
   const quotes = { [valuation.quoteKey(position)]: { price: 45, at: now, source: 'yahoo' as const } }
 
+  it.each(['current', 'stale', 'missing'] as const)('indexes holdings once for %s rule references across batch operations', (reference) => {
+    const positions = Array.from({ length: 200 }, (_, index) => ({ ...position, id: `holding-${index}`, ticker: `STOCK${index}`, providerSymbol: `STOCK${index}.NS` }))
+    const rules = positions.slice(-20).map((holding, index) => ({
+      ...rule, id: String(index), holdingId: reference === 'current' ? holding.id : `old-${index}`,
+      instrumentIdentity: reference === 'missing' ? `missing-${index}` : holdingIdentity(holding),
+    }))
+    const state = { ...emptyMonitorState(), rules }
+    const keys = vi.spyOn(valuation, 'quoteKey')
+    try {
+      const reconciled = reconcileMonitorRules(rules, positions)
+      expect(reconciled.map((item) => item.unresolved ?? false)).toEqual(rules.map(() => reference === 'missing'))
+      if (reference !== 'missing') expect(reconciled.map((item) => item.holdingId)).toEqual(positions.slice(-20).map((item) => item.id))
+      const observations = monitorRuleObservations(rules, positions, {}, now, true)
+      expect([...observations.values()]).toEqual(rules.map(() => ({ state: reference === 'missing' ? 'Unavailable' : 'Waiting' })))
+      expect(evaluateMonitorRules(state, positions, {}, now, true)).toBe(state)
+      expect(keys.mock.calls.length).toBeLessThanOrEqual(3 * (positions.length * 2 + rules.length * 4))
+    } finally { keys.mockRestore() }
+  })
+
+  it('prefers the matching holding ID and otherwise the first matching identity', () => {
+    const duplicate = { ...position, id: 'duplicate', name: 'Second account' }
+    const rules = [{ ...rule, holdingId: duplicate.id }, { ...rule, id: 'stale', holdingId: 'old' }]
+    expect(reconcileMonitorRules(rules, [position, duplicate]).map((item) => item.holdingId)).toEqual([duplicate.id, position.id])
+    const conflictingId = { ...position, ticker: 'OTHER', providerSymbol: 'OTHER.NS' }
+    expect(reconcileMonitorRules([rule], [conflictingId, duplicate])[0].holdingId).toBe(duplicate.id)
+  })
+
   it('shares listing verification across a batch of rules without changing their states', () => {
     const positions = Array.from({ length: 200 }, (_, index) => ({ ...position, id: `holding-${index}`, ticker: `STOCK${index}`, providerSymbol: `STOCK${index}.NS` }))
     const rules = positions.slice(0, 20).map((holding, index) => ({ ...rule, id: String(index), holdingId: holding.id, instrumentIdentity: holdingIdentity(holding), active: index !== 0 }))
