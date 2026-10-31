@@ -6,6 +6,7 @@ import { hasSupportedValuationCurrency } from '../valuation'
 import type { Position } from '../types'
 import { HiddenValuesState } from './HiddenValuesState'
 import { ActionIcon } from './ActionIcon'
+import { FundSchemePicker } from './FundSchemePicker'
 
 function supportsFundNav(fund: Position): boolean {
   return hasSupportedValuationCurrency({ ...fund, currency: fund.currency ?? 'INR' })
@@ -153,12 +154,8 @@ export function FundSchemeReview() {
       <strong>{selected.name}</strong>
       {busy && !review ? <p role="status" className="hint">Searching schemes…</p> : review && <>
         <p className="hint">{review.reason}</p>
-        {review.candidates.length > 0 && <label className="statement-field">Provider scheme
-          <select className="select" value={code} onChange={(event) => setCode(event.target.value)}>
-            <option value="">Choose the exact plan and option</option>
-            {review.candidates.map((item) => <option key={item.schemeCode} value={item.schemeCode} disabled={!canConfirmFundScheme(selected.name || selected.ticker, item)}>{item.schemeName} · {item.schemeCode}</option>)}
-          </select>
-        </label>}
+        {review.candidates.length > 0 && <FundSchemePicker key={selected.id} importedName={selected.name || selected.ticker}
+          candidates={review.candidates} value={code} onChange={setCode} disabled={busy || !settings.allowExternalData} />}
         <p className="hint">A correction changes future prices and history. It cannot reconstruct earlier balances that used uncertain mappings.</p>
         <div className="import-actions"><button type="button" className="btn btn--primary" disabled={busy || !settings.allowExternalData || !candidate || !canConfirmFundScheme(selected.name || selected.ticker, candidate)} onClick={() => void confirm()}>Confirm scheme</button><button type="button" className="btn btn--ghost" disabled={busy} onClick={() => { setSelectedId(null); setReview(null) }}>Cancel scheme review</button></div>
       </>}

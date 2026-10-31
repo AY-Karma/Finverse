@@ -26,6 +26,20 @@ function yahooResponse() {
 }
 
 describe('GET /api/quotes', () => {
+  it('reuses a recent batch but fetches a new provider response after 15 seconds', async () => {
+    let now = NOW
+    const fetcher = vi.fn<typeof fetch>(async () => yahooResponse())
+    const handler = createQuoteHandler({ fetcher, now: () => now })
+    const request = () => handler(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS'))
+    await request()
+    now += 14_999
+    await request()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    now += 1
+    await request()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it('returns normalized quotes with the provider market timestamp', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => yahooResponse())
     const handler = createQuoteHandler({ fetcher, now: () => NOW })
@@ -36,7 +50,7 @@ describe('GET /api/quotes', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(response.headers.get('vercel-cdn-cache-control')).toContain('s-maxage=60')
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=15, must-revalidate')
     expect(fetcher).toHaveBeenCalledTimes(1)
     expect(String(fetcher.mock.calls[0]?.[0])).toContain('symbols=RELIANCE.NS%2CTCS.NS')
     await expect(response.json()).resolves.toEqual({

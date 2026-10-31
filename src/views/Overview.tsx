@@ -6,11 +6,8 @@ import { needsInstrumentReview } from '../instruments'
 import { getFolioFreshness } from '../importFreshness'
 import type { LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
-import {
-  isMarketOpen,
-  marketStatusText,
-  quoteRefreshIssueText,
-} from '../live'
+import { MarketRefreshStatus } from './MarketRefreshStatus'
+import { quoteRefreshIssueText } from '../live'
 import { AllocationCard } from './AllocationCard'
 import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
@@ -20,6 +17,7 @@ const PortfolioPerformance = lazy(() => import('./PortfolioPerformance').then((m
 
 const LEDGER_PAGE_SIZE = 100
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
+const SESSION_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
 function formatCost(value: number, supported: boolean): string {
   return supported ? formatCurrency(value) : 'Unavailable'
 }
@@ -41,7 +39,7 @@ interface LedgerRow {
 }
 
 export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anchor?: string) => void; onRequestImport: () => void }) {
-  const { positions, rawPositions, settings, refreshNow, snapshot, marketDataRefreshing, marketDataResult } = useStore()
+  const { positions, rawPositions, settings, refreshNow, snapshot, marketDataRefreshing, marketDataResult, quoteLastCheckedAt, quoteNextRefreshAt } = useStore()
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -87,10 +85,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   }
 
   const live = settings.allowExternalData ? snapshot.quotes : EMPTY_QUOTES
-  const liveCount = Object.keys(live).length
   const fetchingMarketData = refreshing || marketDataRefreshing
-  const marketOpen = isMarketOpen(marketNow)
-  const marketDotClass = `live-dot${marketOpen ? '' : ' live-dot--market-closed'}${fetchingMarketData ? ' live-dot--fetching' : liveCount > 0 ? '' : ' live-dot--loading'}`
   const refreshCooldownSeconds = Math.max(0, Math.ceil((refreshAvailableAt - Date.now()) / 1000))
   const marketDataIssue = quoteRefreshIssueText(marketDataResult)
 
@@ -211,24 +206,14 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   }
 
   const pnlUp = stats.pnl >= 0
-  const eff = (p: (typeof positions)[number]) => positionPnlPct(p, live)
-  const rankedPerformers = scopePositions
-    .map((position) => ({ position, pct: eff(position) }))
-    .filter((item): item is { position: Position; pct: number } => item.pct != null)
-    .sort((a, b) => b.pct - a.pct)
-  const best = rankedPerformers[0] ?? null
-  const worst = rankedPerformers[rankedPerformers.length - 1] ?? null
   const dataLabels = portfolioDataLabels(snapshot)
   const dailyMove = dataLabels.sessionValue
   const dailyMoveText = dailyMove == null
     ? '—'
     : `${dailyMove >= 0 ? '+' : ''}${formatCurrency(dailyMove)}`
   const dailyMoveDirection = dailyMove == null || dailyMove === 0 ? '' : dailyMove > 0 ? 'up' : 'down'
-  const dailyMoveArrow = dailyMove == null || hideValues ? '' : dailyMove > 0 ? '↑' : dailyMove < 0 ? '↓' : '→'
-  const sessionSummary = dailyMove == null
-    ? 'Waiting for change amounts.'
-    : dailyMove === 0 ? `${dataLabels.isPartialSession ? 'Reporting holdings are' : 'Your portfolio is'} unchanged in this session.`
-    : `${dataLabels.isPartialSession ? 'Reporting holdings' : 'Your portfolio'} ${dailyMove > 0 ? 'gained' : 'lost'} ${formatCurrency(Math.abs(dailyMove))} in this session.`
+  const sessionDate = snapshot.dailyChangeDate
+    ? SESSION_DATE_FORMAT.format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`)) : null
 
   const toggleSort = (field: SortField) => {
     setSort((prev) => {
@@ -317,12 +302,8 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
             </div>
           </div>
           <div className="overview-meta">
-            <div className={`market-status ${marketOpen ? 'market-open' : 'market-closed'}`} role="status" aria-live="polite">
-              <span className={marketDotClass} aria-hidden="true" />
-              <span className="market-status-copy" title={liveCount > 0 ? quoteSourceLabel(live) : undefined}>
-                {marketStatusText(marketOpen, settings.allowExternalData, fetchingMarketData, liveCount > 0 ? `${lastRefreshTime(live)} IST` : undefined)}
-              </span>
-            </div>
+            <MarketRefreshStatus externalEnabled={settings.allowExternalData} refreshing={fetchingMarketData}
+              lastCheckedAt={quoteLastCheckedAt} nextRefreshAt={quoteNextRefreshAt} />
             {refreshError && <span className="hint down" role="alert">{refreshError}</span>}
             {!refreshError && marketDataIssue && <span className="hint down" role="status">{marketDataIssue}</span>}
             <MarketCalendar now={marketNow} />
@@ -337,24 +318,26 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
             {stats.valuationComplete ? 'Current value' : 'Priced holdings value'}
           </div>
           <div className="score-value">{mask(stats.pricedCount ? formatCurrency(stats.currentValue) : 'Unpriced')}</div>
-          {snapshot.dailyChange != null && (
-            <div className="score-foot score-move">
-              <span>{dataLabels.sessionLabel}</span>
-              <span
-                className={`current-value-move${hideValues || !dailyMoveDirection ? ' current-value-move--flat' : ` ${dailyMoveDirection}`}`}
-                aria-label={hideValues ? 'Portfolio session move hidden' : `${dataLabels.sessionLabel} portfolio move: ${dailyMoveText}`}
-                title={dataLabels.coverageLabel}
-              >
-                <span className="current-value-move-arrow" aria-hidden="true">{dailyMoveArrow}</span>
-                <span>{mask(dailyMoveText)}</span>
-              </span>
-            </div>
-          )}
           {!stats.valuationComplete && (
             <div className="score-foot" title="Value, returns and allocation use priced holdings only.">
               {stats.unpricedCount} holding{stats.unpricedCount === 1 ? '' : 's'} unpriced
             </div>
           )}
+        </div>
+        <div className="score score--session" role="group" aria-label="Session summary">
+          <div className="score-label">
+            <button type="button" className="session-insights-link" aria-label="Open session insights" title="Open Insights" onClick={() => onGoTo('insights')}>
+              {dataLabels.isPartialSession ? 'Reported move' : 'Session move'}<ActionIcon name="insights" />
+            </button>
+          </div>
+          <div className={`score-value${hideValues || !dailyMoveDirection ? '' : ` ${dailyMoveDirection}`}`}
+            aria-label={hideValues ? 'Session movement hidden' : `${dataLabels.sessionLabel} ${dataLabels.isPartialSession ? 'reported holdings' : 'portfolio'} move: ${dailyMove == null ? 'Unavailable' : dailyMoveText}`}>
+            {mask(dailyMove == null ? 'Unavailable' : dailyMoveText)}
+          </div>
+          <div className="score-foot score-session-basis" title={hideValues ? undefined : dataLabels.coverageLabel}>
+            {sessionDate ? <time dateTime={snapshot.dailyChangeDate!}>{sessionDate}</time> : 'Awaiting updates'}
+            {!hideValues && dataLabels.sessionTotal > 0 && (dataLabels.isPartialSession || dataLabels.sessionTotal < snapshot.positions.length) && <span>{snapshot.dailyChangeCount} of {dataLabels.sessionTotal} {dataLabels.sessionHoldings}</span>}
+          </div>
         </div>
         <div className="score">
           <div className="score-label">Invested</div>
@@ -370,36 +353,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
             {!stats.valuationComplete && <span className="score-return-basis"> on priced cost</span>}
           </div>
         </div>
-        <div className="score score--performers">
-          <div className="performer-half">
-            <div className="score-label">Best performer</div>
-            <div className="score-value sym" title={best ? mask(best.position.ticker) : undefined}>{mask(best ? best.position.ticker : '—')}</div>
-            <div className={`score-foot ${best ? (best.pct >= 0 ? 'up' : 'down') : ''}`}>
-              {best ? mask(`${best.pct >= 0 ? '+' : ''}${best.pct.toFixed(2)}%`) : 'No priced data'}
-            </div>
-          </div>
-          <div className="performer-half">
-            <div className="score-label">Worst performer</div>
-            <div className="score-value sym" title={worst ? mask(worst.position.ticker) : undefined}>{mask(worst ? worst.position.ticker : '—')}</div>
-            <div className={`score-foot ${worst ? (worst.pct >= 0 ? 'up' : 'down') : ''}`}>
-              {worst ? mask(`${worst.pct >= 0 ? '+' : ''}${worst.pct.toFixed(2)}%`) : 'No priced data'}
-            </div>
-          </div>
-        </div>
       </section>
-
-      <div className="daily-brief enter d2">
-        <div className="daily-brief-copy">
-          <span className="page-eyebrow">Session read</span>
-          <strong>{hideValues ? 'Session movement hidden.' : sessionSummary}</strong>
-          <span className="hint">{dataLabels.isPartialSession ? dataLabels.coverageLabel : 'Open Insights to understand more.'}</span>
-        </div>
-        <div className="daily-brief-stat">
-          <span className="score-label">{dataLabels.sessionLabel}</span>
-          <strong className={hideValues ? '' : dailyMoveDirection}>{dailyMove == null ? 'Unavailable' : mask(dailyMoveText)}</strong>
-        </div>
-        <button type="button" className="btn btn--secondary" onClick={() => onGoTo('insights')}><ActionIcon name="insights" />Open Insights</button>
-      </div>
 
       {/* Ticker tape */}
       <div className="tiker-wrap enter d3">
@@ -523,7 +477,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
                           >
                             ▾
                           </button>
-                          {mask(r.symbol)}
+                          <span className="ledger-symbol-name">{mask(r.symbol)}</span>
                         </td>
                         <td>{mask(fmtUnits(r.qty))}</td>
                         <td>{mask(formatCost(r.buy, r.costSupported))}</td>
@@ -893,30 +847,6 @@ function valueOf(p: PositionLike, live: Record<string, LiveQuote>): number {
 /** General return: (current value − invested) ÷ invested × 100. */
 function mfReturnPct(p: PositionLike, live: Record<string, LiveQuote>): number | null {
   return positionPnlPct(p, live)
-}
-
-/** Latest provider market time across all quotes, in IST. */
-function lastRefreshTime(live: Record<string, LiveQuote>): string {
-  const ats = Object.values(live).map((q) => q.at)
-  if (ats.length === 0) return '—'
-  const max = Math.max(...ats)
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(new Date(max))
-}
-
-function quoteSourceLabel(live: Record<string, LiveQuote>): string {
-  const sources = new Set(Object.values(live).map((quote) => quote.source))
-  if (sources.size !== 1) return 'mixed-source prices'
-  if (sources.has('nse-close')) return 'official NSE close'
-  if (sources.has('nav')) return 'latest NAV'
-  return 'best-effort quotes'
 }
 
 interface TickerCellData {

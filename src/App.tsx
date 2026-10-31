@@ -1,22 +1,29 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Activity, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Position } from './types'
 import type { View } from './useStore'
 import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
-import { Overview } from './views/Overview'
-import { PortfolioImportDialog } from './views/PortfolioImportDialog'
 import { ActionIcon } from './views/ActionIcon'
 
+const loadOverview = () => import('./views/Overview')
 const loadMonitorView = () => import('./views/MonitorView')
 const loadResearchView = () => import('./views/ResearchView')
 const loadSettingsView = () => import('./views/SettingsView')
 const loadInsightsView = () => import('./views/InsightsView')
 
+const Overview = lazy(() => loadOverview().then((module) => ({ default: module.Overview })))
 const MonitorView = lazy(() => loadMonitorView().then((module) => ({ default: module.MonitorView })))
 const ResearchView = lazy(() => loadResearchView().then((module) => ({ default: module.ResearchView })))
 const SettingsView = lazy(() => loadSettingsView().then((module) => ({ default: module.SettingsView })))
 const InsightsView = lazy(() => loadInsightsView().then((module) => ({ default: module.InsightsView })))
+const PortfolioImportDialog = lazy(() => import('./views/PortfolioImportDialog').then((module) => ({ default: module.PortfolioImportDialog })))
+
+const VIEW_LOADERS = { overview: loadOverview, holdings: loadMonitorView, research: loadResearchView, settings: loadSettingsView, insights: loadInsightsView }
+
+function preloadView(view: View) {
+  void VIEW_LOADERS[view]().catch(() => { /* Navigation can retry a failed preload. */ })
+}
 
 const NAV: { id: View; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -29,19 +36,20 @@ const NAV: { id: View; label: string }[] = [
 export default function App({ initialView }: { initialView: View }) {
   const [view, setView] = useState<View>(initialView)
   const [importOpen, setImportOpen] = useState(false)
+  const [importVisited, setImportVisited] = useState(false)
   const [importAccountId, setImportAccountId] = useState<string>()
-  const [researchVisited, setResearchVisited] = useState(initialView === 'research')
+  const [visitedViews, setVisitedViews] = useState(() => new Set<View>([initialView]))
   const [monitorQuery, setMonitorQuery] = useState('')
   const [researchReturn, setResearchReturn] = useState(false)
   const researchUrl = useRef(initialView === 'research' ? window.location.pathname + window.location.search : '/app/research')
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
-  const { positions, settings, setSettings } = useStore()
+  const { settings } = useStore()
 
   const navigate = useCallback((nextView: View, anchor?: string) => {
     if (window.location.pathname === '/app/research') researchUrl.current = window.location.pathname + window.location.search
     const nextPath = (nextView === 'research' ? researchUrl.current : pathForView(nextView)) + (anchor ? `#${anchor}` : '')
     if (window.location.pathname + window.location.search + window.location.hash !== nextPath) window.history.pushState({}, '', nextPath)
-    if (nextView === 'research') setResearchVisited(true)
+    setVisitedViews((visited) => visited.has(nextView) ? visited : new Set([...visited, nextView]))
     if (nextView === 'holdings') setMonitorQuery('')
     setResearchReturn(false)
     setView(nextView)
@@ -55,6 +63,7 @@ export default function App({ initialView }: { initialView: View }) {
 
   const openPortfolioImport = (accountId?: string) => {
     setImportAccountId(accountId)
+    setImportVisited(true)
     setImportOpen(true)
   }
 
@@ -67,7 +76,7 @@ export default function App({ initialView }: { initialView: View }) {
     const onPopState = () => {
       const route = entryRoute(window.location.pathname, window.location.search)
       if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
-      if (route.view === 'research') setResearchVisited(true)
+      setVisitedViews((visited) => visited.has(route.view) ? visited : new Set([...visited, route.view]))
       setView(route.view)
     }
     window.addEventListener('popstate', onPopState)
@@ -83,7 +92,33 @@ export default function App({ initialView }: { initialView: View }) {
   }, [settings.density, settings.mode])
 
   return (
-    <div className="app-shell">
+    <AppShell view={view} navigate={navigate}>
+      <main className="main">
+        {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}><ActionIcon name="research" />Back to Research</button>}
+        {NAV.filter((item) => item.id !== 'settings' && visitedViews.has(item.id)).map((item) => (
+          <Activity key={item.id} mode={view === item.id ? 'visible' : 'hidden'}>
+            <div className={item.id === 'overview' ? 'overview-sections' : undefined} hidden={view !== item.id}>
+              <Suspense fallback={<div className="view-loading" role="status">Loading {item.label.toLowerCase()}…</div>}>
+                {item.id === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
+                {item.id === 'research' && <ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} />}
+                {item.id === 'holdings' && <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
+                {item.id === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
+              </Suspense>
+            </div>
+          </Activity>
+        ))}
+        {view === 'settings' && <Suspense fallback={<div className="view-loading" role="status">Loading settings…</div>}><SettingsView onRequestImport={openPortfolioImport} /></Suspense>}
+      </main>
+      {importVisited && <Suspense fallback={<div className="view-loading" role="status">Opening import…</div>}><PortfolioImportDialog open={importOpen} accountId={importAccountId} onClose={() => setImportOpen(false)} /></Suspense>}
+    </AppShell>
+  )
+}
+
+function AppShell({ view, navigate, children }: { view: View; navigate: (view: View, anchor?: string) => void; children: ReactNode }) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const { settings, setSettings } = useStore()
+  return (
+    <div className={`app-shell${sidebarCollapsed ? ' app-shell--collapsed' : ''}`}>
       <aside className="sidebar">
         <div className="sidebar-head">
           <button className="brand brand--home" type="button" onClick={() => navigate('overview')} aria-label="Go to Overview">
@@ -107,13 +142,25 @@ export default function App({ initialView }: { initialView: View }) {
           </button>
         </div>
 
-        <nav className="nav">
-          <span className="nav-label">Workspace</span>
+        <nav className="nav" id="workspace-navigation" aria-label="Workspace">
+          <div className="nav-heading">
+            <span className="nav-label">Workspace</span>
+            <button type="button" className="sidebar-toggle" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!sidebarCollapsed} aria-controls="workspace-navigation">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
+            </button>
+          </div>
           {NAV.map((item) => (
             <button
               key={item.id}
               className={`nav-item${view === item.id ? ' nav-item--active' : ''}`}
               aria-current={view === item.id ? 'page' : undefined}
+              aria-label={item.label}
+              title={sidebarCollapsed ? item.label : undefined}
+              onPointerEnter={() => preloadView(item.id)}
+              onFocus={() => preloadView(item.id)}
+              onTouchStart={() => preloadView(item.id)}
               onClick={() => navigate(item.id)}
             >
               <span className="nav-item-icon"><ActionIcon name={item.id} /></span>
@@ -124,28 +171,8 @@ export default function App({ initialView }: { initialView: View }) {
           ))}
         </nav>
 
-        <div className="sidebar-foot">
-          <span className="hint">
-            {positions.length > 0
-              ? `${positions.length} position${positions.length === 1 ? '' : 's'} tracked`
-              : 'No portfolio loaded'}
-          </span>
-        </div>
       </aside>
-
-      <main className="main">
-        {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}><ActionIcon name="research" />Back to Research</button>}
-        {view === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
-        {researchVisited && <div hidden={view !== 'research'}><Suspense fallback={<div className="view-loading">Loading research...</div>}><ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} /></Suspense></div>}
-        {view !== 'overview' && (
-          <Suspense fallback={<div className="view-loading">Loading workspace…</div>}>
-            {view === 'holdings' && <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
-            {view === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
-            {view === 'settings' && <SettingsView onRequestImport={openPortfolioImport} />}
-          </Suspense>
-        )}
-      </main>
-      <PortfolioImportDialog open={importOpen} accountId={importAccountId} onClose={() => setImportOpen(false)} />
+      {children}
     </div>
   )
 }

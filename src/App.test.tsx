@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -8,15 +8,22 @@ import type { Position, Settings } from './types'
 import type { View } from './useStore'
 
 const state = vi.hoisted(() => ({
-  positions: [] as Position[], settings: {} as Settings, liveQuotes: {}, setSettings: vi.fn(),
+  positions: [] as Position[], settings: {} as Settings, liveQuotes: {}, setSettings: vi.fn(), monitorEffect: vi.fn(), monitorCleanup: vi.fn(), overviewRender: vi.fn(),
 }))
 vi.mock('./useStore', () => ({ useStore: () => state }))
 vi.mock('./theme', () => ({ applyTheme: vi.fn() }))
-vi.mock('./views/Overview', () => ({ Overview: ({ onGoTo }: { onGoTo: (view: View, anchor?: string) => void }) => <><h1>Overview workspace</h1><button onClick={() => onGoTo('settings', 'instrument-review')}>Review listings</button></> }))
+vi.mock('./views/Overview', () => ({ Overview: ({ onGoTo }: { onGoTo: (view: View, anchor?: string) => void }) => {
+  state.overviewRender()
+  return <><h1>Overview workspace</h1><button onClick={() => onGoTo('settings', 'instrument-review')}>Review listings</button></>
+} }))
 vi.mock('./views/MonitorView', () => ({
   MonitorView: ({ initialQuery }: { initialQuery: string }) => <section aria-label="Monitor workspace"><output>{initialQuery}</output></section>,
 }))
-vi.mock('./views/InsightsView', () => ({ InsightsView: () => <h1>Insights workspace</h1> }))
+vi.mock('./views/InsightsView', () => ({ InsightsView: () => {
+  const [selection, setSelection] = useState('nifty')
+  useEffect(() => { state.monitorEffect(); return state.monitorCleanup }, [])
+  return <><h1>Insights workspace</h1><input aria-label="Selected benchmark" value={selection} onChange={(event) => setSelection(event.target.value)} /></>
+} }))
 vi.mock('./views/SettingsView', () => ({ SettingsView: ({ onRequestImport }: { onRequestImport: () => void }) => <><h1>Settings workspace</h1><button onClick={onRequestImport}>Import holdings</button></> }))
 vi.mock('./views/PortfolioImportDialog', () => ({
   PortfolioImportDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) => open ? <div role="dialog" aria-label="Portfolio import"><button onClick={onClose}>Close import</button></div> : null,
@@ -35,6 +42,9 @@ beforeEach(() => {
   state.positions = [holding]
   state.settings = { ...loadSettings(), allowExternalData: false }
   state.setSettings.mockReset().mockImplementation((settings: Settings) => { state.settings = settings })
+  state.monitorEffect.mockReset()
+  state.monitorCleanup.mockReset()
+  state.overviewRender.mockReset()
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -51,6 +61,28 @@ async function render(view: View, path: string) {
   await act(async () => root.render(<App initialView={view} />))
   await act(async () => vi.dynamicImportSettled())
 }
+
+it('keeps navigation and privacy controls usable while the desktop sidebar is collapsed', async () => {
+  await render('overview', '/app')
+  const toggle = container.querySelector<HTMLButtonElement>('.sidebar-toggle')!
+  const pageRenders = state.overviewRender.mock.calls.length
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  await act(async () => toggle.click())
+  expect(toggle.getAttribute('aria-label')).toBe('Expand sidebar')
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(container.querySelector('.app-shell--collapsed')).not.toBeNull()
+  expect(state.overviewRender).toHaveBeenCalledTimes(pageRenders)
+  expect([...container.querySelectorAll('.nav-item')].map((button) => button.getAttribute('aria-label'))).toEqual(['Overview', 'Insights', 'Monitor', 'Research', 'Settings'])
+  await navigate('Insights')
+  expect([...container.querySelectorAll('h1')].find((heading) => !heading.closest('[hidden]'))?.textContent).toBe('Insights workspace')
+  expect(container.querySelector('.app-shell--collapsed')).not.toBeNull()
+  const privacy = container.querySelector<HTMLButtonElement>('.shell-privacy-toggle')!
+  await act(async () => privacy.click())
+  expect(state.setSettings).toHaveBeenCalledWith(expect.objectContaining({ hideValues: true }))
+  await act(async () => toggle.click())
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(container.querySelector('.app-shell--collapsed')).toBeNull()
+})
 
 async function click(text: string) {
   const button = [...container.querySelectorAll<HTMLButtonElement>('button')]
@@ -86,6 +118,20 @@ async function browserBack() {
 }
 
 describe('workspace navigation', () => {
+  it('restores a visited page and its selections while pausing its effects away from the page', async () => {
+    await render('overview', '/app')
+    expect(state.monitorEffect).not.toHaveBeenCalled()
+    await navigate('Insights')
+    const selection = container.querySelector<HTMLInputElement>('[aria-label="Selected benchmark"]')!
+    await edit(selection, 'sensex')
+    await navigate('Monitor')
+    expect(state.monitorCleanup).toHaveBeenCalledTimes(1)
+    await navigate('Insights')
+    expect(container.querySelector<HTMLInputElement>('[aria-label="Selected benchmark"]')?.value).toBe('sensex')
+    expect(container.querySelector('[aria-label="Selected benchmark"]')).toBe(selection)
+    expect(state.monitorEffect).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps one shared privacy control across every workspace and preserves the route when toggled', async () => {
     await render('overview', '/app')
     const control = container.querySelector<HTMLButtonElement>('.shell-privacy-toggle')!

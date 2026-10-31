@@ -1,6 +1,6 @@
 import type { AccountStatement, Folio, Position } from './types'
 import type { ImportPreview } from './useStore'
-import { listingIdentity, normalizePosition } from './instruments'
+import { hasVerifiedNsePricing, listingIdentity, normalizePosition } from './instruments'
 
 export interface StatementImportOptions {
   operation: 'add' | 'replace'
@@ -27,7 +27,9 @@ const MAX_ACCOUNTS = 100
 const MAX_POSITIONS = 5_000
 
 function copyPosition(position: Position): Position {
-  return { ...position, ...(position.mfScheme ? { mfScheme: { ...position.mfScheme } } : {}) }
+  return { ...position, ...(position.mfScheme ? { mfScheme: { ...position.mfScheme } } : {}),
+    ...(position.pricingListing ? { pricingListing: { ...position.pricingListing } } : {}),
+  }
 }
 
 function statementFor(account: Folio): AccountStatement {
@@ -73,9 +75,16 @@ function groupedPositions(positions: Position[]): Map<string, Position[]> {
   return grouped
 }
 
-function preserveFundMappings(incoming: Position[], previous: Position[]): Position[] {
+function preserveReviewedMappings(incoming: Position[], previous: Position[]): Position[] {
   const nameKey = (position: Position) => JSON.stringify([position.name.trim().toLowerCase(), position.folio?.trim() ?? ''])
   const confirmed = new Map<string, Position['mfScheme']>()
+  const pricing = new Map<string, Position['pricingListing']>()
+  for (const position of previous) {
+    if (!hasVerifiedNsePricing(position)) continue
+    const key = `${position.type}:${position.isin}`
+    if (!pricing.has(key)) pricing.set(key, position.pricingListing)
+    else if (pricing.get(key)?.providerSymbol !== position.pricingListing?.providerSymbol) pricing.set(key, undefined)
+  }
   for (const position of previous) {
     if (position.type !== 'mutual-fund' || !position.name.trim() || position.mfScheme?.source !== 'confirmed') continue
     const key = nameKey(position)
@@ -83,6 +92,10 @@ function preserveFundMappings(incoming: Position[], previous: Position[]): Posit
     else if (confirmed.get(key)?.code !== position.mfScheme.code) confirmed.set(key, undefined)
   }
   return incoming.map((position) => {
+    if (position.type !== 'mutual-fund' && !position.pricingListing) {
+      const mapping = pricing.get(`${position.type}:${position.isin}`)
+      return mapping ? normalizePosition({ ...position, pricingListing: { ...mapping } }) : position
+    }
     if (position.type !== 'mutual-fund' || position.mfScheme || !position.name.trim()) return position
     const mapping = confirmed.get(nameKey(position))
     return mapping ? normalizePosition({ ...position, mfScheme: { ...mapping } }) : position
@@ -155,7 +168,7 @@ export function planStatementImport(
   const alias = options.accountAlias === undefined ? current?.name ?? preview.fileName.trim() : options.accountAlias.trim()
   if (!alias || alias.length > 500) throw new Error('Enter an account alias between 1 and 500 characters.')
   let positions = preview.positions.map((position) => normalizePosition(copyPosition(position)))
-  if (current) positions = preserveFundMappings(positions, current.positions)
+  if (current) positions = preserveReviewedMappings(positions, current.positions)
   const currentStatement = current ? statementFor(current) : undefined
   const importedAccount = folios.find((folio) => folio.statement?.id === preview.id)
   const warnings: string[] = []
@@ -168,7 +181,7 @@ export function planStatementImport(
   })
   if (importedAccount) {
     if ((operation === 'add' || importedAccount.id === accountId)
-      && importedAccount.statement?.statementDate === statementDate && sameHoldings(importedAccount.positions, preserveFundMappings(positions, importedAccount.positions))) return unchanged(importedAccount)
+      && importedAccount.statement?.statementDate === statementDate && sameHoldings(importedAccount.positions, preserveReviewedMappings(positions, importedAccount.positions))) return unchanged(importedAccount)
     throw new Error('This statement preview has already been imported. Prepare the file again for another account or update.')
   }
   if (folios.some((folio) => folio.previousRevision?.statement.id === preview.id) || (operation === 'add' && current)) {

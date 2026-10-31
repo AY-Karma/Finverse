@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { clampViewportStart, createChartViewport, shiftViewportStart } from '../chartViewport'
 import { ActionIcon } from './ActionIcon'
+import { observeSettledResize } from '../observeSettledResize'
 import { DitherAreaFill } from './DitherAreaFill'
 import type { DitherColor } from '../components/dither-kit/palette'
 
@@ -164,14 +165,7 @@ export function InteractiveTrendChart({
       setChartSize((current) => current.width === width && current.height === height ? current : { width, height })
     }
     updateSize()
-    const observer = new ResizeObserver(updateSize)
-    observer.observe(chart)
-    observer.observe(svg)
-    window.addEventListener('resize', updateSize)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', updateSize)
-    }
+    return observeSettledResize([chart, svg], updateSize)
   }, [])
 
   const { width: chartWidth, height: chartHeight } = chartSize

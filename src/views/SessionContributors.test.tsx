@@ -55,7 +55,7 @@ it('ranks quantity-weighted contributions by absolute impact and reconciles the 
   expect(rows.map((row) => row.querySelector('strong')?.textContent)).toEqual(['+₹200.00', '−₹150.00', '+₹40.00', '−₹30.00', '+₹20.00'])
   expect(rows[1].querySelector('strong')?.className).toContain('down')
   expect(container.querySelector('.session-contributors-remainder')?.textContent).toBe('Other reporting holdings 2 holdings+₹10.00')
-  expect(container.querySelector('.session-contributors-total')?.textContent).toBe('All holdings combined+₹90.00')
+  expect(container.querySelector('.session-contributors-total')?.textContent).toBe('Session holdings combined+₹90.00')
   expect(snapshot.contributions.map((item) => item.symbol)).toEqual(originalOrder)
 })
 
@@ -65,7 +65,7 @@ it('shows fewer contributors and labels an incomplete move using only reported f
   snapshot.dailyChange = null
   await render(snapshot)
   expect(container.querySelectorAll('.session-contributors-row')).toHaveLength(2)
-  expect(container.textContent).toContain('whole-portfolio move is unavailable until every holding reports')
+  expect(container.textContent).toContain('session move is incomplete until every eligible holding reports')
   expect(container.querySelector('.session-contributors-total')?.textContent).toBe('Reported holdings combined−₹5.00')
   expect(container.textContent).not.toContain('MISSING')
   expect(container.textContent).not.toContain('INVALID')
@@ -75,7 +75,7 @@ it('shows fewer contributors and labels an incomplete move using only reported f
 it('distinguishes unchanged reporting holdings from unavailable changes', async () => {
   await render(snapshotFor([{ symbol: 'FLAT', change: 0 }, { symbol: 'ALSO FLAT', change: 0 }]))
   expect(container.textContent).toContain('No rise or fall reported')
-  expect(container.querySelector('.session-contributors-total')?.textContent).toBe('All holdings combined₹0.00')
+  expect(container.querySelector('.session-contributors-total')?.textContent).toBe('Session holdings combined₹0.00')
   expect(container.querySelectorAll('.session-contributors-row')).toHaveLength(0)
 })
 
@@ -89,9 +89,9 @@ it('gives quote and settings guidance when no change amounts are reported', asyn
 
 it('keeps same-label holdings of different asset types separate without duplicate keys', async () => {
   const errors = vi.spyOn(console, 'error')
-  await render(snapshotFor([{ symbol: 'SAME', type: 'stock', change: 5 }, { symbol: 'SAME', type: 'mutual-fund', change: -3 }]))
+  await render(snapshotFor([{ symbol: 'SAME', type: 'stock', change: 5 }, { symbol: 'SAME', type: 'etf', change: -3 }]))
   expect(container.querySelectorAll('.session-contributors-row')).toHaveLength(2)
   expect(container.textContent).toContain('Equity')
-  expect(container.textContent).toContain('Mutual fund')
+  expect(container.textContent).toContain('ETF')
   expect(errors.mock.calls.flat().join(' ')).not.toContain('same key')
 })

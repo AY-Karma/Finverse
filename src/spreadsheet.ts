@@ -1,7 +1,8 @@
 import * as XLSX from '@e965/xlsx'
 import type { AssetType, Exchange, Position } from './types'
 import { hasCompatibleFundScheme, isMfSchemeMapping } from './fundSchemes'
-import { normalizePosition } from './instruments'
+import { hasVerifiedNsePricing, normalizePosition } from './instruments'
+import { isNsePricingListing } from './nsePricingProtocol'
 import { MAX_IMPORT_FILE_BYTES } from './importLimits'
 const MAX_IMPORT_ROWS = 100_000
 const MAX_IMPORT_POSITIONS = 5_000
@@ -120,6 +121,7 @@ function validateSheetDimensions(sheetName: string, sheet: unknown, totalCells: 
 }
 
 type IdentityField = 'isin' | 'exchange' | 'currency' | 'sector' | 'industry' | 'providerSymbol' | 'exchangeSource' | 'identityIssue' | 'reportedExchange' | 'reportedCurrency' | 'mfSchemeCode' | 'mfSchemeName' | 'mfMappingSource'
+  | 'pricingExchange' | 'pricingSymbol' | 'pricingIsin' | 'pricingAssetType' | 'pricingSource' | 'pricingVerifiedAt'
 type FieldKey = 'ticker' | 'quantity' | 'buyPrice' | 'lastPrice' | 'investedValue' | 'currentValue' | 'name' | 'type' | IdentityField
 
 const IDENTITY_ALIASES: Record<IdentityField, string[]> = {
@@ -130,6 +132,8 @@ const IDENTITY_ALIASES: Record<IdentityField, string[]> = {
   exchangeSource: ['exchange source'], identityIssue: ['identity issue'],
   reportedExchange: ['reported exchange'], reportedCurrency: ['reported currency'],
   mfSchemeCode: ['mf scheme code', 'nav scheme code'], mfSchemeName: ['mf scheme name'], mfMappingSource: ['mf mapping source'],
+  pricingExchange: ['pricing exchange'], pricingSymbol: ['pricing symbol'], pricingIsin: ['pricing isin'],
+  pricingAssetType: ['pricing asset type'], pricingSource: ['pricing verification source'], pricingVerifiedAt: ['pricing verified at'],
 }
 
 const FIELD_ALIASES: Record<FieldKey, string[]> = {
@@ -410,6 +414,11 @@ function identityFields(row: unknown[], cols: Columns<IdentityField>): Partial<P
   const exchange = ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER'].includes(rawExchange) ? rawExchange as Exchange : rawExchange ? 'OTHER' : undefined
   const source = text('exchangeSource')
   const mapping = { code: parseNumber(cols.mfSchemeCode == null ? null : row[cols.mfSchemeCode]), name: text('mfSchemeName'), source: text('mfMappingSource') }
+  const pricingListing = {
+    exchange: text('pricingExchange'), providerSymbol: text('pricingSymbol'), isin: text('pricingIsin'),
+    type: text('pricingAssetType'), source: text('pricingSource'),
+    verifiedAt: parseNumber(cols.pricingVerifiedAt == null ? null : row[cols.pricingVerifiedAt]),
+  }
   return {
     identityVersion: 2, exchange, exchangeSource: source === 'explicit' || source === 'inferred' ? source : rawExchange ? 'explicit' : 'inferred',
     currency: rawCurrency === 'INR' ? rawCurrency : undefined,
@@ -418,6 +427,7 @@ function identityFields(row: unknown[], cols: Columns<IdentityField>): Partial<P
     isin: text('isin').toUpperCase() || undefined, sector: text('sector') || undefined, industry: text('industry') || undefined,
     providerSymbol: text('providerSymbol').toUpperCase() || undefined, identityIssue: text('identityIssue') || undefined,
     ...(isMfSchemeMapping(mapping) ? { mfScheme: mapping } : {}),
+    ...(isNsePricingListing(pricingListing) ? { pricingListing } : {}),
   }
 }
 
@@ -445,6 +455,10 @@ function hasFinancialData(row: unknown[], columns: (number | null)[]): boolean {
 }
 
 function prepareHolding(position: Position, validation: RowValidation, index: number): Position | null {
+  if (position.pricingListing && !hasVerifiedNsePricing(position)) {
+    rejectRow(validation, index, 'Identity', 'The NSE pricing preference conflicts with the holding ISIN, asset type or native currency. Review its listing before importing.')
+    return null
+  }
   if (position.mfScheme && !position.reportedCurrency && !hasCompatibleFundScheme(position)) {
     rejectRow(validation, index, 'Identity', 'The MF scheme mapping conflicts with the holding plan, option or native currency. Correct the mapping before importing.')
     return null

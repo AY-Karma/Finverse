@@ -1,5 +1,6 @@
 import { MAX_EVENT_SYMBOLS, isEventDate, isEventSymbol, isOfficialEventUrl, type MarketEventPayload, type MarketEventIssue } from '../src/marketEventsProtocol.js'
 import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { readNseCsv } from './nseReference.js'
 
 const DAY_MS = 86_400_000
 const IST_OFFSET_MS = 19_800_000
@@ -17,34 +18,7 @@ function queryDate(value: string): string { return value.split('-').reverse().jo
 function text(value: unknown, maximum = 500): string { return typeof value === 'string' ? value.trim().slice(0, maximum) : '' }
 
 function equityReference(csv: string): Record<string, string> {
-  const rows: string[][] = []
-  let row: string[] = [], field = '', quoted = false, closedQuote = false
-  const endField = () => { row.push(field.trim()); field = ''; closedQuote = false }
-  const endRow = () => {
-    endField()
-    if (row.some(Boolean)) rows.push(row)
-    row = []
-    if (rows.length > 10_000) throw new Error('Equity reference is too large')
-  }
-  for (let index = 0; index < csv.length; index += 1) {
-    const character = csv[index]
-    if (quoted) {
-      if (character !== '"') field += character
-      else if (csv[index + 1] === '"') { field += '"'; index += 1 }
-      else { quoted = false; closedQuote = true }
-    } else if (character === ',') endField()
-    else if (character === '\r' || character === '\n') {
-      endRow()
-      if (character === '\r' && csv[index + 1] === '\n') index += 1
-    } else if (character === '"') {
-      if (field.trim() || closedQuote) throw new Error('Invalid equity reference CSV')
-      field = ''; quoted = true
-    } else if (closedQuote) {
-      if (character.trim()) throw new Error('Invalid equity reference CSV')
-    } else field += character
-  }
-  if (quoted) throw new Error('Invalid equity reference CSV')
-  if (field || row.length) endRow()
+  const rows = readNseCsv(csv)
   const header = rows.shift()?.map((value) => value.replace(/^\uFEFF/, '').trim().toUpperCase()) ?? []
   const required = ['SYMBOL', 'SERIES', 'ISIN NUMBER']
   if (required.some((name) => header.filter((column) => column === name).length !== 1)) throw new Error('Equity reference columns changed')
