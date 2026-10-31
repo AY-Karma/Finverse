@@ -150,28 +150,33 @@ function quoteMetrics(position: Position, quote: LiveQuote): MonitorMetric[] {
   return metrics
 }
 
-function quoteIdentities(positions: Position[]): Map<string, Set<string>> {
+function indexRulePositions(positions: Position[]) {
   const identities = new Map<string, Set<string>>()
+  const byIdentity = new Map<string, { first: Position; byId: Map<string, Position> }>()
   for (const position of positions) {
     const key = quoteKey(position)
+    const identity = holdingIdentity(position)
     const set = identities.get(key) ?? new Set<string>()
-    set.add(holdingIdentity(position))
+    set.add(identity)
     identities.set(key, set)
+    const group = byIdentity.get(identity) ?? { first: position, byId: new Map<string, Position>() }
+    if (!group.byId.has(position.id)) group.byId.set(position.id, position)
+    byIdentity.set(identity, group)
   }
-  return identities
+  return { identities, byIdentity }
 }
 
-function findRulePosition(rule: MonitorRule, positions: Position[], identities: Map<string, Set<string>>): Position | undefined {
-  const match = positions.find((position) => position.id === rule.holdingId && holdingIdentity(position) === rule.instrumentIdentity)
-    ?? positions.find((position) => holdingIdentity(position) === rule.instrumentIdentity)
-  return match && identities.get(quoteKey(match))?.size === 1 ? match : undefined
+function findRulePosition(rule: MonitorRule, index: ReturnType<typeof indexRulePositions>): Position | undefined {
+  const group = index.byIdentity.get(rule.instrumentIdentity)
+  const match = group?.byId.get(rule.holdingId) ?? group?.first
+  return match && index.identities.get(quoteKey(match))?.size === 1 ? match : undefined
 }
 
 export function reconcileMonitorRules(rules: MonitorRule[], positions: Position[]): MonitorRule[] {
-  const identities = quoteIdentities(positions)
+  const index = indexRulePositions(positions)
   return rules.map((rule) => {
     if (rule.unresolved) return rule
-    const position = findRulePosition(rule, positions, identities)
+    const position = findRulePosition(rule, index)
     return position ? { ...rule, holdingId: position.id, holding: position.name || rule.holding || position.ticker } : { ...rule, unresolved: true }
   })
 }
@@ -181,17 +186,17 @@ type RuleObservation = {
 }
 
 export function monitorRuleObservation(rule: MonitorRule, positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean): RuleObservation {
-  return observeRule(rule, positions, quotes, now, allowed, quoteIdentities(positions))
+  return observeRule(rule, quotes, now, allowed, indexRulePositions(positions))
 }
 
 export function monitorRuleObservations(rules: MonitorRule[], positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean): Map<string, RuleObservation> {
   if (!rules.length) return new Map()
-  const identities = quoteIdentities(positions)
-  return new Map(rules.map((rule) => [rule.id, observeRule(rule, positions, quotes, now, allowed, identities)]))
+  const index = indexRulePositions(positions)
+  return new Map(rules.map((rule) => [rule.id, observeRule(rule, quotes, now, allowed, index)]))
 }
 
-function observeRule(rule: MonitorRule, positions: Position[], quotes: Record<string, LiveQuote>, now: number, allowed: boolean, identities: Map<string, Set<string>>): RuleObservation {
-  const position = findRulePosition(rule, positions, identities)
+function observeRule(rule: MonitorRule, quotes: Record<string, LiveQuote>, now: number, allowed: boolean, index: ReturnType<typeof indexRulePositions>): RuleObservation {
+  const position = findRulePosition(rule, index)
   if (rule.unresolved || !position || position.identityIssue || !hasSupportedValuationCurrency(position)) return { state: 'Unavailable' }
   if (!rule.active) return { state: 'Paused' }
   const quote = quotes[quoteKey(position)]
@@ -220,9 +225,9 @@ export function evaluateMonitorRules(state: MonitorState, positions: Position[],
   if (!allowed) return state
   const seen = new Set(state.alerts.map((alert) => alert.observationKey))
   const added: MonitorAlert[] = []
-  const identities = quoteIdentities(positions)
+  const index = indexRulePositions(positions)
   for (const rule of state.rules) {
-    const position = findRulePosition(rule, positions, identities)
+    const position = findRulePosition(rule, index)
     if (!position || position.identityIssue || !hasSupportedValuationCurrency(position)) continue
     const quote = quotes[quoteKey(position)]
     if (!usableQuote(quote, now) || !freshQuote(quote, now) || !ruleMatches(rule, quote)

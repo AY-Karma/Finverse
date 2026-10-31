@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
@@ -36,7 +36,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [benchmarkError, setBenchmarkError] = useState(false)
   const [benchmarkReload, setBenchmarkReload] = useState(0)
   const reusableBenchmark = useRef<{ key: string; at: number; points: typeof benchmarkPoints } | null>(null)
-  const [selectedExposureSymbol, setSelectedExposureSymbol] = useState<string | null>(null)
   const [hoveredSector, setHoveredSector] = useState<string | null>(null)
   const [focusedSector, setFocusedSector] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
@@ -154,7 +153,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const value = (amount: number) => mask(formatCurrency(amount))
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
-  const selectedExposure = exposure.find((item) => item.symbol === selectedExposureSymbol) ?? exposure[0]
   const exposureSectors = snapshot.sectors.slice(0, 10)
   const activeSector = exposureSectors.find((sector) => sector.label === hoveredSector) ?? exposureSectors.find((sector) => sector.label === focusedSector)
   const activeSectorIndex = activeSector ? exposureSectors.indexOf(activeSector) : -1
@@ -288,7 +286,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
         <section className="panel insight-panel insight-panel--allocation">
           <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">02 · Exposure</span></div></div>
-          {hide ? <HiddenValuesState /> : <AllocationMap items={exposure} unmapped={unmappedExposure} selected={selectedExposure?.symbol ?? null} onSelect={setSelectedExposureSymbol} formatValue={value} highlight={exposureHighlight} />}
+          <AllocationMap items={exposure} unmapped={unmappedExposure} formatValue={value} highlight={exposureHighlight} hideValues={hide} />
         </section>
 
         <section className="panel insight-panel insight-panel--exposure">
@@ -376,34 +374,42 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
   )
 }
 
+type AllocationItem = { symbol: string; value: number; weight: number; pnl: number | null; sector: string }
+
+const AllocationTile = memo(function AllocationTile({ item, active, highlight, onSelect }: {
+  item: AllocationItem
+  active: boolean
+  highlight: ExposureHighlight | null
+  onSelect: (symbol: string) => void
+}) {
+  const widthPercent = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12))) / 12 * 100
+  const exposureClass = !highlight ? '' : item.sector === highlight.label ? ' allocation-tile--exposure-match' : ' allocation-tile--exposure-muted'
+  const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
+  return <button type="button" className={`allocation-tile${active ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={active} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
+    <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
+    <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
+  </button>
+})
+
 function AllocationMap({
   items,
   unmapped,
-  selected,
-  onSelect,
   formatValue,
   highlight,
+  hideValues,
 }: {
-  items: { symbol: string; value: number; weight: number; pnl: number | null; sector: string }[]
+  items: AllocationItem[]
   unmapped: { symbol: string; priced: boolean }[]
-  selected: string | null
-  onSelect: (symbol: string) => void
   formatValue: (amount: number) => string
   highlight: ExposureHighlight | null
+  hideValues: boolean
 }) {
+  const [selected, onSelect] = useState<string | null>(null)
+  if (hideValues) return <HiddenValuesState />
   const active = items.find((item) => item.symbol === selected) ?? items[0]
   return <div className="allocation-map-wrap" style={highlight ? { '--exposure-highlight': highlight.color } as CSSProperties : undefined}>
     <div className="allocation-map" aria-label="Allocation treemap">
-      {items.map((item) => {
-        const widthPercent = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12))) / 12 * 100
-        const isActive = item.symbol === active?.symbol
-        const exposureClass = !highlight ? '' : item.sector === highlight.label ? ' allocation-tile--exposure-match' : ' allocation-tile--exposure-muted'
-        const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
-        return <button key={item.symbol} type="button" className={`allocation-tile${isActive ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={isActive} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
-          <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
-          <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
-        </button>
-      })}
+      {items.map((item) => <AllocationTile key={item.symbol} item={item} active={item.symbol === active?.symbol} highlight={highlight} onSelect={onSelect} />)}
     </div>
     {unmapped.length > 0 && <div className="allocation-unmapped">
       <span className="score-label">Outside treemap</span>

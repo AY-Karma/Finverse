@@ -31,7 +31,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
   const [operation, setOperation] = useState<StatementImportOptions['operation']>('add')
   const [accountId, setAccountId] = useState('')
   const [expectedStatementId, setExpectedStatementId] = useState<string>()
-  const [accountAlias, setAccountAlias] = useState('')
+  const accountAlias = useRef('')
   const [statementDate, setStatementDate] = useState('')
   const [complete, setComplete] = useState(false)
   const [allowUndatedReplacement, setAllowUndatedReplacement] = useState(false)
@@ -55,7 +55,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
     setStatementDate('')
     setComplete(false)
     setAllowUndatedReplacement(false)
-    setAccountAlias('')
+    accountAlias.current = ''
     if (files.length > MAX_IMPORT_FILES) {
       setError(`Choose ${MAX_IMPORT_FILES} or fewer files at once.`)
       if (inputRef.current) inputRef.current.value = ''
@@ -92,7 +92,6 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
   const needsDateAcknowledgement = replacing && (!statementDate || !target?.statement?.statementDate)
   const options: StatementImportOptions = {
     operation, accountId: replacing ? accountId : undefined,
-    accountAlias: !replacing && previews.length === 1 ? accountAlias.trim() || undefined : undefined,
     statementDate: statementDate || null, complete,
     expectedStatementId: replacing ? expectedStatementId : undefined,
     allowUndatedReplacement: replacing && allowUndatedReplacement,
@@ -116,10 +115,10 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
     } catch (cause) {
       return { nextFolios: folios, added: [] as Position[], removed: [] as Position[], changed: [] as { before: Position; after: Position }[], error: cause instanceof Error && cause.message ? cause.message : 'This statement cannot be imported.' }
     }
-  }, [previews, folios, operation, accountId, accountAlias, statementDate, complete, expectedStatementId, allowUndatedReplacement])
-  const resultingSnapshot = review && !review.error
+  }, [previews, folios, operation, accountId, statementDate, complete, expectedStatementId, allowUndatedReplacement])
+  const resultingSnapshot = useMemo(() => review && !review.error
     ? investmentWorkspace.readSnapshot({ folios: review.nextFolios, quotes: visibleQuotes(settings?.allowExternalData ?? false, liveQuotes ?? {}) })
-    : null
+    : null, [review, settings?.allowExternalData, liveQuotes])
   const hideValues = settings?.hideValues ?? false
   const money = (amount: number) => privateValue(formatCurrency(amount), hideValues)
   const quantity = (amount: number) => privateValue(QUANTITY_FORMATTER.format(amount), hideValues)
@@ -132,7 +131,8 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
     setSaving(true)
     setError(null)
     try {
-      const saved = previews.length === 1 ? await commitImport(previews[0], options) : await commitImports(previews, options)
+      const saveOptions = { ...options, accountAlias: !replacing && previews.length === 1 ? accountAlias.current.trim() || undefined : undefined }
+      const saved = previews.length === 1 ? await commitImport(previews[0], saveOptions) : await commitImports(previews, saveOptions)
       if (saved !== true) {
         setError('The import could not be saved. Your review is still here. Try again after resolving the workspace error.')
         return
@@ -274,7 +274,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
                   {folios.map((folio) => <option key={folio.id} value={folio.id}>{folio.name}</option>)}
                 </select>
               </label> : previews.length === 1 && <label className="statement-field">Account alias, optional
-                <input className="input" maxLength={200} placeholder={previews[0].fileName} value={accountAlias} onChange={(event) => { setAccountAlias(event.target.value); setError(null) }} />
+                <input className="input" maxLength={200} placeholder={previews[0].fileName} defaultValue={accountAlias.current} onChange={(event) => { accountAlias.current = event.target.value; setError(null) }} />
               </label>}
               <label className="statement-field">Statement date, optional
                 <input className="input" type="date" value={statementDate} onChange={(event) => { setStatementDate(event.target.value); setAllowUndatedReplacement(false); setError(null) }} />
