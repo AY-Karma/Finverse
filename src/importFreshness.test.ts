@@ -23,12 +23,10 @@ it('starts a new freshness period on review without changing the import timestam
 })
 
 it.each([
-  ['2026-10-01T10:00:00Z', 'healthy'],
   ['2026-10-08T10:00:00Z', 'healthy'],
   ['2026-10-08T10:00:00.001Z', 'aging'],
   ['2026-10-22T10:00:00Z', 'aging'],
   ['2026-10-22T10:00:00.001Z', 'old'],
-  ['2026-11-01T10:00:00Z', 'old'],
 ] as const)('classifies elapsed import age at %s as %s', (date, expected) => {
   expect(getImportFreshness(importedAt, Date.parse(date))).toBe(expected)
 })

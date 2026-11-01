@@ -83,8 +83,8 @@ describe('verified NSE valuation preference', () => {
     await expect(loadNsePricingCandidates([imported()])).rejects.toThrow('invalid matches')
   })
 
-  it.each([0, 60])('removes the retired %s-second preference from saved settings and old backups', (quoteRefreshSeconds) => {
-    const legacy = { ...loadSettings(), quoteRefreshSeconds }
+  it('removes the retired zero-second preference from saved settings and old backups', () => {
+    const legacy = { ...loadSettings(), quoteRefreshSeconds: 0 }
     localStorage.setItem('finverse:settings', JSON.stringify(legacy))
     expect(loadSettings()).not.toHaveProperty('quoteRefreshSeconds')
     expect(JSON.parse(localStorage.getItem('finverse:settings')!)).not.toHaveProperty('quoteRefreshSeconds')

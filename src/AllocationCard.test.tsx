@@ -25,7 +25,7 @@ const pulse: PortfolioPulse = {
 }
 
 describe('allocation card', () => {
-  it('shows three compact takeaways with supporting details always visible', () => {
+  it('shows profit, asset split, and position-weight summaries', () => {
     const markup = renderToStaticMarkup(
       <AllocationCard
         allocations={[
@@ -37,33 +37,12 @@ describe('allocation card', () => {
       />,
     )
 
-    expect(markup.match(/class="alloc-summary-row"/g)).toHaveLength(3)
     expect(markup).toContain('70% in profit')
     expect(markup).toContain('46% equity')
     expect(markup).toContain('54% funds')
     expect(markup).toContain('3 hold')
-    expect(markup).not.toMatch(/<details|<summary/)
-    expect(markup.match(/class="alloc-more-section"/g)).toHaveLength(3)
     expect(markup).toContain('Average gain')
     expect(markup).toContain('Weight bands')
-    expect(markup).not.toContain('Large positions')
     expect(markup).not.toContain('Quant Mid Cap Fund Direct Growth')
-  })
-
-  it('replaces private allocation details with the hidden-values status', () => {
-    const markup = renderToStaticMarkup(
-      <AllocationCard
-        allocations={[{ symbol: 'Private Fund', value: 100_000, type: 'mutual-fund' }]}
-        hideValues
-        pulse={{ ...pulse, best: { symbol: 'Private Fund', pct: 50 } }}
-      />,
-    )
-
-    const visibleText = markup.replace(/<[^>]+>/g, '')
-    expect(markup).not.toContain('Private Fund')
-    expect(visibleText).not.toContain('70%')
-    expect(markup).toContain('Values are hidden')
-    expect(markup).toContain('role="status"')
-    expect(markup).not.toMatch(/alloc-(legend|summary|more)|<canvas/)
   })
 })

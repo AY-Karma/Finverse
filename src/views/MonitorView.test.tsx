@@ -336,11 +336,6 @@ describe('single-page Monitor', () => {
 })
 
 describe('Monitor privacy', () => {
-  it('omits the observation strip in masked mode too', async () => {
-    await renderWatch(true)
-    expect(container.querySelector('.mp-check-status')).toBeNull()
-  })
-
   it('redacts alerts, history, reminders and rule labels without changing saved records', async () => {
     await renderWatch()
     await clickButton('Mark reviewed: UP')

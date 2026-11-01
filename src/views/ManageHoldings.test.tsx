@@ -32,20 +32,6 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
-  it('groups mutual-fund schemes directly below instrument listings with the same disclosure styling', async () => {
-    state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
-    const container = document.createElement('div')
-    const root = createRoot(container)
-    try {
-      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
-      const listings = container.querySelector('#listing-review-trigger')!.parentElement!
-      const schemes = listings.nextElementSibling!
-      expect(schemes.matches('details.fund-review.listing-review')).toBe(true)
-      expect(schemes.querySelector('summary.listing-review-trigger .listing-review-copy strong')!.textContent).toBe('Mutual-fund schemes')
-      expect(schemes.querySelector('.listing-review-action')!.textContent).toBe('Review schemes')
-    } finally { await act(async () => root.unmount()) }
-  })
-
   it('shows unchanged confirmation only after seven days and ignores repeat clicks while saving', async () => {
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
@@ -170,12 +156,14 @@ describe('holdings management', () => {
   })
 
   it('distinguishes pending review from ready listings and connects the disclosure', async () => {
+    state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
     const onReviewListings = vi.fn()
     const container = document.createElement('div')
     const root = createRoot(container)
     const render = () => act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={onReviewListings} />))
     try {
       await render()
+      expect(container.querySelector('.fund-review')).not.toBeNull()
       const trigger = container.querySelector<HTMLButtonElement>('#listing-review-trigger')!
       expect(trigger.textContent).toContain('1 listing needs your confirmation.')
       expect(trigger.querySelector('.listing-review-action')?.textContent).toBe('Review listings')

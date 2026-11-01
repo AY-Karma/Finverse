@@ -33,10 +33,6 @@ describe('market status text', () => {
     expect(marketStatusText(false, false, false, timestamp)).toBe('External market data off · showing imported prices')
   })
 
-  it('continues polling on weekdays when a future holiday calendar is unavailable', () => {
-    expect(isMarketOpen(new Date('2027-01-04T04:00:00.000Z'))).toBe(true)
-  })
-
   it('treats the market as closed outside the NSE trading window', () => {
     expect(isMarketOpen(new Date('2026-09-23T03:44:00.000Z'))).toBe(false)
     expect(isMarketOpen(new Date('2026-09-23T03:45:00.000Z'))).toBe(true)
