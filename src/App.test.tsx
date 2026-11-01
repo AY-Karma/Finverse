@@ -118,6 +118,24 @@ async function browserBack() {
 }
 
 describe('workspace navigation', () => {
+  it('shows a not-found screen on unknown browser navigation and restores the workspace on return', async () => {
+    await render('overview', '/app')
+    await act(async () => {
+      window.history.pushState({}, '', '/app/missing-screen')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(window.location.pathname).toBe('/app/missing-screen')
+    expect(container.querySelector('h1')?.textContent).toBe('This page is off the chart')
+    expect(container.querySelector('.error-screen-actions a[href="/app"]')?.textContent).toBe('Back to Overview')
+    expect(container.querySelector('.app-shell')).toBeNull()
+    await act(async () => {
+      window.history.replaceState({}, '', '/app/settings')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await vi.dynamicImportSettled()
+    })
+    expect([...container.querySelectorAll('h1')].find((heading) => !heading.closest('[hidden]'))?.textContent).toBe('Settings workspace')
+  })
+
   it('restores a visited page and its selections while pausing its effects away from the page', async () => {
     await render('overview', '/app')
     expect(state.monitorEffect).not.toHaveBeenCalled()
