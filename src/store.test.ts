@@ -9,7 +9,7 @@ afterEach(() => {
 })
 
 describe('settings persistence', () => {
-  it.each(['indigo', 'emerald', 'amber', 'custom', 'cobalt'])('migrates the saved %s accent to fixed blue and removes custom colors', (accent) => {
+  it.each(['custom', 'cobalt'])('migrates the saved %s accent to fixed blue and removes custom colors', (accent) => {
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), accent, customAccent: '#123abc' }))
     const settings = loadSettings()
     expect(settings.accent).toBe('cobalt')

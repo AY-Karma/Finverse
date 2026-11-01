@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { StoreProvider } from './useStore'
 import { ErrorBoundary } from './ErrorBoundary'
+import { NotFound } from './NotFound'
 import { entryRoute } from './entryRoute'
 import { recoverWorkspaceWrite } from './workspaceArchive'
 import { migrateWorkspaceIdentities } from './identityMigration'
@@ -11,11 +12,15 @@ import './design.css'
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)
 async function renderWorkspace() {
-  const recovery = await recoverWorkspaceWrite()
-  const migration = recovery.error ? { error: recovery.error } : await migrateWorkspaceIdentities()
   const route = entryRoute(window.location.pathname, window.location.search)
+  if (route.notFound) {
+    root.render(<NotFound />)
+    return
+  }
   if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
 
+  const recovery = await recoverWorkspaceWrite()
+  const migration = recovery.error ? { error: recovery.error } : await migrateWorkspaceIdentities()
   root.render(migration.error ?
     <main className="panel" role="alert">
       <h1>Workspace recovery needs attention</h1>

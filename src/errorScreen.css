@@ -1,0 +1,53 @@
+.error-screen {
+  --error-frame-space: 80px;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  align-items: center;
+  padding: 32px;
+  background: var(--canvas);
+  color: var(--ink);
+}
+.error-screen-inner { width: min(1080px, 100%); margin: auto; }
+.error-screen-header { display: flex; align-items: center; justify-content: center; padding-bottom: 32px; border-bottom: 1px solid var(--hairline-strong); }
+.error-screen-brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); font-size: 18px; font-weight: 600; text-decoration: none; }
+.error-screen-brand img { width: 28px; height: 28px; }
+.error-screen-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 64px; padding: var(--error-frame-space) 0; }
+.error-screen-code { display: inline-flex; align-items: center; gap: 12px; color: var(--semantic-danger); font: 500 clamp(24px, 3vw, 32px)/1.5 var(--font-mono); }
+.error-screen-code > span { width: 12px; height: 12px; flex: none; background: currentColor; border-radius: 50%; box-shadow: 0 0 8px color-mix(in srgb, var(--semantic-danger) 85%, transparent); animation: pulse 1.4s infinite; }
+.error-screen-copy h1 { max-width: 480px; margin-top: 20px; font: 500 clamp(36px, 4.5vw, 56px)/1.08 'IBM Plex Sans', var(--font-display); letter-spacing: -.035em; text-wrap: balance; }
+.error-screen-copy > p { max-width: 380px; margin-top: 24px; color: var(--ink-muted); font-size: 14px; line-height: 1.8; }
+.error-screen-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 32px; }
+.error-screen-actions .btn { min-height: 44px; text-decoration: none; }
+.error-screen-actions > .hint { flex-basis: 100%; margin-top: 4px; font-size: 12px; }
+.error-screen-copy::after { content: ''; display: block; width: calc(200% + 64px); height: 1px; margin-top: var(--error-frame-space); background: var(--hairline-strong); }
+.error-screen-art { min-width: 0; padding: 20px 0; }
+.error-screen-art svg { display: block; width: 100%; height: auto; margin: 16px 0; overflow: visible; }
+.error-chart-grid { stroke: var(--hairline); stroke-dasharray: 2 6; }
+.error-chart-history { stroke: var(--ink-tertiary); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.error-chart-candles { color: var(--semantic-danger); }
+.error-chart-candles > g { transform-box: fill-box; transform-origin: center; animation: error-candle-drop .65s cubic-bezier(.2,.7,.3,1) both; }
+.error-chart-candles > g:nth-child(2) { animation-delay: .12s; }
+.error-chart-candles > g:nth-child(3) { animation-delay: .24s; }
+.error-chart-candles > g:nth-child(4) { animation-delay: .36s; }
+.error-chart-candles > g:nth-child(5) { animation-delay: .48s; }
+.error-chart-candles path { stroke: currentColor; stroke-width: 1.5; }
+.error-chart-candles rect { fill: var(--canvas); stroke: currentColor; stroke-width: 1.5; }
+.error-chart-fall { stroke: var(--semantic-danger); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 1; animation: error-line-draw 1.3s .1s ease-out both; }
+.error-chart-settle { stroke: var(--semantic-danger); stroke-dasharray: 3 6; opacity: .5; }
+.error-chart-end { color: var(--semantic-danger); animation: error-chart-arrive .3s 1.1s ease-out both; }
+.error-chart-end circle { fill: var(--canvas); stroke: currentColor; stroke-width: 1.5; }
+.error-chart-end path { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+@keyframes error-candle-drop { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes error-line-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes error-chart-arrive { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 700px) {
+  .error-screen { --error-frame-space: 40px; padding: 24px; }
+  .error-screen-body { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: var(--error-frame-space) 0 24px; }
+  .error-screen-copy::after { width: 100%; }
+  .error-screen-art { width: min(440px, 100%); justify-self: center; padding: 0; }
+  .error-screen-actions { margin-top: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .error-screen-code > span, .error-chart-candles > g, .error-chart-fall, .error-chart-end { animation: none; }
+}

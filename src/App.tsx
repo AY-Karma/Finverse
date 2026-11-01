@@ -5,6 +5,7 @@ import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
 import { ActionIcon } from './views/ActionIcon'
+import { NotFound } from './NotFound'
 
 const loadOverview = () => import('./views/Overview')
 const loadMonitorView = () => import('./views/MonitorView')
@@ -35,6 +36,7 @@ const NAV: { id: View; label: string }[] = [
 
 export default function App({ initialView }: { initialView: View }) {
   const [view, setView] = useState<View>(initialView)
+  const [notFound, setNotFound] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [importVisited, setImportVisited] = useState(false)
   const [importAccountId, setImportAccountId] = useState<string>()
@@ -52,6 +54,7 @@ export default function App({ initialView }: { initialView: View }) {
     setVisitedViews((visited) => visited.has(nextView) ? visited : new Set([...visited, nextView]))
     if (nextView === 'holdings') setMonitorQuery('')
     setResearchReturn(false)
+    setNotFound(false)
     setView(nextView)
   }, [])
 
@@ -75,6 +78,11 @@ export default function App({ initialView }: { initialView: View }) {
   useEffect(() => {
     const onPopState = () => {
       const route = entryRoute(window.location.pathname, window.location.search)
+      setNotFound(route.notFound === true)
+      if (route.notFound) {
+        setImportOpen(false)
+        return
+      }
       if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
       setVisitedViews((visited) => visited.has(route.view) ? visited : new Set([...visited, route.view]))
       setView(route.view)
@@ -90,6 +98,8 @@ export default function App({ initialView }: { initialView: View }) {
       mode: settings.mode,
     })
   }, [settings.density, settings.mode])
+
+  if (notFound) return <NotFound />
 
   return (
     <AppShell view={view} navigate={navigate}>

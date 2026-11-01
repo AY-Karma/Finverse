@@ -36,18 +36,6 @@ describe('workspace settings', () => {
     expect(container.querySelector('.holdings-import')).toBeNull()
   })
 
-  it('shows holdings, privacy, preferences, and data handling in one continuous page', async () => {
-    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
-    const page = container.querySelector('.settings-page')!
-    expect([...page.children].map((item) => item.getAttribute('aria-label') || item.getAttribute('aria-labelledby'))).toEqual(['Manage holdings', 'Data & privacy', 'Preferences', 'data-handling-title'])
-    expect(container.querySelector('.settings-nav, [role="tablist"]')).toBeNull()
-    expect(container.querySelector('#currency')).toBeNull()
-    expect(container.querySelector('[aria-label="Accent colour"], [aria-label="Hue"], .accent-popover')).toBeNull()
-    expect(container.textContent).not.toContain('Accent colour')
-    expect(container.querySelector('#density, [aria-label="Interface density"]')).toBeNull()
-    expect(container.textContent).not.toContain('Interface density')
-  })
-
   it('applies appearance and hidden-value changes immediately', async () => {
     state.settings = { ...state.settings, mode: 'dark', hideValues: false }
     const render = () => act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))

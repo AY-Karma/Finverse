@@ -3643,29 +3643,6 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   .ticker-track { animation: none !important; }
 }
 
-/* ============ Root recovery ============ */
-.fatal-error {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: var(--sp-xl);
-  background: var(--canvas);
-}
-.fatal-error-card {
-  display: grid;
-  gap: var(--sp-lg);
-  width: min(520px, 100%);
-  padding: var(--sp-xxl);
-  background: var(--surface-1);
-  border: 1px solid color-mix(in srgb, var(--semantic-danger) 50%, transparent);
-  border-radius: var(--r-lg);
-}
-.fatal-error-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-md);
-}
-
 /* ============ Storage warnings ============ */
 .folio-save-warning {
   position: fixed;

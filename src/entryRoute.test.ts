@@ -23,9 +23,9 @@ describe('entryRoute', () => {
     expect(entryRoute('/workspace', '')).toEqual({ view: 'overview', redirectTo: '/app' })
   })
 
-  it('redirects unknown paths to the app root', () => {
-    expect(entryRoute('/app/unknown', '')).toEqual({ view: 'overview', redirectTo: '/app' })
-    expect(entryRoute('/unknown', '')).toEqual({ view: 'overview', redirectTo: '/app' })
+  it('keeps unknown paths for the not-found screen', () => {
+    expect(entryRoute('/app/unknown', '')).toEqual({ view: 'overview', notFound: true })
+    expect(entryRoute('/unknown', '')).toEqual({ view: 'overview', notFound: true })
   })
 
   it('recognizes app paths with trailing slashes and view-specific queries', () => {

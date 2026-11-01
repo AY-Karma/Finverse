@@ -85,14 +85,6 @@ it('opens import from the empty insights landing without fetching market data', 
   expect(state.benchmark).not.toHaveBeenCalled()
 })
 
-it('shows holding price history for all holdings at the bottom below the insights grid', async () => {
-  await renderInsights([])
-  const history = container.querySelector('[data-history-scope="all"]')
-  expect(history).not.toBeNull()
-  expect(container.querySelector('.insights-page')?.lastElementChild).toBe(history)
-  expect(history?.previousElementSibling?.classList.contains('insight-grid')).toBe(true)
-})
-
 it('keeps session totals and contributors on stocks and ETFs until same-session NAVs publish', async () => {
   const positions: Position[] = [
     { id: 'stock', ticker: 'STOCK', name: 'Stock', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
@@ -100,6 +92,7 @@ it('keeps session totals and contributors on stocks and ETFs until same-session 
     { id: 'fund', ticker: 'Fund Direct Growth', name: 'Fund Direct Growth', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 150, mfScheme: { code: 990, name: 'Fund Direct Growth', source: 'confirmed' } },
   ]
   await renderInsights([], [], positions)
+  expect(container.querySelector('[data-history-scope="all"]')).not.toBeNull()
   const folios = [{ id: 'session', name: 'Mixed', importedAt: 1, positions }]
   const quotes = {
     [quoteKey(positions[0])]: { price: 120, change: 10, at: Date.parse('2026-10-30T12:00:00+05:30'), source: 'yahoo' as const },

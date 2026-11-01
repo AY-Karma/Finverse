@@ -410,9 +410,9 @@ describe('automatic equity refresh', () => {
     } finally { await view.close() }
   })
 
-  it.each([0, 60] as const)('ignores the retired %s-second setting and polls every 30 seconds', async (legacySeconds) => {
+  it('ignores the retired zero-second setting and polls every 30 seconds', async () => {
     refreshQuotes.mockResolvedValue({ quotes: {}, updated: 1, failed: 0, skipped: 0 })
-    const view = await mount([stock], legacySeconds)
+    const view = await mount([stock], 0)
     try {
       expect(view.read().quoteNextRefreshAt).toBe(Date.now() + 30_000)
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })

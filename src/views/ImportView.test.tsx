@@ -97,6 +97,61 @@ describe('statement import review', () => {
     } finally { snapshot.mockRestore() }
   })
 
+  it('redacts identities and alias input when privacy changes without changing the import payload', async () => {
+    state.folios = [account()]
+    const parsed = preview()
+    state.previewFile.mockResolvedValue(parsed)
+    const view = await renderImport()
+    await view.upload()
+    await view.change('Account alias', 'Private account alias')
+    expect(view.container.textContent).toContain('HDFCBANK')
+    state.settings.hideValues = true
+    await act(async () => view.root.render(<ImportView />))
+    for (const secret of ['HDFCBANK', 'holdings.csv', 'Main account', 'Private account alias']) {
+      expect(view.container.innerHTML).not.toContain(secret)
+    }
+    expect(view.field('Account alias').value).toBe('')
+    expect(view.field('Account alias').disabled).toBe(true)
+    state.settings.hideValues = false
+    await act(async () => view.root.render(<ImportView />))
+    expect(view.field('Account alias').value).toBe('Private account alias')
+    state.settings.hideValues = true
+    await act(async () => view.root.render(<ImportView />))
+    await act(async () => view.button('Add to portfolio').click())
+    expect(state.commitImport).toHaveBeenCalledExactlyOnceWith(parsed, expect.objectContaining({ accountAlias: 'Private account alias' }))
+  })
+
+  it('masks target accounts, removed and changed holdings in a private replacement review', async () => {
+    const current = account()
+    current.positions.push(normalizePosition({ ...holding(), id: 'sold', ticker: 'SOLD', providerSymbol: 'SOLD.NS' }))
+    state.folios = [current]
+    const parsed = preview()
+    state.previewFile.mockResolvedValue(parsed)
+    const view = await renderImport()
+    await view.upload()
+    await view.replace()
+    state.settings.hideValues = true
+    await act(async () => view.root.render(<ImportView compact />))
+    for (const secret of ['HDFCBANK', 'SOLD', 'holdings.csv', 'Main account']) {
+      expect(view.container.innerHTML).not.toContain(secret)
+    }
+    await act(async () => view.button('Update account').click())
+    expect(state.commitImport).toHaveBeenCalledExactlyOnceWith(parsed, expect.objectContaining({ accountId: 'account-one', operation: 'replace' }))
+  })
+
+  it('redacts file parsing errors in visible and live-region messages until privacy is disabled', async () => {
+    state.previewFile.mockRejectedValue(new Error('HDFCBANK cost is invalid'))
+    state.settings.hideValues = true
+    const view = await renderImport()
+    await view.upload()
+    expect(view.container.innerHTML).not.toContain('HDFCBANK')
+    expect(view.container.innerHTML).not.toContain('holdings.csv')
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('Import needs attention')
+    state.settings.hideValues = false
+    await act(async () => view.root.render(<ImportView compact />))
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('holdings.csv: HDFCBANK cost is invalid')
+  })
+
   it('preselects the requested folio for replacement while still requiring a complete statement', async () => {
     state.folios = [account()]
     state.previewFile.mockResolvedValue(preview())
