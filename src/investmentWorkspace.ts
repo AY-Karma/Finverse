@@ -5,6 +5,7 @@ import { isRegularMarketOpen } from './marketCalendar'
 import { combinePositions, computePortfolioStats, effectivePrice, hasSupportedValuationCurrency, positionPnl, positionsWithStatementDates, positionValue, quoteKey } from './valuation'
 
 interface Contribution {
+  id: string
   symbol: string
   type: Position['type']
   value: number
@@ -125,6 +126,7 @@ function buildContributions(positions: Position[], quotes: Record<string, LiveQu
       const inSession = sessionKeys.has(quoteKey(position)) && quote != null && quoteDate(quote.at) === sessionDate
       const dailyChange = inSession ? quoteChange(position, quotes) : null
       return {
+        id: position.id,
         symbol: instrumentLabel(position),
         type: position.type,
         value,

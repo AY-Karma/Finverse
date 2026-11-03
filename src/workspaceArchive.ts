@@ -9,6 +9,8 @@ import { isNsePricingListing } from './nsePricingProtocol'
 import { hasVerifiedNsePricing } from './instruments'
 import { remapMonitorReferences } from './workspaceReferences'
 import { writeWorkspaceRecords, type WorkspaceRecords } from './workspaceStorage'
+import { validateLedgerRecords, type LedgerRecord } from './investmentLedger'
+import { MARKET_CAP_STORAGE_KEY, parseMarketCapRecords, type MarketCapRecord } from './marketCapExposure'
 
 export { captureWorkspaceRecords, hasWorkspaceRecovery, recoverWorkspaceWrite, restorePreviousWorkspace } from './workspaceStorage'
 export type { WorkspaceRecords } from './workspaceStorage'
@@ -22,6 +24,8 @@ export interface WorkspaceArchive {
   settings: Settings
   snapshots: PortfolioSnapshot[]
   monitor: MonitorState
+  ledger?: LedgerRecord[]
+  marketCap?: MarketCapRecord[]
 }
 export interface WorkspaceArchivePreview { archive: WorkspaceArchive; legacy: boolean; warnings: string[] }
 
@@ -240,6 +244,8 @@ export function validateWorkspaceArchive(value: unknown): WorkspaceArchive {
     format: 'finverse-workspace', version: 1, exportedAt: number(row.exportedAt, 'export time', 0, MAX_DATE),
     folios: unique(list(row.folios, 100, 'accounts', parseFolio), 'account'), settings: parseSettings(row.settings),
     snapshots: list(row.snapshots, 730, 'tracked balances', parseSnapshot), monitor: parseMonitor(row.monitor),
+    ...(row.ledger !== undefined ? { ledger: validateLedgerRecords(row.ledger) } : {}),
+    ...(row.marketCap !== undefined ? { marketCap: parseMarketCapRecords(row.marketCap) } : {}),
   }
 }
 
@@ -255,7 +261,11 @@ export function createWorkspaceArchive(folios: Folio[], settings: Settings, snap
       state = parseMonitor(stored)
     }
   }
-  const archive = validateWorkspaceArchive({ format: 'finverse-workspace', version: 1, exportedAt: Date.now(), folios, settings, snapshots, monitor: state })
+  const ledger = localStorage.getItem('finverse:investment-ledger:v1')
+  const marketCap = localStorage.getItem(MARKET_CAP_STORAGE_KEY)
+  const archive = validateWorkspaceArchive({ format: 'finverse-workspace', version: 1, exportedAt: Date.now(), folios, settings, snapshots, monitor: state,
+    ...(ledger ? { ledger: JSON.parse(ledger) } : {}), ...(marketCap ? { marketCap: JSON.parse(marketCap) } : {}),
+  })
   validateReferences(archive)
   if (new TextEncoder().encode(JSON.stringify(archive, null, 2)).byteLength > MAX_WORKSPACE_ARCHIVE_BYTES) throw new Error('This workspace exceeds the 10 MB backup limit. Reduce retained data before exporting.')
   return archive
@@ -292,6 +302,8 @@ export async function restoreWorkspaceArchive(value: WorkspaceArchive, expectedR
   const records: WorkspaceRecords = {
     'finverse:folios': JSON.stringify(archive.folios), 'finverse:settings': JSON.stringify({ ...archive.settings, allowExternalData: false }),
     'finverse:portfolio-snapshots': JSON.stringify(archive.snapshots), 'finverse:monitor:v1': JSON.stringify({ version: 1, ...archive.monitor }), 'finverse:positions': null,
+    'finverse:investment-ledger:v1': archive.ledger ? JSON.stringify(archive.ledger) : null,
+    'finverse:market-cap:v1': archive.marketCap ? JSON.stringify(archive.marketCap) : null,
   }
   await writeWorkspaceRecords(records, expectedRecords)
 }

@@ -50,7 +50,8 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
           />
           <div className="settings-group">
             <SettingRow label="Appearance" description="Choose a light or dark workspace.">
-              <div className="segmented-control settings-control mode-toggle" role="group" aria-label="Appearance mode">
+              <div className="settings-control mode-toggle" role="group" aria-label="Appearance mode" data-selected-mode={settings.mode}>
+                <span className="mode-toggle-thumb" aria-hidden="true" />
                 {(['dark', 'light'] as Mode[]).map((modeOption) => (
                   <button
                     key={modeOption}
@@ -59,19 +60,13 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
                     aria-pressed={settings.mode === modeOption}
                     onClick={() => update({ mode: modeOption })}
                   >
+                    <ActionIcon name={modeOption === 'dark' ? 'moon' : 'sun'} />
                     {modeOption === 'dark' ? 'Dark' : 'Light'}
                   </button>
                 ))}
               </div>
             </SettingRow>
 
-            <SettingToggle
-              id="hide-values"
-              label="Hide portfolio values"
-              description="Conceal holdings and amounts when sharing your screen."
-              checked={settings.hideValues}
-              onChange={(hideValues) => update({ hideValues })}
-            />
           </div>
         </section>
         <section className="settings-data" aria-labelledby="data-handling-title">
@@ -112,7 +107,7 @@ function SettingRow({ label, description, children }: {
   children: ReactNode
 }) {
   return (
-    <div className="setting-row">
+    <div className="setting-row setting-row--appearance">
       <div className="setting-copy">
         <strong>{label}</strong>
         <span>{description}</span>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useStore } from '../useStore'
 import { marketData } from '../marketData'
 import { canConfirmFundScheme, matchFundScheme, type FundSchemeReview as SchemeReview } from '../fundSchemes'
@@ -17,6 +17,8 @@ export function FundSchemeReview() {
   const funds = positions.filter((position) => position.type === 'mutual-fund')
   const reviewCount = funds.filter((fund) => !fund.mfScheme).length
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const id = useId()
+  const nameTriggers = useRef(new Map<string, HTMLButtonElement>())
   const [review, setReview] = useState<SchemeReview | null>(null)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -90,7 +92,19 @@ export function FundSchemeReview() {
     }
   }
 
+  function closeReview() {
+    controllerRef.current?.abort()
+    controllerRef.current = null
+    setSelectedId(null)
+    setReview(null)
+    setCode('')
+    setMessage('')
+    setBusy(false)
+    if (selectedId) nameTriggers.current.get(selectedId)?.focus()
+  }
+
   async function findScheme(id: string) {
+    if (selectedId === id) { closeReview(); return }
     const fund = funds.find((position) => position.id === id)
     if (!fund || busy || settings.hideValues || !settings.allowExternalData || !supportsFundNav(fund)) return
     controllerRef.current?.abort()
@@ -147,20 +161,26 @@ export function FundSchemeReview() {
       <span className="hint">Exact fund, plan and option matches only.</span>
     </div>
     {funds.map((fund) => <div className="fund-scheme-row" key={fund.id}>
-      <div className="folio-copy"><span className="sym">{fund.name || fund.ticker}</span><span className="hint">{fund.mfScheme ? `${fund.mfScheme.name} · code ${fund.mfScheme.code}` : 'Imported values · scheme unconfirmed'}</span>{!supportsFundNav(fund) && <span className="hint">MFAPI supports INR mutual funds only. This holding's {fund.reportedCurrency || fund.currency} currency cannot use its scheme search or confirmation.</span>}</div>
-      <button type="button" className="btn btn--secondary btn--small" disabled={busy || !settings.allowExternalData || !supportsFundNav(fund)} onClick={() => void findScheme(fund.id)}>{fund.mfScheme ? 'Review scheme' : 'Find scheme'}</button>
-    </div>)}
-    {selected && supportsFundNav(selected) && <section className="import-preview" aria-label="Review fund scheme">
-      <strong>{selected.name}</strong>
+      <button type="button" className="fund-scheme-trigger" ref={(element) => { if (element) nameTriggers.current.set(fund.id, element); else nameTriggers.current.delete(fund.id) }}
+        aria-expanded={selectedId === fund.id} aria-controls={selectedId === fund.id ? `${id}-${fund.id}` : undefined}
+        disabled={(busy && (selectedId !== fund.id || !!review)) || !settings.allowExternalData || !supportsFundNav(fund)} onClick={() => void findScheme(fund.id)}>
+        <span className="folio-copy"><span className="sym">{fund.name || fund.ticker}</span><span className="hint">{fund.mfScheme ? `Code ${fund.mfScheme.code}` : 'Scheme unconfirmed'}</span></span>
+        <svg className="listing-review-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
+      </button>
+      {!supportsFundNav(fund) && <p className="hint">MFAPI supports INR mutual funds only. This holding's {fund.reportedCurrency || fund.currency} currency cannot use its scheme search or confirmation.</p>}
+    {selected?.id === fund.id && supportsFundNav(selected) && <section id={`${id}-${fund.id}`} className="fund-scheme-editor" aria-label="Review fund scheme">
+      {fund.mfScheme && <p className="hint">Current scheme: {fund.mfScheme.name}</p>}
       {busy && !review ? <p role="status" className="hint">Searching schemes…</p> : review && <>
         <p className="hint">{review.reason}</p>
-        {review.candidates.length > 0 && <FundSchemePicker key={selected.id} importedName={selected.name || selected.ticker}
+        {review.candidates.length > 0 && <FundSchemePicker key={selected.id} inline onClose={closeReview} importedName={selected.name || selected.ticker}
           candidates={review.candidates} value={code} onChange={setCode} disabled={busy || !settings.allowExternalData} />}
         <p className="hint">A correction changes future prices and history. It cannot reconstruct earlier balances that used uncertain mappings.</p>
-        <div className="import-actions"><button type="button" className="btn btn--primary" disabled={busy || !settings.allowExternalData || !candidate || !canConfirmFundScheme(selected.name || selected.ticker, candidate)} onClick={() => void confirm()}>Confirm scheme</button><button type="button" className="btn btn--ghost" disabled={busy} onClick={() => { setSelectedId(null); setReview(null) }}>Cancel scheme review</button></div>
+        <div className="import-actions"><button type="button" className="btn btn--primary" disabled={busy || !settings.allowExternalData || !candidate || !canConfirmFundScheme(selected.name || selected.ticker, candidate)} onClick={() => void confirm()}>{busy ? 'Saving scheme…' : 'Confirm scheme'}</button></div>
       </>}
+      {message && <p className="hint" role="status">{message}</p>}
     </section>}
-    {message && <p className="hint" role="status">{message}</p>}
+    </div>)}
+    {!selected && message && <p className="hint" role="status">{message}</p>}
     </div>
   </details>
 }

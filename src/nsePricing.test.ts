@@ -1,6 +1,6 @@
 import './test/storage'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyNsePricing, loadNsePricingCandidates, type NsePricingCandidate } from './nsePricing'
+import { applyNsePricing, loadNseInstrumentTypes, loadNsePricingCandidates, type NsePricingCandidate } from './nsePricing'
 import { hasVerifiedNsePricing, normalizePosition } from './instruments'
 import { loadFolios, loadSettings, saveFolios, saveSettings } from './store'
 import { createWorkspaceArchive, parseWorkspaceArchive } from './workspaceArchive'
@@ -74,6 +74,13 @@ describe('verified NSE valuation preference', () => {
     expect(fetcher).toHaveBeenCalledOnce()
     expect(String(fetcher.mock.calls[0][0])).toContain(candidate.isin)
     expect(await loadNsePricingCandidates([{ ...imported(), type: 'etf' }])).toEqual([])
+  })
+
+  it('can identify an ETF when its imported type defaulted to stock, without approving a mismatched pricing preference', async () => {
+    const etf = { ...candidate, type: 'etf' as const, providerSymbol: 'GOLDBEES.NS' }
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ candidates: [etf] })))
+    expect(await loadNseInstrumentTypes([imported()])).toEqual([etf])
+    expect(await loadNsePricingCandidates([imported()])).toEqual([])
   })
 
   it('rejects unavailable and ambiguous provider results instead of approving guessed matches', async () => {

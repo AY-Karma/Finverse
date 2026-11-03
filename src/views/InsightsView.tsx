@@ -18,6 +18,10 @@ import { DataHealthGuide, dataHealthColor } from './DataHealthGuide'
 import { DitherBar } from './DitherBar'
 import { rgb, seedOfColor, type DitherColor } from '../components/dither-kit/palette'
 import './insights.css'
+import './holdingInsights.css'
+import { HoldingMarketMoves } from './HoldingMarketMoves'
+import { MarketCapExposure, type MarketCapSelection } from './MarketCapExposure'
+import { holdingMovePeriod, holdingMoveToday } from '../holdingMarketMoves'
 
 const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
@@ -25,10 +29,34 @@ const EXPO_PALETTE: DitherColor[] = ['purple', 'green', 'blue', 'orange', 'pink'
 const BENCHMARK_REUSE_MS = 5 * 60_000
 
 type BenchmarkPoint = { ts: number; portfolio: number; benchmark?: number }
-type ExposureHighlight = { label: string; color: string }
+type ExposureHighlight = { label: string; color: string; positionIds?: ReadonlySet<string> }
+type ContributionRange = 'today' | 'month' | 'year' | 'custom'
 
 export function InsightsView({ onRequestImport }: { onRequestImport: () => void }) {
   const { snapshot, settings } = useStore()
+  const [contributionRange, setContributionRange] = useState<ContributionRange>('today')
+  const [customFrom, setCustomFrom] = useState('')
+  const [appliedContribution, setAppliedContribution] = useState<{ range: ContributionRange; from: string }>({ range: 'today', from: '' })
+  const appliedRange = appliedContribution.range
+  const today = holdingMoveToday()
+
+  function selectContributionRange(range: ContributionRange) {
+    setContributionRange(range)
+    if (range === 'custom') {
+      setCustomFrom('')
+      return
+    }
+    setAppliedContribution({ range, from: '' })
+  }
+
+  function changeCustomStart(value: string) {
+    setCustomFrom(value)
+    if (value >= '1900-01-01' && holdingMovePeriod('custom', value, today)) {
+      setAppliedContribution({ range: 'custom', from: value })
+    }
+  }
+  const [exposureMode, setExposureMode] = useState<'sector' | 'market-cap'>('sector')
+  const [marketCapSelection, setMarketCapSelection] = useState<MarketCapSelection | null>(null)
   const [benchmarkId, setBenchmarkId] = useState('nifty-50')
   const selectedBenchmark = BENCHMARKS.find((item) => item.id === benchmarkId) ?? BENCHMARKS[0]
   const [benchmarkPoints, setBenchmarkPoints] = useState<{ date: string; close: number }[]>([])
@@ -156,7 +184,11 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const exposureSectors = snapshot.sectors.slice(0, 10)
   const activeSector = exposureSectors.find((sector) => sector.label === hoveredSector) ?? exposureSectors.find((sector) => sector.label === focusedSector)
   const activeSectorIndex = activeSector ? exposureSectors.indexOf(activeSector) : -1
-  const exposureHighlight: ExposureHighlight | null = !hide && activeSectorIndex >= 0 ? {
+  const exposureHighlight: ExposureHighlight | null = !hide && exposureMode === 'market-cap' && marketCapSelection ? {
+    label: marketCapSelection.label,
+    positionIds: new Set(marketCapSelection.positionIds),
+    color: 'var(--primary-hover)',
+  } : !hide && exposureMode === 'sector' && activeSectorIndex >= 0 ? {
     label: exposureSectors[activeSectorIndex].label,
     color: rgb(seedOfColor(EXPO_PALETTE[activeSectorIndex % EXPO_PALETTE.length]).fill),
   } : null
@@ -214,12 +246,10 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
       <div className="insight-grid enter d2">
         <section className="panel insight-panel insight-panel--wide insight-panel--benchmark chart-open">
-          <div className="panel-head">
-            <div className="panel-head-titles">
-              <span className="panel-title">Benchmark race</span>
+          <div className="performance-panel-header"><span className="panel-title">Market comparison</span>
               <details className="benchmark-menu">
                 <summary aria-label={`Portfolio compared with ${selectedBenchmark.label}. Choose a benchmark`}>
-                  <span>01 · Portfolio vs</span>
+                  <span>Compare with</span>
                   <strong>{selectedBenchmark.label}</strong>
                   <i aria-hidden="true" />
                 </summary>
@@ -246,8 +276,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
                   ))}
                 </div>
               </details>
-            </div>
           </div>
+          <div className="performance-comparison">
           {benchmarkSeries.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--portfolio">
               <span><i aria-hidden="true" />Portfolio</span>
@@ -282,26 +312,33 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
             ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (backcastLoading ? 'Building your comparison' : settings.allowExternalData ? 'Historical comparison unavailable' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
           </div>
           <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
+          </div>
         </section>
 
         <section className="panel insight-panel insight-panel--allocation">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">02 · Exposure</span></div></div>
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">Exposure</span></div></div>
           <AllocationMap items={exposure} unmapped={unmappedExposure} formatValue={value} highlight={exposureHighlight} hideValues={hide} />
         </section>
 
         <section className="panel insight-panel insight-panel--exposure">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Exposure mix</span><span className="section-index">03 · Sectors / type</span></div></div>
-          {hide ? <HiddenValuesState /> : <ExposureMix items={exposureSectors} formatValue={value} activeLabel={exposureHighlight?.label ?? null} onHover={setHoveredSector} onFocus={setFocusedSector} />}
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Exposure mix</span><span className="section-index">Sectors</span></div></div>
+          <div className="segmented-control exposure-mode" role="group" aria-label="Exposure view"><button type="button" className={exposureMode === 'sector' ? 'is-active' : ''} aria-pressed={exposureMode === 'sector'} onClick={() => setExposureMode('sector')}>Sectors</button><button type="button" className={exposureMode === 'market-cap' ? 'is-active' : ''} aria-pressed={exposureMode === 'market-cap'} onClick={() => { setExposureMode('market-cap'); setHoveredSector(null); setFocusedSector(null) }}>Market cap</button></div>
+          {hide ? <HiddenValuesState /> : <>
+            {exposureMode === 'sector' && <ExposureMix items={exposureSectors} formatValue={value} activeLabel={exposureHighlight?.label ?? null} onHover={setHoveredSector} onFocus={setFocusedSector} />}
+            <div hidden={exposureMode !== 'market-cap'}>
+              <MarketCapExposure positions={snapshot.positions} quotes={snapshot.quotes} hideValues={hide} active={exposureMode === 'market-cap'} allowExternalData={settings.allowExternalData} onHighlight={setMarketCapSelection} />
+            </div>
+          </>}
         </section>
 
         <section className="panel insight-panel insight-panel--wide">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Latest price movers</span><span className="section-index">04 · Holding price changes</span></div><div className="segmented-control" aria-label="Mover display"><button type="button" className={contributionDisplay === 'price' ? 'is-active' : ''} onClick={() => setContributionDisplay('price')} aria-pressed={contributionDisplay === 'price'}>Price Δ</button><button type="button" className={contributionDisplay === 'percent' ? 'is-active' : ''} onClick={() => setContributionDisplay('percent')} aria-pressed={contributionDisplay === 'percent'}>% Δ</button></div></div>
-          {!hide && <p className="hint">{dataLabels.sessionLabel} · {dataLabels.coverageLabel}. Bars show each holding's price change.</p>}
-          {hide ? <HiddenValuesState /> : hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty">{settings.allowExternalData ? 'No price changes reported for this measure. Refresh quotes to try again.' : 'Enable external market data in Settings to see holding-level price changes.'}</div>}
+          <div className="panel-head market-contribution-head"><div className="panel-head-titles"><span className="panel-title">{appliedRange === 'today' ? 'Latest price movers' : 'Market contribution'}</span><span className="section-index">{appliedRange === 'today' ? 'Holding price changes' : 'Current holdings at market prices'}</span></div>{appliedRange === 'today' && <div className="segmented-control" aria-label="Mover display"><button type="button" className={contributionDisplay === 'price' ? 'is-active' : ''} onClick={() => setContributionDisplay('price')} aria-pressed={contributionDisplay === 'price'}>Price Δ</button><button type="button" className={contributionDisplay === 'percent' ? 'is-active' : ''} onClick={() => setContributionDisplay('percent')} aria-pressed={contributionDisplay === 'percent'}>% Δ</button></div>}<div className="performance-controls contribution-period-control"><label><span className="sr-only">Period</span><select aria-label="Return contribution period" value={contributionRange} onChange={(event) => selectContributionRange(event.target.value as ContributionRange)}><option value="today">Today</option><option value="month">This month</option><option value="year">This year</option><option value="custom">Custom</option></select></label>{contributionRange === 'custom' && <label className="contribution-date-control"><span>From</span><input type="date" aria-label="Contribution start date" min="1900-01-01" max={today} value={customFrom} onChange={(event) => changeCustomStart(event.target.value)} /></label>}</div></div>
+          {!hide && appliedRange === 'today' && <p className="hint">{dataLabels.sessionLabel} · {dataLabels.coverageLabel}. Bars show each holding's price change.</p>}
+          {hide ? <HiddenValuesState /> : appliedRange !== 'today' ? <HoldingMarketMoves positions={snapshot.positions} quotes={snapshot.quotes} range={appliedRange} customFrom={appliedContribution.from} allowExternalData={settings.allowExternalData} /> : hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty contributor-empty">{settings.allowExternalData ? 'No price changes reported for this measure. Refresh quotes to try again.' : 'Enable external market data in Settings to see holding-level price changes.'}</div>}
         </section>
 
         <section className="panel insight-panel insight-panel--wide insight-panel--risk">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">05 · At a glance</span></div></div>
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">At a glance</span></div></div>
           {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile risk={risk} hideValues={hide}
             historyStart={analyticsHistory[0].at} historyEnd={analyticsHistory[analyticsHistory.length - 1].at}
             coverage={backcast && backcast.holdingsIncluded < backcast.holdingsTotal ? `History covers ${backcast.holdingsIncluded} of ${backcast.holdingsTotal} holdings · ${backcast.coveragePct.toFixed(0)}% of priced INR value.` : null} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : backcastLoading ? 'Historical prices are loading to build your risk profile.' : 'Historical risk is unavailable. Tracked balance changes include account changes and cash flows.'}</div>}
@@ -374,18 +411,23 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
   )
 }
 
-type AllocationItem = { symbol: string; value: number; weight: number; pnl: number | null; sector: string }
+type AllocationItem = { id: string; symbol: string; value: number; weight: number; pnl: number | null; sector: string }
+
+function matchesExposure(item: AllocationItem, highlight: ExposureHighlight): boolean {
+  return highlight.positionIds ? highlight.positionIds.has(item.id) : item.sector === highlight.label
+}
 
 const AllocationTile = memo(function AllocationTile({ item, active, highlight, onSelect }: {
   item: AllocationItem
   active: boolean
   highlight: ExposureHighlight | null
-  onSelect: (symbol: string) => void
+  onSelect: (id: string) => void
 }) {
   const widthPercent = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12))) / 12 * 100
-  const exposureClass = !highlight ? '' : item.sector === highlight.label ? ' allocation-tile--exposure-match' : ' allocation-tile--exposure-muted'
+  const matchesHighlight = highlight && matchesExposure(item, highlight)
+  const exposureClass = !highlight ? '' : matchesHighlight ? ' allocation-tile--exposure-match' : ' allocation-tile--exposure-muted'
   const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
-  return <button type="button" className={`allocation-tile${active ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.symbol)} onFocus={() => onSelect(item.symbol)} onClick={() => onSelect(item.symbol)} aria-pressed={active} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
+  return <button type="button" className={`allocation-tile${active ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.id)} onFocus={() => onSelect(item.id)} onClick={() => onSelect(item.id)} aria-pressed={active} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
     <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
     <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
   </button>
@@ -399,23 +441,30 @@ function AllocationMap({
   hideValues,
 }: {
   items: AllocationItem[]
-  unmapped: { symbol: string; priced: boolean }[]
+  unmapped: { id: string; symbol: string; priced: boolean }[]
   formatValue: (amount: number) => string
   highlight: ExposureHighlight | null
   hideValues: boolean
 }) {
   const [selected, onSelect] = useState<string | null>(null)
   if (hideValues) return <HiddenValuesState />
-  const active = items.find((item) => item.symbol === selected) ?? items[0]
+  const active = items.find((item) => item.id === selected) ?? items[0]
+  const members = highlight ? items.filter((item) => matchesExposure(item, highlight)) : []
+  const detail = highlight ? {
+    symbol: highlight.label,
+    weight: members.reduce((sum, item) => sum + item.weight, 0),
+    value: members.reduce((sum, item) => sum + item.value, 0),
+    pnl: members.reduce<number | null>((sum, item) => sum == null || item.pnl == null ? null : sum + item.pnl, 0),
+  } : active
   return <div className="allocation-map-wrap" style={highlight ? { '--exposure-highlight': highlight.color } as CSSProperties : undefined}>
     <div className="allocation-map" aria-label="Allocation treemap">
-      {items.map((item) => <AllocationTile key={item.symbol} item={item} active={item.symbol === active?.symbol} highlight={highlight} onSelect={onSelect} />)}
+      {items.map((item) => <AllocationTile key={item.id} item={item} active={item.id === active?.id} highlight={highlight} onSelect={onSelect} />)}
     </div>
     {unmapped.length > 0 && <div className="allocation-unmapped">
       <span className="score-label">Outside treemap</span>
-      <ul>{unmapped.map((item) => <li key={item.symbol}><strong>{item.symbol}</strong><span>{item.priced ? 'No positive value' : 'Unpriced'}</span></li>)}</ul>
+      <ul>{unmapped.map((item) => <li key={item.id}><strong>{item.symbol}</strong><span>{item.priced ? 'No positive value' : 'Unpriced'}</span></li>)}</ul>
     </div>}
-    {active && <div className="allocation-detail" aria-live="polite"><div><span className="score-label">Selected holding</span><strong>{active.symbol}</strong></div><div><span className="score-label">Portfolio weight</span><strong>{active.weight.toFixed(1)}%</strong></div><div><span className="score-label">Current value</span><strong>{formatValue(active.value)}</strong></div><div><span className="score-label">P&L</span><strong className={active.pnl == null ? undefined : active.pnl < 0 ? 'down' : 'up'}>{active.pnl == null ? '—' : formatValue(active.pnl)}</strong></div></div>}
+    {detail && <div className="allocation-detail" aria-live="polite"><div><span className="score-label">{highlight ? 'Selected group' : 'Selected holding'}</span><strong>{detail.symbol}</strong></div><div><span className="score-label">Portfolio weight</span><strong>{detail.weight.toFixed(1)}%</strong></div><div><span className="score-label">Current value</span><strong>{formatValue(detail.value)}</strong></div><div><span className="score-label">P&L</span><strong className={detail.pnl == null ? undefined : detail.pnl < 0 ? 'down' : 'up'}>{detail.pnl == null ? '—' : formatValue(detail.pnl)}</strong></div></div>}
   </div>
 }
 

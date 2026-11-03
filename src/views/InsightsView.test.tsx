@@ -2,7 +2,7 @@
 import { Activity, act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { investmentWorkspace } from '../investmentWorkspace'
 import { loadSettings } from '../store'
 import type { Position, PortfolioSnapshot } from '../types'
@@ -13,7 +13,8 @@ import { isRegularMarketOpen } from '../marketCalendar'
 import { InsightsView } from './InsightsView'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn(), chart: vi.fn() }))
+const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn(), chart: vi.fn(), classification: vi.fn() }))
+vi.mock('../marketCapReference', () => ({ loadMarketCapReference: state.classification, getCachedMarketCapReference: () => null }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
 vi.mock('./HistoryPanel', () => ({ HistoryPanel: ({ scope }: { scope: string }) => <section data-history-scope={scope}>Holding Price History</section> }))
 vi.mock('../portfolioBackcast', async (original) => ({ ...await original<typeof import('../portfolioBackcast')>(), buildPortfolioBackcast: state.build }))
@@ -26,6 +27,8 @@ vi.mock('./InteractiveTrendChart', () => ({ InteractiveTrendChart: (props: Compo
 
 let root: Root | undefined
 let container: HTMLDivElement
+
+beforeEach(() => { state.classification.mockResolvedValue({ records: [] }) })
 
 async function renderInsights(backcast: PortfolioBackcastHistory['points'], history: PortfolioSnapshot[] = [], positions: Position[] = [{ id: 'a', ticker: 'AAA', name: 'AAA', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]) {
   const folios = [{ id: 'test', name: 'Test', importedAt: 0, positions }]
@@ -83,6 +86,30 @@ it('opens import from the empty insights landing without fetching market data', 
   expect(onRequestImport).toHaveBeenCalledOnce()
   expect(state.build).not.toHaveBeenCalled()
   expect(state.benchmark).not.toHaveBeenCalled()
+})
+
+it('loads market cap before selection and retains the request and results across exposure switches', async () => {
+  let resolve!: (value: unknown) => void
+  state.classification.mockReturnValue(new Promise((done) => { resolve = done }))
+  const isin = 'INE002A01018'
+  await renderInsights([], [], [{ id: 'stock', ticker: 'STOCK', name: 'Stock', isin, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }])
+  const control = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('.exposure-mode button')].find((button) => button.textContent === label)!
+  expect(control('Sectors').getAttribute('aria-pressed')).toBe('true')
+  expect(state.classification).toHaveBeenCalledOnce()
+  const signal = state.classification.mock.calls[0][0] as AbortSignal
+  await act(async () => control('Market cap').click())
+  await act(async () => control('Sectors').click())
+  expect(signal.aborted).toBe(false)
+  await act(async () => resolve({ records: [{ isin, band: 'large', asOf: '2026-06-30', name: 'Stock', weight: 100, parentIsin: '', source: '' }] }))
+  act(() => control('Market cap').click())
+  expect(container.querySelector('.market-cap-band--large')?.textContent).toContain('100.0%')
+  expect(container.querySelector('.market-cap-band--unclassified')).toBeNull()
+  expect(container.querySelector('.market-cap-exposure [role="status"]')).toBeNull()
+  expect(state.classification).toHaveBeenCalledOnce()
+  await act(async () => (container.querySelector('.market-cap-band--large') as HTMLButtonElement).click())
+  expect(container.querySelector('.allocation-tile--exposure-match')).not.toBeNull()
+  await act(async () => control('Sectors').click())
+  expect(container.querySelector('.allocation-tile--exposure-match')).toBeNull()
 })
 
 it('keeps session totals and contributors on stocks and ETFs until same-session NAVs publish', async () => {
@@ -393,7 +420,7 @@ it('hides exposure labels, counts and relative sizes while masked, then restores
   expect(panel.querySelector('.expo-mix')).not.toBeNull()
 })
 
-it('highlights exact sector members on row hover without changing the selected holding', async () => {
+it('shows sector totals while highlighted and restores the selected holding on pointer leave', async () => {
   await renderInsights([], [], exposurePositions)
   expectExposureMatches()
   const selected = container.querySelector<HTMLButtonElement>('.allocation-tile[aria-label^="BANK,"]')!
@@ -404,12 +431,57 @@ it('highlights exact sector members on row hover without changing the selected h
   await act(async () => technology.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
   expectExposureMatches(['ALPHA', 'BETA', 'Technology Fund'])
   expect(selected.getAttribute('aria-pressed')).toBe('true')
-  expect(container.querySelector('.allocation-detail')!.textContent).toBe(detail)
+  expect([...container.querySelectorAll('.allocation-detail strong')].map((value) => value.textContent)).toEqual(['Technology', '42.9%', '₹300.00', '₹0.00'])
+  expect(container.querySelector('.allocation-detail .score-label')?.textContent).toBe('Selected group')
 
   await act(async () => technology.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
   expectExposureMatches()
   expect(selected.getAttribute('aria-pressed')).toBe('true')
   expect(container.querySelector('.allocation-detail')!.textContent).toBe(detail)
+})
+
+it('shows combined fund-group values instead of the last hovered holding and clears them when switching views', async () => {
+  await renderInsights([], [], [
+    { id: 'stock', ticker: 'STOCK', name: 'Stock', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 50 },
+    { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 2, buyPrice: 100, invested: 200, lastPrice: 100 },
+    { id: 'etf', ticker: 'ETF', name: 'ETF', type: 'etf', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 150 },
+  ])
+  const stock = container.querySelector<HTMLButtonElement>('.allocation-tile[aria-label^="STOCK,"]')!
+  await act(async () => stock.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  const detail = container.querySelector('.allocation-detail')!.textContent
+  const mode = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('.exposure-mode button')].find((button) => button.textContent === label)!
+  await act(async () => mode('Market cap').click())
+  await act(async () => (container.querySelector('.market-cap-band--funds') as HTMLButtonElement).click())
+  expect([...container.querySelectorAll('.allocation-detail strong')].map((value) => value.textContent)).toEqual(['ETF + Mutual Funds', '87.5%', '₹350.00', '₹50.00'])
+  expect(container.querySelector('.allocation-detail .score-label')?.textContent).toBe('Selected group')
+  expect(container.querySelector('.allocation-detail .up')?.textContent).toBe('₹50.00')
+  await act(async () => stock.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  expect(container.querySelector('.allocation-detail strong')?.textContent).toBe('ETF + Mutual Funds')
+  await act(async () => mode('Sectors').click())
+  expect(container.querySelector('.allocation-detail')!.textContent).toBe(detail)
+})
+
+it('keeps same-label holdings separate in market-cap totals and individual selection', async () => {
+  const source = 'https://portal.amfiindia.com/spages/AverageMarketCapitalization30Jun2026.xlsx'
+  const isins = ['INE002A01018', 'INE467B01029']
+  state.classification.mockResolvedValue({ records: isins.map((isin, index) => ({ isin, band: index === 0 ? 'large' : 'small', asOf: '2026-06-30', name: 'ALPHA', weight: 100, parentIsin: '', source })) })
+  await renderInsights([], [], [
+    { id: 'large', ticker: 'ALPHA', name: 'Large company', type: 'stock', isin: isins[0], exchange: 'NSE', currency: 'INR', quantity: 1, buyPrice: 90, invested: 90, lastPrice: 100 },
+    { id: 'small', ticker: 'ALPHA', name: 'Small company', type: 'stock', isin: isins[1], exchange: 'BSE', currency: 'INR', quantity: 1, buyPrice: 70, invested: 70, lastPrice: 60 },
+  ])
+  const tiles = [...container.querySelectorAll<HTMLButtonElement>('.allocation-tile')]
+  const mode = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('.exposure-mode button')].find((button) => button.textContent === label)!
+  await act(async () => mode('Market cap').click())
+  await act(async () => (container.querySelector('.market-cap-band--large') as HTMLButtonElement).click())
+  expect([...container.querySelectorAll('.allocation-detail strong')].map((value) => value.textContent)).toEqual(['Large cap', '62.5%', '₹100.00', '₹10.00'])
+  expect(tiles.map((tile) => tile.classList.contains('allocation-tile--exposure-match'))).toEqual([true, false])
+  await act(async () => (container.querySelector('.market-cap-band--small') as HTMLButtonElement).click())
+  expect([...container.querySelectorAll('.allocation-detail strong')].map((value) => value.textContent)).toEqual(['Small cap', '37.5%', '₹60.00', '−₹10.00'])
+  expect(tiles.map((tile) => tile.classList.contains('allocation-tile--exposure-match'))).toEqual([false, true])
+  await act(async () => mode('Sectors').click())
+  await act(async () => tiles[1].click())
+  expect(tiles.map((tile) => tile.getAttribute('aria-pressed'))).toEqual(['false', 'true'])
+  expect([...container.querySelectorAll('.allocation-detail strong')].map((value) => value.textContent)).toEqual(['ALPHA', '37.5%', '₹60.00', '−₹10.00'])
 })
 
 it('uses the workspace fund fallback sector when hovering a ribbon segment', async () => {

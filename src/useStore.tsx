@@ -166,7 +166,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [savedSettings, assertCurrentWorkspace])
   useEffect(() => {
     const changed = (event: StorageEvent) => {
-      if (!event.key || !['finverse:folios', 'finverse:settings', 'finverse:monitor:v1', 'finverse:workspace-write:v1'].includes(event.key)) return
+      if (!event.key || !['finverse:folios', 'finverse:settings', 'finverse:monitor:v1', 'finverse:workspace-write:v1', 'finverse:investment-ledger:v1', 'finverse:market-cap:v1'].includes(event.key)) return
       workspaceChangedRef.current = true
       setWorkspaceChanged(true)
       for (const controller of manualRefreshControllers.current) controller.abort()

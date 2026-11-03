@@ -1,4 +1,4 @@
-.dither-bar {
+:where(.dither-bar) {
   display: block;
   position: relative;
   width: 100%;

@@ -13,9 +13,14 @@ export function applyNsePricing(position: Position, candidate: NsePricingCandida
   return normalizePosition({ ...position, pricingListing: { ...candidate, source: 'nse-master', verifiedAt: Date.now() } })
 }
 
-export async function loadNsePricingCandidates(positions: Position[], signal?: AbortSignal): Promise<NsePricingCandidate[]> {
-  const eligible = positions.filter((position) => (position.type === 'stock' || position.type === 'etf')
+function eligibleNsePositions(positions: Position[]): Position[] {
+  return positions.filter((position) => (position.type === 'stock' || position.type === 'etf')
     && hasInrDenomination(position) && ['NSE', 'BSE'].includes(position.exchange ?? '') && isIsin(position.isin))
+}
+
+/** Exact security matches can establish asset type even when a holdings export omitted it. */
+export async function loadNseInstrumentTypes(positions: Position[], signal?: AbortSignal): Promise<NsePricingCandidate[]> {
+  const eligible = eligibleNsePositions(positions)
   const isins = [...new Set(eligible.map((position) => position.isin!))].sort()
   const matches: NsePricingCandidate[] = []
   for (let start = 0; start < isins.length; start += MAX_NSE_LOOKUP_ISINS) {
@@ -31,7 +36,13 @@ export async function loadNsePricingCandidates(positions: Position[], signal?: A
     }
     const candidates = payload.candidates as NsePricingCandidate[]
     if (new Set(candidates.map((candidate) => candidate.isin)).size !== candidates.length) throw new Error('The NSE reference returned ambiguous matches. Review listings individually.')
-    matches.push(...candidates.filter((candidate) => eligible.some((position) => position.isin === candidate.isin && position.type === candidate.type)))
+    matches.push(...candidates)
   }
   return matches
+}
+
+export async function loadNsePricingCandidates(positions: Position[], signal?: AbortSignal): Promise<NsePricingCandidate[]> {
+  const candidates = await loadNseInstrumentTypes(positions, signal)
+  const eligible = eligibleNsePositions(positions)
+  return candidates.filter((candidate) => eligible.some((position) => position.isin === candidate.isin && position.type === candidate.type))
 }

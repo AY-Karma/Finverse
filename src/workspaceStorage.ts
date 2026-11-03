@@ -4,6 +4,8 @@ export const WORKSPACE_STORAGE_KEYS = [
   'finverse:portfolio-snapshots',
   'finverse:monitor:v1',
   'finverse:positions',
+  'finverse:investment-ledger:v1',
+  'finverse:market-cap:v1',
 ] as const
 
 export type WorkspaceRecords = Record<typeof WORKSPACE_STORAGE_KEYS[number], string | null>
@@ -26,6 +28,10 @@ function readRecords(value: unknown): StoredRecords {
     if (!(WORKSPACE_STORAGE_KEYS as readonly string[]).includes(key) && !isCacheKey(key)) throw new Error('The saved recovery copy contains an unsupported record.')
     if (raw !== null && typeof raw !== 'string') throw new Error('The saved recovery copy is invalid.')
     records[key] = raw
+  }
+  // Older recovery copies predate the optional analytics records.
+  for (const key of ['finverse:investment-ledger:v1', 'finverse:market-cap:v1']) {
+    if (!(key in records)) records[key] = null
   }
   if (WORKSPACE_STORAGE_KEYS.some((key) => !(key in records))) throw new Error('The saved recovery copy is incomplete.')
   return records

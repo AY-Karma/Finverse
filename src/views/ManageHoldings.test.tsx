@@ -32,6 +32,50 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('groups sources in one portfolio and keeps targeted update and delete together', async () => {
+    state.folios = [folio, { ...folio, id: 'funds', name: 'funds.xlsx', positions: [{ ...position, id: 'fund', type: 'mutual-fund' }] }]
+    state.positions = state.folios.flatMap((item) => item.positions)
+    const onRequestImport = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
+      expect(container.querySelectorAll('.imported-portfolio')).toHaveLength(1)
+      expect(container.querySelector('.imported-portfolio-copy')?.textContent).toContain('2 holdings · 2 source files')
+      expect(container.querySelector<HTMLDetailsElement>('.import-source-files')?.open).toBe(false)
+      const actions = container.querySelectorAll('.import-source-files .folio-review-actions')
+      expect(actions).toHaveLength(2)
+      const update = actions[1].querySelector<HTMLButtonElement>('button')!
+      const remove = actions[1].querySelector<HTMLButtonElement>('.btn-remove')!
+      expect(remove.textContent).toBe('Remove')
+      await act(async () => update.click())
+      expect(onRequestImport).toHaveBeenCalledExactlyOnceWith('funds')
+      await act(async () => remove.click())
+      expect(state.removeFolio).not.toHaveBeenCalled()
+      expect(actions[1].querySelector('.btn-remove--armed')).toBe(remove)
+      await act(async () => remove.click())
+      expect(state.removeFolio).toHaveBeenCalledExactlyOnceWith('funds')
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('keeps the latest statement comparison available on the saved account', async () => {
+    state.folios = [{ ...folio, positions: [{ ...position, quantity: 2 }], statement: { id: 'next', fileName: 'next.csv', statementDate: '2026-02-01', completeness: 'complete' },
+      previousRevision: { statement: { id: 'previous', fileName: 'previous.csv', statementDate: '2026-01-01', completeness: 'complete' }, importedAt: 123, positions: [position] } }]
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const comparison = container.querySelector('.statement-changes')!
+      expect(comparison.querySelector('summary strong')?.textContent).toBe('Changes since last import')
+      expect(comparison.textContent).toContain('Quantity 1 → 2')
+      expect(comparison.textContent).toContain('2026-01-01 → 2026-02-01')
+      state.settings.hideValues = true
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      expect(comparison.textContent).toContain('Statement changes hidden')
+      expect(comparison.innerHTML).not.toContain('ABC')
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('shows unchanged confirmation only after seven days and ignores repeat clicks while saving', async () => {
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
@@ -99,7 +143,7 @@ describe('holdings management', () => {
       expect(remove.getAttribute('aria-label')).toBe('Remove ••••••')
       await act(async () => remove.click())
       expect(container.innerHTML).not.toContain(folio.name)
-      await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Delete')!.click())
+      await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Delete ?')!.click())
       expect(state.removeFolio).toHaveBeenCalledExactlyOnceWith(folio.id)
       await act(async () => container.querySelector<HTMLButtonElement>('.undo-import')!.click())
       await act(async () => container.querySelector<HTMLButtonElement>('.undo-import')!.click())
@@ -140,7 +184,7 @@ describe('holdings management', () => {
     const root = createRoot(container)
     try {
       await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
-      expect(container.querySelector('.imported-statements > h3')?.textContent).toBe('Imported statements')
+      expect(container.querySelector('.imported-portfolio h3')?.textContent).toBe('Imported portfolio')
       expect(container.querySelector('.folio-title > .sym')?.textContent).toBe(folio.name)
       const facts = Object.fromEntries([...container.querySelectorAll('.folio-facts > div')].map((item) => [item.querySelector('dt')?.textContent, item.querySelector('dd')?.textContent]))
       expect(facts.Holdings).toBe('1')
@@ -191,23 +235,32 @@ describe('holdings management', () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
-    const findButton = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent === label)!
     try {
       await act(async () => root.render(View === ManageHoldings ? <ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} /> : <ImportView />))
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove holdings.xlsx"]')!.click())
+      const remove = container.querySelector<HTMLButtonElement>('[aria-label="Remove holdings.xlsx"]')!
+      expect(remove.textContent).toBe('Remove')
+      await act(async () => remove.focus())
+      await act(async () => remove.click())
       expect(state.removeFolio).not.toHaveBeenCalled()
-      expect(container.querySelector('[aria-label="Confirm deletion of holdings.xlsx"]')).not.toBeNull()
-      await act(async () => findButton('Cancel').click())
+      expect(container.querySelector('[aria-label="Confirm deletion of holdings.xlsx"]')).toBe(remove)
+      expect(remove.textContent).toBe('Delete ?')
+      expect(remove.classList.contains('btn-remove--armed')).toBe(true)
+      await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })))
       expect(state.removeFolio).not.toHaveBeenCalled()
-      expect(container.querySelector('[aria-label="Confirm deletion of holdings.xlsx"]')).toBeNull()
+      expect(remove.classList.contains('btn-remove--armed')).toBe(false)
+      expect(remove.getAttribute('aria-label')).toBe('Remove holdings.xlsx')
+      expect(remove.textContent).toBe('Remove')
       expect(container.textContent).toContain(folio.name)
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove holdings.xlsx"]')!.click())
-      expect(document.activeElement).toBe(findButton('Cancel'))
-      await act(async () => findButton('Cancel').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      await act(async () => remove.click())
+      await act(async () => remove.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
       expect(state.removeFolio).not.toHaveBeenCalled()
-      expect(document.activeElement).toBe(container.querySelector('[aria-label="Remove holdings.xlsx"]'))
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove holdings.xlsx"]')!.click())
-      await act(async () => findButton('Delete').click())
+      expect(document.activeElement).toBe(remove)
+      expect(remove.classList.contains('btn-remove--armed')).toBe(false)
+      await act(async () => remove.click())
+      await act(async () => remove.blur())
+      expect(remove.classList.contains('btn-remove--armed')).toBe(false)
+      await act(async () => remove.click())
+      await act(async () => remove.click())
       expect(state.removeFolio).toHaveBeenCalledExactlyOnceWith(folio.id)
     } finally { await act(async () => root.unmount()); container.remove() }
   })

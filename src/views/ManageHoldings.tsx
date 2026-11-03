@@ -12,6 +12,7 @@ import { canConfirmFolioUnchanged } from '../importFreshness'
 import { useFolioReviewTime } from '../useFolioReviewTime'
 import { InstrumentReview } from './InstrumentReview'
 import { dateFormatter } from '../formatters'
+import { StatementChanges } from './StatementChanges'
 
 const statementDate = dateFormatter({ day: 'numeric', month: 'short', year: 'numeric' })
 function displayDate(value: number | string): string {
@@ -24,6 +25,8 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
   const hideValues = settings.hideValues
   const hasPositions = positions.length > 0
   const now = useFolioReviewTime()
+  const latestImport = Math.max(...folios.map((folio) => folio.importedAt))
+  const oldestFolio = folios.reduce<typeof folios[number] | undefined>((oldest, folio) => !oldest || Math.max(folio.importedAt, folio.reviewedAt ?? 0) < Math.max(oldest.importedAt, oldest.reviewedAt ?? 0) ? folio : oldest, undefined)
   const listingCount = positions.filter((position) => position.type !== 'mutual-fund').length
   const pendingListings = positions.filter(needsInstrumentReview).length
   const sectionRef = useRef<HTMLElement>(null)
@@ -75,8 +78,17 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
       </div></div></div>
     </div>
     <WorkspaceRestore actionsTarget={restoreActionsTarget} />
-    {folios.length > 0 && <div className="imported-statements">
-      <h3>Imported statements</h3>
+    {folios.length > 0 && <div className="imported-statements imported-portfolio">
+      <div className="imported-portfolio-head">
+        <ActionIcon name="holdings" />
+        <div className="imported-portfolio-copy"><h3>Imported portfolio</h3>
+          <span>{hideValues ? 'Import details hidden' : `${positions.length} holding${positions.length === 1 ? '' : 's'} · ${folios.length} source file${folios.length === 1 ? '' : 's'}`}</span>
+        </div>
+        {!hideValues && <p className="imported-portfolio-date">Last imported <span>{displayDate(latestImport)}</span></p>}
+        {!hideValues && oldestFolio && <ImportHealthIndicator importedAt={oldestFolio.importedAt} reviewedAt={oldestFolio.reviewedAt} showLabel />}
+      </div>
+      <details className="import-source-files">
+        <summary><span>Source files</span><span className="import-source-action">Manage imports</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary>
       <div className="folio-list">{folios.map((folio) => <div className="folio-row" key={folio.id}>
       <span className="folio-document" aria-hidden="true"><ActionIcon name="sources" /></span>
       <div className="folio-copy">
@@ -89,12 +101,14 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
         </dl>}
         <div className="folio-review-actions">
           <button type="button" className="btn btn--secondary btn--small" aria-haspopup="dialog" disabled={workspaceReadOnly || reviewingId !== null} onClick={() => onRequestImport(folio.id)}>Update folio</button>
-          {canConfirmFolioUnchanged(folio, now) && <button type="button" className="btn btn--ghost btn--small" disabled={workspaceReadOnly || reviewingId !== null} onClick={() => void confirmUnchanged(folio.id)}>{reviewingId === folio.id ? 'Saving…' : 'Holdings unchanged'}</button>}
+          {canConfirmFolioUnchanged(folio, now) && <button type="button" className="btn btn--secondary btn--small folio-unchanged" disabled={workspaceReadOnly || reviewingId !== null} onClick={() => void confirmUnchanged(folio.id)}><ActionIcon name="review" />{reviewingId === folio.id ? 'Saving…' : 'Holdings unchanged'}</button>}
+          <RemoveFolioButton folio={{ id: folio.id, name: privateValue(folio.name, hideValues) }} onConfirm={removeFolio} />
         </div>
         {reviewedId === folio.id && <span className="hint" role="status">Marked fresh</span>}
       </div>
-      <RemoveFolioButton folio={{ id: folio.id, name: privateValue(folio.name, hideValues) }} onConfirm={removeFolio} showLabel />
-    </div>)}</div></div>}
+    </div>)}</div></details>
+      {folios.filter((folio) => folio.previousRevision).map((folio) => <StatementChanges key={`${folio.id}:${folio.importedAt}`} folio={folio} before={folio.previousRevision!.positions} after={folio.positions} beforeDate={folio.previousRevision!.statement.statementDate} afterDate={folio.statement?.statementDate} hideValues={hideValues} />)}
+    </div>}
     {listingCount > 0 && <div className={`listing-review${!hideValues && pendingListings > 0 ? ' listing-review--pending' : ''}`}>
       <button id="listing-review-trigger" type="button" className="listing-review-trigger" aria-expanded={reviewOpen} aria-controls="instrument-review-content" onClick={onReviewListings}>
         <ActionIcon name="review" />
