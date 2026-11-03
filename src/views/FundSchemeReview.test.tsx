@@ -26,7 +26,7 @@ it('hides fund identities and aborts an in-flight lookup when masking turns on',
   const root = createRoot(container)
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Find scheme')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.fund-scheme-trigger')!.click())
     const signal = state.search.mock.calls[0][1] as AbortSignal
     state.settings.hideValues = true
     await act(async () => root.render(<FundSchemeReview />))
@@ -53,9 +53,10 @@ it('requires explicit confirmation, blocks Growth for an IDCW holding and retain
   const button = (label: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === label)!
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    await act(async () => button('Find scheme').click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.fund-scheme-trigger')!.click())
     expect(state.confirmFundScheme).not.toHaveBeenCalled()
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!.click())
+    expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull()
+    expect(container.querySelector('.fund-scheme-row [role="listbox"]')).not.toBeNull()
     const options = [...container.querySelectorAll<HTMLElement>('[role="option"]')]
     expect(options.find((option) => option.textContent?.includes(growth.schemeName))!.getAttribute('aria-disabled')).toBe('true')
     await act(async () => options.find((option) => option.textContent?.includes(idcw.schemeName))!.click())
@@ -68,13 +69,37 @@ it('requires explicit confirmation, blocks Growth for an IDCW holding and retain
   } finally { await act(async () => root.unmount()) }
 })
 
+it('toggles the dropdown on the fund name and cancels an unfinished search', async () => {
+  let finish!: (value: unknown) => void
+  state.search.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<FundSchemeReview />))
+    const trigger = container.querySelector<HTMLButtonElement>('.fund-scheme-trigger')!
+    expect(trigger.textContent).toContain(state.positions[0].name)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => trigger.click())
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    const signal = state.search.mock.calls[0][1] as AbortSignal
+    expect(container.querySelector('.fund-scheme-row [aria-label="Review fund scheme"]')).not.toBeNull()
+    await act(async () => trigger.click())
+    expect(signal.aborted).toBe(true)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => finish({ status: 'review', candidates: [], reason: 'Late response' }))
+    expect(container.textContent).not.toContain('Late response')
+    expect(container.querySelector('[aria-label="Review fund scheme"]')).toBeNull()
+    expect(state.confirmFundScheme).not.toHaveBeenCalled()
+  } finally { await act(async () => root.unmount()) }
+})
+
 it.each([{ reportedCurrency: 'EUR' }, { currency: 'INR' as const, reportedCurrency: 'EUR' }])('blocks scheme search and confirmation for an unsupported fund currency %j', async (metadata) => {
   state.positions = [{ ...state.positions[0], ...metadata }]
   const container = document.createElement('div')
   const root = createRoot(container)
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    const search = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Find scheme')!
+    const search = container.querySelector<HTMLButtonElement>('.fund-scheme-trigger')!
     expect(search.disabled).toBe(true)
     expect(container.textContent).toContain('MFAPI supports INR mutual funds only')
     await act(async () => search.click())
@@ -91,7 +116,7 @@ it('closes a provider confirmation when the holding currency changes after the s
   const root = createRoot(container)
   try {
     await act(async () => root.render(<FundSchemeReview />))
-    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Find scheme')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.fund-scheme-trigger')!.click())
     expect(container.querySelector('[aria-label="Review fund scheme"]')).not.toBeNull()
     state.positions = [{ ...state.positions[0], reportedCurrency: 'EUR' }]
     await act(async () => root.render(<FundSchemeReview />))

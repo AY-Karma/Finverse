@@ -8,9 +8,11 @@ interface Props {
   value: string
   onChange: (code: string) => void
   disabled?: boolean
+  inline?: boolean
+  onClose?: () => void
 }
 
-export function FundSchemePicker({ importedName, candidates, value, onChange, disabled = false }: Props) {
+export function FundSchemePicker({ importedName, candidates, value, onChange, disabled = false, inline = false, onClose }: Props) {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
   const search = useRef<HTMLInputElement>(null)
@@ -24,7 +26,7 @@ export function FundSchemePicker({ importedName, candidates, value, onChange, di
   const filtered = choices.filter((item) => terms.every((term) => `${item.schemeName} ${item.schemeCode}`.toLowerCase().includes(term)))
   const available = filtered.filter((item) => item.compatible)
   const active = available.find((item) => String(item.schemeCode) === activeCode) ?? available[0]
-  const expanded = open && !disabled
+  const expanded = (inline || open) && !disabled
 
   useEffect(() => {
     if (expanded) search.current?.focus()
@@ -35,6 +37,7 @@ export function FundSchemePicker({ importedName, candidates, value, onChange, di
   }, [expanded, active?.schemeCode, id])
 
   function close() {
+    if (inline) { onClose?.(); return }
     setOpen(false)
     trigger.current?.focus()
   }
@@ -42,7 +45,7 @@ export function FundSchemePicker({ importedName, candidates, value, onChange, di
   function choose(item: FundSchemeCandidate) {
     if (disabled || !canConfirmFundScheme(importedName, item)) return
     onChange(String(item.schemeCode))
-    close()
+    if (!inline) close()
   }
 
   function navigate(event: KeyboardEvent<HTMLInputElement>) {
@@ -60,8 +63,8 @@ export function FundSchemePicker({ importedName, candidates, value, onChange, di
   return <div className="scheme-picker" onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
   }}>
-    <span className="scheme-picker-label" id={`${id}-label`}>Provider scheme</span>
-    <button ref={trigger} type="button" className="scheme-picker-trigger" disabled={disabled}
+    <span className={inline ? 'sr-only' : 'scheme-picker-label'} id={`${id}-label`}>Provider scheme</span>
+    {!inline && <button ref={trigger} type="button" className="scheme-picker-trigger" disabled={disabled}
       aria-labelledby={`${id}-label ${id}-value`} aria-haspopup="listbox" aria-expanded={expanded} aria-controls={expanded ? `${id}-list` : undefined}
       onClick={() => { setQuery(''); setActiveCode(value); setOpen(!expanded) }}
       onKeyDown={(event) => {
@@ -73,7 +76,7 @@ export function FundSchemePicker({ importedName, candidates, value, onChange, di
         <span className="scheme-picker-meta">{selected ? `Code ${selected.schemeCode}` : 'Select the exact plan and option'}</span>
       </span>
       <svg className="scheme-picker-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
-    </button>
+    </button>}
     {expanded && <div className="scheme-picker-panel">
       <div className="scheme-picker-search">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>

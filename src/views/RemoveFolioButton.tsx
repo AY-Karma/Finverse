@@ -1,32 +1,44 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Folio } from '../types'
 
-export function RemoveFolioButton({ folio, onConfirm, showLabel = false }: { folio: Pick<Folio, 'id' | 'name'>; onConfirm: (id: string) => void; showLabel?: boolean }) {
+export function RemoveFolioButton({ folio, onConfirm }: { folio: Pick<Folio, 'id' | 'name'>; onConfirm: (id: string) => void | boolean | Promise<void | boolean> }) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
-  const removeButtonRef = useRef<HTMLButtonElement>(null)
-  const restoreFocusRef = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const busyRef = useRef(false)
+  const armed = confirmingId === folio.id
 
   useEffect(() => {
-    if (confirmingId === null && restoreFocusRef.current) {
-      removeButtonRef.current?.focus()
-      restoreFocusRef.current = false
+    if (!armed || busy) return
+    function cancelOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !buttonRef.current?.contains(event.target)) setConfirmingId(null)
     }
-  }, [confirmingId])
+    document.addEventListener('pointerdown', cancelOutside, true)
+    return () => document.removeEventListener('pointerdown', cancelOutside, true)
+  }, [armed, busy])
 
-  function cancel() {
-    restoreFocusRef.current = true
-    setConfirmingId(null)
+  async function remove() {
+    if (busyRef.current) return
+    setError('')
+    if (!armed) { setConfirmingId(folio.id); return }
+    busyRef.current = true
+    setBusy(true)
+    try {
+      if (await onConfirm(folio.id) !== false) setConfirmingId(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The import could not be deleted. Try again.')
+    } finally { busyRef.current = false; setBusy(false) }
   }
 
-  if (confirmingId !== folio.id) {
-    return <button ref={removeButtonRef} className={`btn-remove${showLabel ? ' btn-remove--label' : ''}`} type="button" aria-label={`Remove ${folio.name}`} title="Remove import" onClick={() => setConfirmingId(folio.id)}>{showLabel ? 'Remove' : '\u00d7'}</button>
-  }
-
-  return <div className="folio-remove-confirm" role="group" aria-label={`Confirm deletion of ${folio.name}`} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); cancel() } }}>
-    <span className="hint">Delete this import?</span>
-    <div className="folio-remove-actions">
-      <button className="btn btn--ghost btn--small" type="button" autoFocus onClick={cancel}>Cancel</button>
-      <button className="btn btn--secondary btn--small down" type="button" onClick={() => { setConfirmingId(null); onConfirm(folio.id) }}>Delete</button>
-    </div>
-  </div>
+  return <>
+    <button ref={buttonRef} className={`btn-remove btn-remove--label${armed ? ' btn-remove--armed' : ''}`}
+      type="button" disabled={busy} aria-label={armed ? `Confirm deletion of ${folio.name}` : `Remove ${folio.name}`}
+      title={armed ? 'Click again to delete. Click outside or press Escape to cancel.' : 'Remove import'}
+      onClick={() => void remove()} onBlur={() => { if (!busyRef.current) setConfirmingId(null) }}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setConfirmingId(null) } }}>
+      {busy ? 'Deleting…' : armed ? 'Delete ?' : 'Remove'}
+    </button>
+    {error && <p className="hint down" role="alert">{error}</p>}
+  </>
 }

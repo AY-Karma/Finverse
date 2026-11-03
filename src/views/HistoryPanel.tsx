@@ -237,7 +237,7 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
       <div className="panel-head">
         <div className="panel-head-titles">
           <span className="panel-title">Holding Price History</span>
-          {!position && <span className="section-index">06 · Trends</span>}
+          {!position && <span className="section-index">Trends</span>}
         </div>
         {!settings.hideValues && <div className="history-tools">
           {!position && <div className="history-picker">

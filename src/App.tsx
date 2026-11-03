@@ -158,7 +158,7 @@ function AppShell({ view, navigate, children }: { view: View; navigate: (view: V
             <button type="button" className="sidebar-toggle" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
               aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               aria-expanded={!sidebarCollapsed} aria-controls="workspace-navigation">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18" /><path className="sidebar-toggle-chevron" d="m16 8-4 4 4 4" /></svg>
             </button>
           </div>
           {NAV.map((item) => (

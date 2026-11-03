@@ -36,7 +36,7 @@ describe('workspace settings', () => {
     expect(container.querySelector('.holdings-import')).toBeNull()
   })
 
-  it('applies appearance and hidden-value changes immediately', async () => {
+  it('applies appearance changes immediately without duplicating the app privacy control', async () => {
     state.settings = { ...state.settings, mode: 'dark', hideValues: false }
     const render = () => act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     await render()
@@ -46,12 +46,9 @@ describe('workspace settings', () => {
     state.settings = state.setSettings.mock.lastCall![0]
     await render()
     expect(light.getAttribute('aria-pressed')).toBe('true')
-    const hidden = container.querySelector<HTMLInputElement>('#hide-values')!
-    await act(async () => hidden.click())
-    expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, hideValues: true })
-    state.settings = state.setSettings.mock.lastCall![0]
-    await render()
-    expect(hidden.checked).toBe(true)
+    expect(container.querySelector('#hide-values')).toBeNull()
+    expect(container.textContent).not.toContain('Hide portfolio values')
+    expect(state.settings.hideValues).toBe(false)
   })
 
   it('opens listing review inline, provides a separate scroll region, and restores focus on close', async () => {

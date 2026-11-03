@@ -1,0 +1,18 @@
+.holding-market-moves { display: grid; gap: 12px; min-width: 0; }
+.holding-market-moves > .hint { margin: 0; }
+.holding-move-summary { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.holding-move-summary > strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.holding-move-column { min-width: 0; }
+.holding-move-column > .score-label { display: block; margin-bottom: 14px; }
+.holding-move-identity { display: inline-flex; align-items: baseline; gap: 12px; min-width: 0; }
+.holding-move-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.holding-move-pct { flex: none; color: var(--ink-subtle); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.holding-move-help .risk-help-popover { top: calc(100% + 8px); left: 0; }
+.holding-move-details { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+.holding-move-details > summary { cursor: pointer; font-size: .8rem; padding-block: 4px; }
+.holding-move-table-scroll { overflow-x: auto; margin-top: 12px; }
+.holding-move-table-scroll table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.holding-move-table-scroll th, .holding-move-table-scroll td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.holding-move-table-scroll td:not(:first-child) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.holding-move-details .hint { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .holding-move-column .contribution-row > div { gap: 8px; } }

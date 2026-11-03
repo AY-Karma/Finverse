@@ -218,34 +218,36 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
     <div className="instrument-review-scroll" role="region" aria-label="Instrument listings" tabIndex={0}>
       <p className="hint">Confirm listing details against your broker statement. NSE auto-approval checks exact ISIN matches against the official listing reference.</p>
       {nsePending.length > 0 && <div className="nse-approval-actions">
-        <button type="button" className="btn btn--primary btn--small" disabled={saving || !!nsePlan || !settings.allowExternalData} onClick={() => void findNseMatches()}>{approvingNse ? 'Checking NSE matches…' : 'Auto-approve NSE matches'}</button>
+        <button type="button" className="btn btn--primary btn--small" aria-busy={approvingNse} disabled={saving || !!nsePlan || !settings.allowExternalData} onClick={() => void findNseMatches()}>{approvingNse ? 'Checking NSE matches…' : 'Auto-approve NSE matches'}</button>
         <p className="nse-pricing-note"><strong>NSE pricing preferred</strong><span>Verified matches use NSE prices. Our current BSE feed is delayed by about 15 minutes.</span></p>
         {!settings.allowExternalData && <span className="hint">Enable external market data in Settings to check NSE matches.</span>}
       </div>}
       {reviewCount > 0 && <div className="import-actions">
-        <button type="button" className="btn btn--secondary btn--small" disabled={saving || !!nsePlan} onClick={() => void approveAll()}>{approvingAll ? 'Approving default listings…' : 'Approve all default listings'}</button>
+        <button type="button" className="btn btn--secondary btn--small" aria-busy={approvingAll} disabled={saving || !!nsePlan} onClick={() => void approveAll()}>{approvingAll ? 'Approving default listings…' : 'Approve all default listings'}</button>
         <span className="hint">Use the current values shown below. Listings with invalid details will still need review.</span>
       </div>}
       {bulkError && <p className="hint down" role="alert">{bulkError}</p>}
       {message && <p className="hint" role="status">{message}</p>}
       {holdings.map((position) => <div key={position.id} className="instrument-review-item">
         <div className="folio-row">
+          <div className="listing-item-header">
+            <span className="sym" title={position.name || position.ticker}>{position.name || position.ticker}</span>
+            <div className="listing-item-actions">
+              <span className={`listing-item-status${needsInstrumentReview(position) ? ' listing-item-status--pending' : ''}`}>{needsInstrumentReview(position) ? 'Needs review' : 'Ready'}</span>
+              <button type="button" className="btn btn--secondary btn--small" disabled={saving || !hasInrDenomination(position)} aria-expanded={selectedId === position.id} onClick={() => review(position)}>Review listing</button>
+            </div>
+          </div>
           <div className="folio-copy listing-copy">
-            <span className="sym">{position.name || position.ticker}</span>
-            <dl className="listing-facts">
-              <div><dt>Symbol</dt><dd>{position.ticker || 'Not provided'}</dd></div>
+            <dl className={`listing-facts${!position.name || position.name === position.ticker ? ' listing-facts--compact' : ''}`}>
+              {position.name && position.name !== position.ticker && <div><dt>Symbol</dt><dd>{position.ticker || 'Not provided'}</dd></div>}
               <div><dt>Exchange</dt><dd>{position.exchange ?? 'Unresolved'}{position.exchangeSource !== 'explicit' && <span className="listing-fact-note">Inferred</span>}</dd></div>
               <div><dt>Currency</dt><dd>{position.currency ?? 'Unresolved'}</dd></div>
               <div><dt>Price symbol</dt><dd>{hasVerifiedNsePricing(position) ? position.pricingListing!.providerSymbol : position.providerSymbol || 'Derived from listing'}</dd></div>
             </dl>
-            <div className="listing-provenance">{hasVerifiedNsePricing(position) && <span className="nse-priced-label">Priced via NSE<span>Imported exchange: {position.reportedExchange || position.exchange || 'not provided'}</span></span>}</div>
+            {hasVerifiedNsePricing(position) && <div className="listing-provenance"><span className="nse-priced-label">Priced via NSE<span>Imported exchange: {position.reportedExchange || position.exchange || 'not provided'}</span></span></div>}
             {position.identityIssue && <span className="hint down">{position.identityIssue}</span>}
             {(position.reportedExchange || position.reportedCurrency) && <span className="hint">Statement metadata: {position.reportedExchange ? `exchange ${position.reportedExchange}` : ''}{position.reportedExchange && position.reportedCurrency ? ', ' : ''}{position.reportedCurrency ? `currency ${position.reportedCurrency}` : ''}</span>}
             {!hasInrDenomination(position) && <span className="hint">Import a corrected INR statement to review this listing. Original unsupported amounts are retained.</span>}
-          </div>
-          <div className="listing-item-actions">
-            <span className={`listing-item-status${needsInstrumentReview(position) ? ' listing-item-status--pending' : ''}`}>{needsInstrumentReview(position) ? 'Needs review' : 'Ready'}</span>
-            <button type="button" className="btn btn--secondary btn--small" disabled={saving || !hasInrDenomination(position)} aria-expanded={selectedId === position.id} onClick={() => review(position)}>Review listing</button>
           </div>
         </div>
         {selected?.id === position.id && draft && hasInrDenomination(selected) && <form className="import-preview" aria-label="Review instrument listing" onSubmit={(event) => void save(event)}>
@@ -261,7 +263,7 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
           </div>
           <p className="hint" style={{ overflowWrap: 'anywhere' }}>Reviewed listing: {listing(draft)}</p>
           <p className="hint">{needsProviderSymbol ? 'Numeric BSE codes need a confirmed price symbol ending in .BO. Keep the BSE exchange; imported values stay in use until corrected.' : 'Confirm the symbol and exchange with your INR statement. Changing either clears the price symbol.'}</p>
-          <div className="import-actions"><button type="submit" className="btn btn--primary" disabled={saving || !draft.ticker.trim()}>{saving && !approvingAll ? 'Saving correction…' : 'Save listing correction'}</button><button type="button" className="btn btn--ghost" disabled={saving} onClick={() => { setSelectedId(null); setDraft(null); setError('') }}>Cancel listing review</button></div>
+          <div className="import-actions"><button type="submit" className="btn btn--primary" aria-busy={saving && !approvingAll} disabled={saving || !draft.ticker.trim()}>{saving && !approvingAll ? 'Saving correction…' : 'Save listing correction'}</button><button type="button" className="btn btn--ghost" disabled={saving} onClick={() => { setSelectedId(null); setDraft(null); setError('') }}>Cancel listing review</button></div>
           {error && <p className="hint down" role="alert">{error}</p>}
         </form>}
       </div>)}

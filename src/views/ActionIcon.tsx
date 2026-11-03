@@ -1,5 +1,7 @@
 const ICON_PATHS = {
   overview: 'M3 3h7v7H3V3Zm11 0h7v7h-7V3ZM3 14h7v7H3v-7Zm11 0h7v7h-7v-7Z',
+  moon: 'M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z',
+  sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-6v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5',
   details: 'M4 4h16v16H4V4Zm5 0v16m3-11h5m-5 4h5',
   holdings: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5m-18 5 9 5 9-5',
   activity: 'M3 12h4l3-7 4 14 3-7h4',

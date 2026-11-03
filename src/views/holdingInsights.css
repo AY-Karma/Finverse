@@ -1,0 +1,16 @@
+.performance-panel-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.performance-comparison > .panel-head { margin-bottom: 16px; }
+.insight-panel--benchmark .insight-chart-metric + .insight-chart-metric { border-left: 0; }
+.exposure-mode { align-self: start; justify-self: start; margin: 0 0 16px; }
+.insight-panel--exposure { grid-template-rows: auto auto minmax(0, 1fr); }
+.contribution-period-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: 12px; }
+.contribution-period-control label { display: grid; gap: 4px; color: var(--ink-subtle); font-size: 11px; min-width: 0; }
+.contribution-period-control input, .contribution-period-control select { min-height: 32px; max-width: 100%; color: var(--ink); background: var(--surface-1); border: 1px solid var(--hairline-strong); border-radius: var(--r-sm); padding: 4px 8px; font: 400 11px var(--font-body); }
+.contribution-period-control select { width: 124px; }
+.contribution-period-control input { width: 134px; }
+.contribution-period-control .contribution-date-control { display: flex; align-items: center; gap: 8px; }
+.contribution-period-control input, .contribution-period-control select { box-sizing: border-box; height: 32px; }
+.market-contribution-head .panel-head-titles { flex: 1 1 260px; padding-right: 0; }
+.market-contribution-head + .hint + .contribution-columns { margin-top: 12px; }
+.contributor-empty { height: auto; min-height: 96px; padding: 24px 16px; }
+@media (max-width: 600px) { .contribution-period-control { margin-left: 0; } }

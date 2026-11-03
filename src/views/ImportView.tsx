@@ -10,6 +10,7 @@ import type { Position } from '../types'
 import { UndoImportButton } from './UndoImportButton'
 import { RemoveFolioButton } from './RemoveFolioButton'
 import { ActionIcon } from './ActionIcon'
+import { StatementChanges } from './StatementChanges'
 import folderIcon from '../assets/imports/folder.svg'
 
 interface ImportViewProps {
@@ -323,7 +324,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
               <div><strong>{review.removed.length}</strong><span>holdings removed</span></div>
               <div><strong>{review.changed.length}</strong><span>holdings changed</span></div>
             </div>
-            <details>
+            {replacing && target && previews.length === 1 ? <StatementChanges before={target.positions} after={previews[0].positions} beforeDate={target.statement?.statementDate} afterDate={statementDate || null} hideValues={hideValues} summary="Review holding changes" /> : <details>
               <summary>Review holding changes</summary>
               <ul>
                 {review.added.map((position, index) => <li className="hint" key={`added-${index}`}>Added · {holdingDetail(position)}</li>)}
@@ -331,7 +332,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
                 {review.changed.map(({ before, after }, index) => <li className="hint" key={`changed-${index}`}>{mask(after.ticker)} · Quantity {quantity(before.quantity)} → {quantity(after.quantity)} · Cost {nativeAmount(before.invested, before.currency)} → {nativeAmount(after.invested, after.currency)} · Imported price {nativeAmount(before.lastPrice, before.currency)} → {nativeAmount(after.lastPrice, after.currency)}</li>)}
               </ul>
               {review.added.length + review.removed.length + review.changed.length === 0 && <p className="hint">No holding changes in this statement.</p>}
-            </details>
+            </details>}
             <div className="import-quality" aria-label="Resulting portfolio totals">
               <div><strong>{resultingSnapshot.positions.length}</strong><span>resulting holdings</span></div>
               <div><strong>{money(resultingSnapshot.invested)}</strong><span>resulting cost</span></div>
