@@ -48,6 +48,11 @@ export function AllocationCard({
   const eqShare = splitTotal > 0 ? (p.equityValue / splitTotal) * 100 : 0
   const leader = valued[0]
   const smallest = valued[valued.length - 1]
+  const weightBands = ([
+    { key: 'heavy', label: '10% or more' },
+    { key: 'mid', label: '5% to under 10%' },
+    { key: 'light', label: 'Under 5%' },
+  ] as const).filter((band) => p.bands[band.key] > 0)
 
   const hoverSlice = (index: number) => () => setActive(index)
   const clearSlice = () => setActive(null)
@@ -124,7 +129,8 @@ export function AllocationCard({
           </div>
         </div>
 
-        <div className="alloc-more">
+        <details className="alloc-more" open>
+          <summary>Composition details</summary>
           <div className="alloc-more-content">
             <section className="alloc-more-section">
               <h3>Profit and loss</h3>
@@ -182,26 +188,16 @@ export function AllocationCard({
             <section className="alloc-more-section">
               <h3>Weight bands</h3>
               <p>Share of portfolio value held by each group.</p>
-              <div className="alloc-keys alloc-keys--three">
-                <span className="alloc-key-block">
-                  <span className="alloc-key-name"><i className="alloc-dot band-heavy" />10% or more</span>
-                  <strong>{p.bands.heavy} position{p.bands.heavy === 1 ? '' : 's'}</strong>
-                  <small>{mask(`${p.bandWeight.heavy.toFixed(0)}%`)} of portfolio</small>
-                </span>
-                <span className="alloc-key-block">
-                  <span className="alloc-key-name"><i className="alloc-dot band-mid" />5% to under 10%</span>
-                  <strong>{p.bands.mid} position{p.bands.mid === 1 ? '' : 's'}</strong>
-                  <small>{mask(`${p.bandWeight.mid.toFixed(0)}%`)} of portfolio</small>
-                </span>
-                <span className="alloc-key-block">
-                  <span className="alloc-key-name"><i className="alloc-dot band-light" />Under 5%</span>
-                  <strong>{p.bands.light} position{p.bands.light === 1 ? '' : 's'}</strong>
-                  <small>{mask(`${p.bandWeight.light.toFixed(0)}%`)} of portfolio</small>
-                </span>
+              <div className={`alloc-keys${weightBands.length === 3 ? ' alloc-keys--three' : weightBands.length === 2 ? ' alloc-keys--two' : ''}`}>
+                {weightBands.map(({ key, label }) => <span className="alloc-key-block" key={key}>
+                  <span className="alloc-key-name"><i className={`alloc-dot band-${key}`} />{label}</span>
+                  <strong>{p.bands[key]} position{p.bands[key] === 1 ? '' : 's'}</strong>
+                  <small>{mask(`${p.bandWeight[key].toFixed(0)}%`)} of portfolio</small>
+                </span>)}
               </div>
             </section>
           </div>
-        </div>
+        </details>
       </section>
     </div>
   )

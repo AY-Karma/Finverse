@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { holdingIdentity } from '../monitor'
 import { useMonitor } from '../useMonitor'
 import { useStore } from '../useStore'
@@ -7,12 +7,15 @@ import type { MarketEvent } from '../marketEvents'
 import { quoteKey } from '../valuation'
 import { MonitorToast } from './MonitorToast'
 import { MonitorNewsPanel } from './MonitorNewsPanel'
+import { MonitorIpos } from './MonitorIpos'
+import { IpoWatchRules } from './IpoWatchRules'
 import { MonitorOnboarding } from './MonitorOnboarding'
 import { MonitorAlerts } from './MonitorAlerts'
 import { MonitorAgenda, MonitorDevelopments } from './MonitorAgenda'
 import { MonitorCompanyContext } from './MonitorCompanyContext'
 import { RulesPanel, type ReminderRequest, type RuleRequest } from './monitorPanels'
 import './monitor.css'
+import './overviewNotifications.css'
 
 export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestImport: () => void; initialQuery?: string }) {
   const controller = useMonitor()
@@ -43,22 +46,30 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
     })
   }
 
-  if (controller.positions.length === 0) return <MonitorOnboarding onRequestImport={onRequestImport} />
+  if (controller.positions.length === 0) return <div className="mp-page">
+    <header className="mp-hero"><div className="mp-hero-main"><h1 className="page-title">Monitor</h1><button className="mp-button" type="button" onClick={onRequestImport}>Import portfolio</button></div></header>
+    <MonitorIpos allowed={controller.allowExternalData} watchedIds={controller.hideValues ? [] : controller.ipoWatches.map((watch) => watch.id)} onWatch={controller.addIpoWatch} onUnwatch={controller.deleteIpoWatch} watchReadOnly={workspaceReadOnly || controller.hideValues} />
+    {controller.ipoWatches.length > 0 && <div className="mp-panel mp-watch-rules" id="monitor-watch-rules"><IpoWatchRules controller={controller} /></div>}
+    <MonitorToast message={controller.statusMessage} revision={controller.statusRevision} />
+    <details className="mi-setup"><summary><span>Portfolio news &amp; watches</span><span>How it works <span aria-hidden="true">⌄</span></span></summary><MonitorOnboarding onRequestImport={onRequestImport} /></details>
+  </div>
 
   return <div className="mp-page">
     <header className="mp-hero"><div className="mp-hero-main">
-      <div><h1>Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : <>External data off · <a href="/app/settings">Settings</a></>}</p></div>
+      <div><h1 className="page-title">Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : <>External data off · <a href="/app/settings">Settings</a></>}</p></div>
       <button className="mp-button" type="button" disabled={controller.refreshing || !controller.allowExternalData} onClick={() => { void controller.refresh(); refreshEvents() }}>{controller.refreshing ? 'Refreshing prices…' : 'Refresh prices'}</button>
     </div></header>
+    <nav className="mp-section-links" aria-label="Monitor sections"><a href="#monitor-news-heading">News</a><a href="#monitor-ipos-heading">IPOs</a><a href="#monitor-upcoming-heading">Upcoming</a><a href="#monitor-watch-rules">Watches</a></nav>
     <div className="mp-content-flow" data-has-portfolio={controller.positions.length > 0}>
       <div className="mp-monitor-content">
         <MonitorAlerts controller={controller} onOpenHolding={setContextId} />
         <MonitorNewsPanel initialQuery={initialQuery} selectedIdentity={newsSelection.identity} selectedRevision={newsSelection.revision} reading={controller.reading} onReadingChange={controller.updateReading} onOpenHolding={openIdentity} readOnly={workspaceReadOnly} />
         <MonitorDevelopments events={feed.events} onOpenHolding={setContextId} />
       </div>
-      {controller.positions.length > 0 && <aside className="mp-monitor-sidebar" aria-label="Upcoming events and watch rules">
+      {controller.positions.length > 0 && <aside className="mp-monitor-sidebar" aria-label="Upcoming events, IPOs and watch rules">
         <MonitorAgenda controller={controller} feed={feed} loading={loading} onRemind={remind} onOpenHolding={setContextId} onRetry={refreshEvents} reminderRequest={reminderRequest} />
-        <div className="mp-panel mp-watch-rules" id="monitor-watch-rules"><RulesPanel controller={controller} request={ruleRequest} /></div>
+        <MonitorIpos allowed={controller.allowExternalData} watchedIds={controller.hideValues ? [] : controller.ipoWatches.map((watch) => watch.id)} onWatch={controller.addIpoWatch} onUnwatch={controller.deleteIpoWatch} watchReadOnly={workspaceReadOnly || controller.hideValues} />
+        <div className="mp-panel mp-watch-rules" id="monitor-watch-rules"><RulesPanel controller={controller} request={ruleRequest} /><IpoWatchRules controller={controller} /></div>
       </aside>}
     </div>
     {contextPosition && <MonitorCompanyContext key={contextPosition.id} position={contextPosition} quote={liveQuotes[quoteKey(contextPosition)]} controller={controller} events={feed.events} onClose={() => setContextId('')}

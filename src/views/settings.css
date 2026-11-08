@@ -156,9 +156,6 @@
 .setting-copy { display: grid; min-width: 0; gap: 4px; }
 .setting-copy strong { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1.4; }
 .setting-copy > span { color: var(--ink-subtle); font-size: 12px; line-height: 1.5; }
-.setting-row--toggle { cursor: pointer; }
-.setting-row--toggle:hover .setting-copy strong { color: var(--primary-hover); }
-.setting-row--toggle:focus-within { outline: 2px solid var(--primary-focus); outline-offset: 4px; border-radius: 4px; }
 .setting-control-wrap { display: flex; align-items: center; justify-content: start; min-width: 0; }
 .settings-control { width: 180px; max-width: 100%; }
 .settings-page .segmented-control.settings-control { display: flex; }
@@ -174,8 +171,6 @@
 @media (prefers-reduced-motion: reduce) {
   .mode-toggle-thumb, .settings-page .mode-toggle > button { transition: none; }
 }
-.setting-toggle-control { display: inline-flex; align-items: center; justify-self: start; gap: 9px; min-height: 40px; }
-.setting-toggle-status { min-width: 22px; color: var(--ink-muted); font-size: 11px; }
 .settings-subhead { margin-bottom: 12px; }
 .data-handling-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .data-handling-card { display: grid; align-content: start; gap: 8px; min-width: 0; }
@@ -185,8 +180,12 @@
 .data-destination { color: var(--ink-muted); font: 11px var(--font-mono); }
 .data-handling-card h4 { color: var(--ink); font-size: 12px; font-weight: 500; }
 .data-handling-card p { max-width: 350px; color: var(--ink-subtle); font-size: 11px; line-height: 1.6; }
-[data-mode='light'] .setting-row--toggle:hover .setting-copy strong { color: var(--primary-action); }
 @media (max-width: 640px) {
+  .settings-save-status, .settings-page .workspace-recovery > .hint,
+  .imported-portfolio-date, .import-source-action, .folio-facts dt,
+  .listing-facts dt, .listing-review-copy > span, .listing-provenance,
+  .listing-fact-note, .data-destination,
+  .data-handling-card p { font-size: 12px; }
   .folio-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
   .settings-page .holdings-manage .folio-row { position: relative; grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .folio-document { display: none; }
@@ -203,7 +202,6 @@
   .settings-page { gap: 18px; }
   .settings-section, .settings-data { padding-top: 18px; }
   .setting-row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-block: 14px; }
-  .setting-row--toggle { grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
   .setting-row.setting-row--appearance { grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
   .setting-row--appearance .setting-control-wrap { justify-content: flex-end; }
   .settings-control { width: 200px; }
@@ -211,7 +209,6 @@
   .settings-page .mode-toggle > button { min-height: 40px; }
   .settings-page .manage-actions .btn,
   .settings-page .workspace-recovery > .import-actions > .btn { min-height: 44px; }
-  .setting-toggle-control { min-height: 44px; gap: 6px; }
   .data-handling-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 }
 @media (max-width: 480px) {

@@ -12,6 +12,7 @@ import { RemoveFolioButton } from './RemoveFolioButton'
 import { ActionIcon } from './ActionIcon'
 import { StatementChanges } from './StatementChanges'
 import folderIcon from '../assets/imports/folder.svg'
+import './importQuality.css'
 
 interface ImportViewProps {
   compact?: boolean
@@ -190,25 +191,13 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
         type="file"
         accept=".xlsx,.xls,.csv"
         multiple
+        aria-label="Choose holdings files"
+        aria-describedby={`${instructionsId} ${statusId}`}
         disabled={parsing || saving}
         onChange={(event) => void handleFiles(event.target.files)}
       />
       {initialStep === 'sources' ? (
         <div className="import-source-grid">
-          {IMPORT_SOURCES.map((source) => (
-            <a
-              className="import-source-card"
-              href={source.url}
-              key={source.id}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <span className={`import-source-mark import-source-mark--${source.id}`} aria-hidden="true"><img src={source.icon} alt="" width={44} height={44} /></span>
-              <strong>{source.name}</strong>
-              <small>{source.description}</small>
-              <span className="import-source-action"><ActionIcon name="external" />Open official site</span>
-            </a>
-          ))}
           <button
             type="button"
             className={`import-source-card import-source-card--local${dragOver ? ' import-source-card--over' : ''}`}
@@ -224,6 +213,20 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
             <small id={instructionsId}>Drop or choose one or more .xlsx, .xls, or .csv files</small>
             <span className="import-source-action">Up to {MAX_IMPORT_FILES} files · 10 MB each</span>
           </button>
+          {IMPORT_SOURCES.map((source) => (
+            <a
+              className="import-source-card"
+              href={source.url}
+              key={source.id}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span className={`import-source-mark import-source-mark--${source.id}`} aria-hidden="true"><img src={source.icon} alt="" width={44} height={44} /></span>
+              <strong>{source.name}</strong>
+              <small>{source.description}</small>
+              <span className="import-source-action"><ActionIcon name="external" />Open official site</span>
+            </a>
+          ))}
         </div>
       ) : (
         <button

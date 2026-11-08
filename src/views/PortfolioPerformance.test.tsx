@@ -241,6 +241,34 @@ it('shows missing scoped holdings without fetching history or offering tracked b
   expect(button('Tracked').disabled).toBe(true)
 })
 
+it('retries unavailable history from the same screen without changing holding scope', async () => {
+  await renderPerformance([])
+  expect(container.textContent).toContain('Historical prices are unavailable')
+  state.build.mockResolvedValueOnce({ points: points(), coveredPositions: defaultPositions, holdingsIncluded: 1, holdingsTotal: 1 })
+  await act(async () => button('Retry history').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(state.build).toHaveBeenCalledTimes(2)
+  expect(state.build.mock.calls[1][0]).toEqual(state.build.mock.calls[0][0])
+})
+
+it('retains useful history after failure and cancels a retry without accepting its late result', async () => {
+  await renderPerformance()
+  state.build.mockRejectedValueOnce(new Error('Network unavailable'))
+  await act(async () => button('Earlier history').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(container.textContent).toContain('History update failed. Showing saved prices.')
+  let resolve!: (history: PortfolioBackcastHistory) => void
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcastHistory>((done) => { resolve = done }))
+  await act(async () => button('Retry history').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  const signal = state.build.mock.lastCall?.[3] as AbortSignal
+  await act(async () => button('Cancel update').click())
+  expect(signal.aborted).toBe(true)
+  await act(async () => resolve({ points: points([800, 900]), coveredPositions: defaultPositions, holdingsIncluded: 1, holdingsTotal: 1 }))
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(container.textContent).not.toContain('Updating historical prices')
+})
+
 it('formats compact chart labels in INR', async () => {
   await renderPerformance(points([200000, 220000]))
   await rerender()

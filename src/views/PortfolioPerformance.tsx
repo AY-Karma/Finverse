@@ -13,7 +13,7 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
   const positions = useMemo(() => scope === 'all' ? snapshot.positions : snapshot.positions.filter((position) => (
     scope === 'mutual' ? position.type === 'mutual-fund' : position.type !== 'mutual-fund'
   )), [scope, snapshot.positions])
-  const { backcast, history, loading, requestMore, observationLabel } = usePortfolioBackcast({
+  const { backcast, history, loading, error, refreshing, retry, cancel, requestMore, observationLabel } = usePortfolioBackcast({
     positions, quotes: snapshot.quotes, allowExternalData: settings.allowExternalData,
   })
   const mode = scope === 'all' ? selectedMode : 'backcast'
@@ -38,6 +38,10 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
       {settings.hideValues ? <HiddenValuesState /> : <>
         {mode === 'tracked' && <p className="performance-method-note">Balances include cash flows and account changes.{snapshot.history.some((balance) => balance.dataQuality) && ' Earlier data may be unverified.'}</p>}
         {mode === 'backcast' && performanceHistory.length >= 2 && backcast && backcast.holdingsIncluded < backcast.holdingsTotal && <p className="performance-method-note performance-coverage">History covers {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings · {backcast.coveragePct.toFixed(0)}% of priced INR value.</p>}
+        {mode === 'backcast' && performanceHistory.length >= 2 && (error || refreshing) && <div className="performance-retry" role="status">
+          <span>{refreshing ? 'Updating historical prices…' : 'History update failed. Showing saved prices.'}</span>
+          <button type="button" className="btn btn--secondary" onClick={refreshing ? cancel : retry}>{refreshing ? 'Cancel update' : 'Retry history'}</button>
+        </div>}
         {performanceHistory.length >= 2 && <div className="insight-chart-readout">
           <div className="insight-chart-metric insight-chart-metric--value">
             <span><i aria-hidden="true" />Portfolio value</span><strong>{latest ? value(latest.value) : '—'}</strong>
@@ -64,7 +68,7 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
             yAxisLabel="Value"
             appearance="insight"
             onReachStart={mode === 'backcast' && backcast ? requestMore : undefined}
-          /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{positions.length === 0 ? 'No holdings in this view' : loading ? 'Building your historical series' : settings.allowExternalData ? 'Historical prices are unavailable' : 'External market data is off'}</strong><span>{positions.length === 0 ? 'Select another holding type to see its performance.' : loading ? 'Matching current holdings with historical closes.' : mode === 'tracked' ? 'Tracked balances appear after two market-day snapshots.' : settings.allowExternalData ? 'Use tracked snapshots as they accumulate, or try again later.' : 'Enable it in Settings or use saved tracked balances.'}</span></div>}
+          /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{positions.length === 0 ? 'No holdings in this view' : loading ? 'Building your historical series' : settings.allowExternalData ? 'Historical prices are unavailable' : 'External market data is off'}</strong><span>{positions.length === 0 ? 'Select another holding type to see its performance.' : loading ? 'Matching current holdings with historical closes.' : mode === 'tracked' ? 'Tracked balances appear after two market-day snapshots.' : settings.allowExternalData ? 'Use tracked snapshots as they accumulate, or retry historical prices.' : 'Enable it in Settings or use saved tracked balances.'}</span>{mode === 'backcast' && positions.length > 0 && settings.allowExternalData && !loading && <button type="button" className="btn btn--secondary" onClick={retry}>Retry history</button>}</div>}
         </div>
       </>}
     </section>

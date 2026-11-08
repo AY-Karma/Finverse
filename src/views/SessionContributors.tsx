@@ -1,11 +1,14 @@
 import type { InvestmentSnapshot } from '../investmentWorkspace'
 import { assetTypeLabel, instrumentLabel } from '../instruments'
 import { DitherBar } from './DitherBar'
+import { MovementCalculationHelp } from './MovementCalculationHelp'
+import { formatPercent } from '../valuation'
 import './SessionContributors.css'
 
-export function SessionContributors({ snapshot, formatValue }: {
+export function SessionContributors({ snapshot, formatValue, compact = false }: {
   snapshot: InvestmentSnapshot
   formatValue: (amount: number) => string
+  compact?: boolean
 }) {
   const reported = snapshot.contributions.filter((item): item is typeof item & { dailyContribution: number } =>
     item.dailyContribution != null && Number.isFinite(item.dailyContribution),
@@ -23,7 +26,7 @@ export function SessionContributors({ snapshot, formatValue }: {
     && reported.length === snapshot.sessionHoldingCount
   const reportedTotal = reported.reduce((sum, item) => sum + item.dailyContribution, 0)
   const total = complete ? snapshot.dailyChange ?? reportedTotal : reportedTotal
-  const otherCount = reported.length - topFive.length
+  const otherCount = (compact ? ranked.length : reported.length) - topFive.length
   const remainder = ranked.slice(5).reduce((sum, item) => sum + item.dailyContribution, 0)
   const largest = Math.max(...topFive.map((item) => Math.abs(item.dailyContribution)), 1)
   const signed = (amount: number) => `${amount > 0 ? '+' : amount < 0 ? '\u2212' : ''}${formatValue(Math.abs(amount))}`
@@ -36,18 +39,19 @@ export function SessionContributors({ snapshot, formatValue }: {
   }
 
   return <div className="session-contributors">
-    <p className="session-contributors-note">{complete
+    {compact && <div className="movement-breakdown-head"><span className="score-label">Largest contributors</span><MovementCalculationHelp session /></div>}
+    {!compact && <p className="session-contributors-note">{complete
       ? 'The card adds stock and ETF moves, plus NAV changes published for this session. The list shows up to five of the largest impacts.'
-      : 'Only holdings reporting a change for this session are shown. The session move is incomplete until every eligible holding reports.'}</p>
-    {topFive.length > 0 && <ol className="session-contributors-list" aria-label="Largest session contributions by amount">
+      : 'Only holdings reporting a change for this session are shown. The session move is incomplete until every eligible holding reports.'}</p>}
+    {topFive.length > 0 && <ol className={`session-contributors-list${compact ? ' holding-move-ranked-list' : ''}`} aria-label="Largest session contributions by amount">
       {topFive.map((item) => {
         const position = snapshot.positions.find((holding) => holding.type === item.type && instrumentLabel(holding) === item.symbol)
         const name = position?.name.trim() || item.symbol
         const direction = item.dailyContribution > 0 ? 'up' : 'down'
-        return <li className="session-contributors-row" key={item.key}>
-          <span className="session-contributors-name">
-            <span title={name}>{name}</span>
-            <small>{name !== item.symbol ? `${item.symbol} · ` : ''}{assetTypeLabel(item.type)}</small>
+        return <li className={`session-contributors-row${compact ? ' session-contributors-row--compact' : ''}`} key={item.key}>
+          <span className={compact ? 'holding-move-identity' : 'session-contributors-name'}>
+            <span className={compact ? 'holding-move-name' : undefined} title={compact ? `${name} · ${assetTypeLabel(item.type)}` : name}>{name}</span>
+            {compact ? item.dailyPriceChangePct != null && <span className="holding-move-pct">{formatPercent(item.dailyPriceChangePct)}</span> : <small>{name !== item.symbol ? `${item.symbol} · ` : ''}{assetTypeLabel(item.type)}</small>}
           </span>
           <DitherBar className="session-contributors-track" segments={[{ value: Math.abs(item.dailyContribution), color: direction === 'up' ? 'green' : 'red' }]} scale={largest} />
           <strong className={direction}>{signed(item.dailyContribution)}</strong>
@@ -62,9 +66,9 @@ export function SessionContributors({ snapshot, formatValue }: {
       <span>Other reporting holdings <small>{otherCount} holding{otherCount === 1 ? '' : 's'}</small></span>
       <strong className={remainder > 0 ? 'up' : remainder < 0 ? 'down' : ''}>{signed(remainder)}</strong>
     </div>}
-    <div className="session-contributors-total">
+    {!compact && <div className="session-contributors-total">
       <span>{complete ? 'Session holdings combined' : 'Reported holdings combined'}</span>
       <strong className={total > 0 ? 'up' : total < 0 ? 'down' : ''}>{signed(total)}</strong>
-    </div>
+    </div>}
   </div>
 }

@@ -9,6 +9,12 @@ afterEach(() => {
 })
 
 describe('settings persistence', () => {
+  it('enables market data by default and migrates the retired opt-out', () => {
+    expect(loadSettings().allowExternalData).toBe(true)
+    localStorage.setItem('finverse:settings', JSON.stringify({ allowExternalData: false, mode: 'light', hideValues: true }))
+    expect(loadSettings()).toMatchObject({ allowExternalData: true, mode: 'light', hideValues: true })
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!).allowExternalData).toBe(true)
+  })
   it.each(['custom', 'cobalt'])('migrates the saved %s accent to fixed blue and removes custom colors', (accent) => {
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), accent, customAccent: '#123abc' }))
     const settings = loadSettings()
@@ -63,7 +69,7 @@ describe('settings persistence', () => {
         localStorage.setItem('finverse:settings', raw)
         const preferences = loadSettings()
         expect(preferences).toEqual({
-          currency: 'INR', allowExternalData: false, density: 'comfortable',
+          currency: 'INR', allowExternalData: true, density: 'comfortable',
           accent: 'cobalt', mode: 'dark', hideValues: false,
         })
         expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
@@ -76,7 +82,7 @@ describe('settings persistence', () => {
     vi.stubGlobal('localStorage', { getItem: blocked, setItem: blocked, removeItem: blocked })
     vi.stubGlobal('sessionStorage', { removeItem: blocked })
     expect(loadSettings()).toEqual({
-      currency: 'INR', allowExternalData: false, density: 'comfortable',
+      currency: 'INR', allowExternalData: true, density: 'comfortable',
       accent: 'cobalt', mode: 'dark', hideValues: false,
     })
     expect(saveSettings(loadSettings())).toBe(false)

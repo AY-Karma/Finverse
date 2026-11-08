@@ -1,7 +1,7 @@
 import type { LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
 import { createSharedRequest } from './sharedRequest'
-import { isRegularMarketOpen } from './marketCalendar'
+import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from './marketCalendar'
 import { hasCompatibleFundScheme } from './fundSchemes'
 import { normalizePosition, pricingProviderSymbol } from './instruments'
 import {
@@ -22,9 +22,9 @@ import {
 const FORCE_LIVE =
   typeof location !== 'undefined' && /[?&]live=1(\b|&|$)/.test(location.search)
 
-/** True while the NSE cash market is trading (IST weekdays, 09:15–15:30, non-holiday). */
+/** True during regular NSE cash-market hours or an announced special session. */
 export function isMarketOpen(date: Date = new Date()): boolean {
-  return FORCE_LIVE || isRegularMarketOpen(date)
+  return FORCE_LIVE || isRegularMarketOpen(date) || isSpecialMarketOpen(date)
 }
 
 /** The IST calendar date (YYYY-MM-DD) for "has this NAV already been fetched today?" checks. */
@@ -126,7 +126,7 @@ async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Ma
   return quotes
 }
 
-async function fetchYahooPrices(symbols: string[], signal?: AbortSignal): Promise<Map<string, YahooResult>> {
+export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal): Promise<Map<string, YahooResult>> {
   const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
   const quotes = new Map<string, YahooResult>()
   let next = 0
@@ -437,13 +437,17 @@ function fetchCachedHistory(
   to: Date,
   fetchRange: (from: string, to: string, signal: AbortSignal) => Promise<HistoryPoint[] | null>,
   signal?: AbortSignal,
+  requireLatestNseClose = false,
 ): Promise<HistoryPoint[]> {
   signal?.throwIfAborted()
   const fromS = istDate(from)
   const toS = istDate(to)
   const key = historyCacheKey(symbol)
   const cached = readHistoryCache(key)
-  if (cached && cached.from <= fromS && cached.to >= toS) {
+  const calendar = requireLatestNseClose ? getMarketCalendarInfo(new Date()) : undefined
+  const completed = calendar?.available && calendar.lastSessionClose ? istDate(calendar.lastSessionClose) : undefined
+  const missingClose = cached && completed && completed >= fromS && completed <= toS && !cached.points.some((point) => point.date === completed) ? completed : undefined
+  if (cached && cached.from <= fromS && cached.to >= toS && !missingClose) {
     return Promise.resolve(historyInRange(cached.points, fromS, toS))
   }
   const emptyRanges = cached?.points.some((point) => point.date >= fromS && point.date <= toS)
@@ -457,6 +461,9 @@ function fetchCachedHistory(
           ...(toS > cached.to ? [[adjacentDay(cached.to, 1), toS] as [string, string]] : []),
         ]
       : [[fromS, toS]]
+    if (missingClose && !ranges.some(([start, end]) => start <= missingClose && end >= missingClose)) {
+      ranges.push([adjacentDay(missingClose, -1), missingClose])
+    }
     let next = cached ?? { from: fromS, to: toS, points: [], at: Date.now() }
     const checkedEmptyRanges: string[] = []
     for (const [rangeFrom, rangeTo] of ranges) {
@@ -491,12 +498,12 @@ function fetchCachedHistory(
     return { from: fromS, to: toS, points: historyInRange(next.points, fromS, toS) }
   }, signal).then((result) => result.from === fromS && result.to === toS
     ? result.points
-    : fetchCachedHistory(symbol, from, to, fetchRange, signal))
+    : fetchCachedHistory(symbol, from, to, fetchRange, signal, requireLatestNseClose))
 }
 
 /** Daily close series for an equity/ETF market symbol. */
 export function fetchHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal, cacheIdentity = symbol): Promise<HistoryPoint[]> {
-  return fetchCachedHistory(cacheIdentity, from, to, (rangeFrom, rangeTo, requestSignal) => fetchHistoryUncached(symbol, rangeFrom, rangeTo, requestSignal), signal)
+  return fetchCachedHistory(cacheIdentity, from, to, (rangeFrom, rangeTo, requestSignal) => fetchHistoryUncached(symbol, rangeFrom, rangeTo, requestSignal), signal, symbol.endsWith('.NS'))
 }
 
 let activeHistoryRequests = 0

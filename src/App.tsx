@@ -5,7 +5,9 @@ import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
 import { ActionIcon } from './views/ActionIcon'
+import { MarketStoriesEntry } from './views/MarketStoriesEntry'
 import { NotFound } from './NotFound'
+import { loadIpos } from './ipos'
 
 const loadOverview = () => import('./views/Overview')
 const loadMonitorView = () => import('./views/MonitorView')
@@ -46,6 +48,10 @@ export default function App({ initialView }: { initialView: View }) {
   const researchUrl = useRef(initialView === 'research' ? window.location.pathname + window.location.search : '/app/research')
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
   const { settings } = useStore()
+
+  useEffect(() => {
+    if (settings.allowExternalData) void loadIpos().catch(() => { /* Monitor offers a retry if preloading fails. */ })
+  }, [settings.allowExternalData])
 
   const navigate = useCallback((nextView: View, anchor?: string) => {
     if (window.location.pathname === '/app/research') researchUrl.current = window.location.pathname + window.location.search
@@ -102,14 +108,14 @@ export default function App({ initialView }: { initialView: View }) {
   if (notFound) return <NotFound />
 
   return (
-    <AppShell view={view} navigate={navigate}>
-      <main className="main">
+    <MarketStoriesEntry navigate={navigate}>{(highlightsEntry) => <AppShell view={view} navigate={navigate} highlightsEntry={highlightsEntry}>
+      <main className="main" id="main-content" tabIndex={-1}>
         {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}><ActionIcon name="research" />Back to Research</button>}
         {NAV.filter((item) => item.id !== 'settings' && visitedViews.has(item.id)).map((item) => (
           <Activity key={item.id} mode={view === item.id ? 'visible' : 'hidden'}>
             <div className={item.id === 'overview' ? 'overview-sections' : undefined} hidden={view !== item.id}>
               <Suspense fallback={<div className="view-loading" role="status">Loading {item.label.toLowerCase()}…</div>}>
-                {item.id === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
+                {item.id === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} highlightsEntry={highlightsEntry} />}
                 {item.id === 'research' && <ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} />}
                 {item.id === 'holdings' && <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
                 {item.id === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
@@ -120,18 +126,19 @@ export default function App({ initialView }: { initialView: View }) {
         {view === 'settings' && <Suspense fallback={<div className="view-loading" role="status">Loading settings…</div>}><SettingsView onRequestImport={openPortfolioImport} /></Suspense>}
       </main>
       {importVisited && <Suspense fallback={<div className="view-loading" role="status">Opening import…</div>}><PortfolioImportDialog open={importOpen} accountId={importAccountId} onClose={() => setImportOpen(false)} /></Suspense>}
-    </AppShell>
+    </AppShell>}</MarketStoriesEntry>
   )
 }
 
-function AppShell({ view, navigate, children }: { view: View; navigate: (view: View, anchor?: string) => void; children: ReactNode }) {
+function AppShell({ view, navigate, highlightsEntry, children }: { view: View; navigate: (view: View, anchor?: string) => void; highlightsEntry: ReactNode; children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { settings, setSettings } = useStore()
   return (
     <div className={`app-shell${sidebarCollapsed ? ' app-shell--collapsed' : ''}`}>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <aside className="sidebar">
         <div className="sidebar-head">
-          <button className="brand brand--home" type="button" onClick={() => navigate('overview')} aria-label="Go to Overview">
+          <button className="brand brand--home" type="button" onClick={() => navigate('overview')} title="Go to Overview">
             <img className="brand-mark" src="/favicon.svg?v=2" alt="" width={30} height={30} />
             <div>
               <div className="brand-name">Finverse</div>
@@ -180,7 +187,7 @@ function AppShell({ view, navigate, children }: { view: View; navigate: (view: V
             </button>
           ))}
         </nav>
-
+        {highlightsEntry}
       </aside>
       {children}
     </div>

@@ -17,6 +17,7 @@ beforeEach(() => { vi.mocked(loadMarketEvents).mockReset().mockResolvedValue({ e
 const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore> }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
 vi.mock('./MonitorNewsPanel', () => ({ MonitorNewsPanel: ({ selectedIdentity, selectedRevision }: { selectedIdentity: string; selectedRevision: number }) => <section data-news-identity={selectedIdentity} data-news-revision={selectedRevision} /> }))
+vi.mock('./MonitorIpos', () => ({ MonitorIpos: ({ allowed }: { allowed: boolean }) => <section data-ipo-panel data-allowed={allowed} /> }))
 
 let root: Root
 let container: HTMLDivElement
@@ -81,7 +82,7 @@ afterEach(async () => {
 })
 
 describe('single-page Monitor', () => {
-  it('shows an onboarding edition without loading news or events before import', async () => {
+  it('puts public IPOs before the collapsed portfolio guide without loading owned-company feeds', async () => {
     state.store = { positions: [], liveQuotes: {}, settings: { ...loadSettings(), allowExternalData: true }, refreshNow: vi.fn() } as unknown as ReturnType<typeof useStore>
     container = document.createElement('div')
     document.body.append(container)
@@ -91,13 +92,22 @@ describe('single-page Monitor', () => {
     expect(container.querySelector('[data-news-identity]')).toBeNull()
     expect(container.querySelector('.mo-edition')?.querySelectorAll('article')).toHaveLength(3)
     expect(container.querySelector('.mp-monitor-sidebar')).toBeNull()
+    expect(container.querySelector('[data-ipo-panel]')?.getAttribute('data-allowed')).toBe('true')
+    const publicIpos = container.querySelector('[data-ipo-panel]')!
+    const guide = container.querySelector<HTMLDetailsElement>('details.mi-setup')!
+    expect(guide.open).toBe(false)
+    expect(publicIpos.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const directImport = container.querySelector<HTMLButtonElement>('.mp-hero button')!
+    expect(directImport.textContent).toBe('Import portfolio')
+    await act(async () => { directImport.click() })
+    expect(importHoldings).toHaveBeenCalledOnce()
     expect(loadMarketEvents).not.toHaveBeenCalled()
     expect(state.store.refreshNow).not.toHaveBeenCalled()
+    await act(async () => { guide.querySelector('summary')!.click() })
+    expect(guide.open).toBe(true)
     const review = container.querySelector<HTMLDetailsElement>('.mo-story details')!
     await act(async () => review.querySelector('summary')!.click())
     expect(review.open).toBe(true)
-    await clickButton('Import portfolio')
-    expect(importHoldings).toHaveBeenCalledOnce()
 
     state.store.positions = [{ id: 'imported', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
     await rerender()
@@ -288,6 +298,47 @@ describe('single-page Monitor', () => {
     expect(reminders.querySelector('.pa-inactive-reminders')).toBeNull()
     expect(reminders.textContent).toContain('Overdue')
     expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).events.find((event: { id: string }) => event.id === 'overdue').reminder).toBe(true)
+  })
+
+  it('deletes only the selected inactive reminder and keeps it deleted after remounting', async () => {
+    await renderWatch()
+    await restoreSaved(saved => {
+      saved.events = [
+        { id: 'remove', holding: 'UP', holdingId: 'UP', title: 'Old results reminder', date: '2000-01-01', kind: 'Reminder', reminder: false },
+        { id: 'keep-inactive', holding: 'DOWN', holdingId: 'DOWN', title: 'Inactive dividend reminder', date: '2000-01-02', kind: 'Reminder', reminder: false },
+        { id: 'keep-active', holding: 'UP', holdingId: 'UP', title: 'Active review reminder', date: '2099-01-01', kind: 'Reminder', reminder: true },
+      ]
+    })
+    await clickButton('Inactive reminders')
+    await clickButton('Delete inactive reminder: Old results reminder')
+    const remaining = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).events
+    expect(remaining.map((event: { id: string }) => event.id)).toEqual(['keep-inactive', 'keep-active'])
+    expect(remaining.find((event: { id: string }) => event.id === 'keep-active').reminder).toBe(true)
+    expect(container.textContent).not.toContain('Old results reminder')
+    expect(container.textContent).toContain('Reminder deleted.')
+
+    await act(async () => { root.unmount() })
+    root = createRoot(container)
+    await rerender()
+    expect(container.textContent).not.toContain('Old results reminder')
+    expect(container.querySelector('.pa-inactive-reminders')?.textContent).toContain('Inactive dividend reminder')
+    expect(container.querySelector('.mp-personal-reminders')?.textContent).toContain('Active review reminder')
+    expect(container.querySelector('.mp-personal-reminders .mp-reminder-delete')).toBeNull()
+  })
+
+  it('keeps an inactive reminder visible when deletion cannot be saved', async () => {
+    await renderWatch()
+    await restoreSaved(saved => {
+      saved.events = [{ id: 'remove', holding: 'UP', holdingId: 'UP', title: 'Old results reminder', date: '2000-01-01', kind: 'Reminder', reminder: false }]
+    })
+    await clickButton('Inactive reminders')
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage full') })
+    try {
+      await clickButton('Delete inactive reminder: Old results reminder')
+      expect(container.querySelector('.pa-inactive-reminders')?.textContent).toContain('Old results reminder')
+      expect(container.textContent).toContain('Reminder could not be deleted. Free browser storage and try again.')
+      expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).events[0].id).toBe('remove')
+    } finally { write.mockRestore() }
   })
 
   it('does not recreate fund NAV summaries, price moves or constituent news', async () => {

@@ -28,21 +28,6 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
 
       <div className="settings-page enter d1">
         <ManageHoldings onRequestImport={onRequestImport} reviewOpen={showListingReview} onReviewListings={showListingReview ? closeListingReview : () => setReviewOpen(true)} />
-        <section className="settings-section" aria-label="Data & privacy">
-          <SettingsSectionHeader
-            icon="privacy"
-            title="Data & privacy"
-          />
-          <div className="settings-group">
-            <SettingToggle
-              id="external-data"
-              label="External market data"
-              description="Allow quotes, NAVs, company updates, and market news after import."
-              checked={settings.allowExternalData}
-              onChange={(allowExternalData) => update({ allowExternalData })}
-            />
-          </div>
-        </section>
         <section className="settings-section" aria-label="Preferences">
           <SettingsSectionHeader
             icon="preferences"
@@ -114,30 +99,6 @@ function SettingRow({ label, description, children }: {
       </div>
       <div className="setting-control-wrap">{children}</div>
     </div>
-  )
-}
-
-function SettingToggle({ id, label, description, checked, onChange }: {
-  id: string
-  label: string
-  description: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <label className="setting-row setting-row--toggle" htmlFor={id}>
-      <span className="setting-copy">
-        <strong>{label}</strong>
-        <span id={`${id}-description`}>{description}</span>
-      </span>
-      <span className="setting-toggle-control">
-        <span className="setting-toggle-status" aria-hidden="true">{checked ? 'On' : 'Off'}</span>
-        <span className="switch">
-          <input id={id} type="checkbox" role="switch" aria-label={label} aria-describedby={`${id}-description`} checked={checked} onChange={(event) => onChange(event.target.checked)} />
-          <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
-        </span>
-      </span>
-    </label>
   )
 }
 

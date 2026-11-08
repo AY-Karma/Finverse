@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from './useStore'
 import { privateValue } from './privacy'
 import { emptyMonitorReadingState, parseMonitorReadingState, type MonitorReadingState } from './monitorReading'
+import type { IpoIssue } from './ipoProtocol'
 import {
   evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, loadMonitorState, reconcileMonitorRules, saveMonitorState, validReminderDate,
-  MONITOR_STORAGE_KEY,
+  MONITOR_STORAGE_KEY, parseIpoWatch,
   type AlertState, type MonitorAlert, type RuleCondition,
 } from './monitor'
 
@@ -157,6 +158,50 @@ export function useMonitor() {
     return true
   }
 
+  function addIpoWatch(issue: Pick<IpoIssue, 'id' | 'name' | 'status' | 'openDate' | 'closeDate' | 'sourceUrl'>): boolean {
+    if (!canChangeMonitor()) return false
+    const watch = parseIpoWatch(issue)
+    const currentDate = new Date(Date.now() + 19_800_000).toISOString().slice(0, 10)
+    if (!watch || !['OPEN', 'UPCOMING'].includes(issue.status) || watch.closeDate < currentDate) {
+      setStatusMessage('A current IPO with a confirmed closing date is needed for a reminder.')
+      return false
+    }
+    const watches = state.ipoWatches ?? []
+    if (watches.some((item) => item.id === watch.id)) {
+      setStatusMessage('This IPO is already in your watch rules.')
+      return false
+    }
+    if (watches.length >= 200) {
+      setStatusMessage('You can save up to 200 IPO watch rules. Remove one before adding another.')
+      return false
+    }
+    const next = { ...state, ipoWatches: [...watches, watch] }
+    if (!saveMonitorState(next)) {
+      setStorageError('IPO watch could not be saved. Free browser storage and try again.')
+      return false
+    }
+    persistedRevision.current = persistedMonitor()
+    savedState.current = next
+    setStorageError('')
+    setState(next)
+    setStatusMessage('IPO watch saved. Overview will show its last-day reminder.')
+    return true
+  }
+
+  function deleteIpoWatch(id: string) {
+    if (!canChangeMonitor() || !state.ipoWatches?.some((watch) => watch.id === id)) return
+    const next = { ...state, ipoWatches: state.ipoWatches.filter((watch) => watch.id !== id) }
+    if (!saveMonitorState(next)) {
+      setStorageError('IPO watch could not be removed. Free browser storage and try again.')
+      return
+    }
+    persistedRevision.current = persistedMonitor()
+    savedState.current = next
+    setStorageError('')
+    setState(next)
+    setStatusMessage('IPO watch removed.')
+  }
+
   function setAlertState(id: string, alertState: AlertState) {
     if (alertState === 'snoozed') {
       snoozeAlert(id, Date.now() + 86_400_000)
@@ -221,6 +266,21 @@ export function useMonitor() {
     setStatusMessage('Reminder updated.')
   }
 
+  function deleteInactiveReminder(id: string) {
+    if (!state.events.some((event) => event.id === id && !event.reminder) || !canChangeMonitor()) return
+    const keepReminder = (event: typeof state.events[number]) => event.id !== id || event.reminder
+    const next = { ...state, events: state.events.filter(keepReminder) }
+    if (!saveMonitorState(next)) {
+      setStorageError('Reminder could not be deleted. Free browser storage and try again.')
+      return
+    }
+    persistedRevision.current = persistedMonitor()
+    savedState.current = next
+    setStorageError('')
+    setState((current) => current === state ? next : { ...current, events: current.events.filter(keepReminder) })
+    setStatusMessage('Reminder deleted.')
+  }
+
   const refresh = useCallback(async () => {
     if (workspaceReadOnly) {
       setStorageError('This workspace changed in another tab. Reload it before making changes.')
@@ -260,9 +320,11 @@ export function useMonitor() {
     now,
     positions,
     hideValues: settings.hideValues,
+    readOnly: workspaceReadOnly,
     allowExternalData: settings.allowExternalData,
     alerts: state.alerts.map(redact),
     rules,
+    ipoWatches: state.ipoWatches ?? [],
     reading,
     events: [...state.events].sort((a, b) => a.date.localeCompare(b.date)).map((event) => settings.hideValues
       ? { ...event, holding: privateValue(event.holding, true), title: privateValue(event.title, true) }
@@ -285,7 +347,10 @@ export function useMonitor() {
     toggleRule,
     deleteRule,
     addReminder,
+    addIpoWatch,
+    deleteIpoWatch,
     toggleReminder,
+    deleteInactiveReminder,
   }
 }
 

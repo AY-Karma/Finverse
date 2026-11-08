@@ -1,0 +1,6 @@
+.import-quality > div { min-width: 0; }
+.import-quality[aria-label='Resulting portfolio totals'] strong { white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .import-quality[aria-label='Resulting portfolio totals'] { grid-template-columns: minmax(0, 1fr); }
+}

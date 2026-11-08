@@ -50,6 +50,13 @@ export function isRegularMarketOpen(date: Date): boolean {
   return minutes >= MARKET_OPEN_MIN && minutes < MARKET_CLOSE_MIN && regularTradingDay(ist)
 }
 
+/** NSE cash-market Muhurat session: https://nsearchives.nseindia.com/content/circulars/CMTR76941.pdf */
+export function isSpecialMarketOpen(date: Date): boolean {
+  const ist = istClock(date)
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes()
+  return ist.toISOString().slice(0, 10) === '2026-11-08' && minutes >= 14 * 60 + 20 && minutes < MARKET_CLOSE_MIN
+}
+
 function sessionTime(day: Date, minutes: number, direction: -1 | 1): Date | null {
   const candidate = new Date(day)
   while (HOLIDAYS_BY_YEAR[String(candidate.getUTCFullYear())]) {

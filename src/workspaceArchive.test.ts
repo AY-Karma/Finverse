@@ -22,6 +22,16 @@ const reading: MonitorReadingState = { articles: [{ key: newsReadingKey(savedArt
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear() })
 
 describe('workspace archives', () => {
+  it('retains IPO deadline watches through backup and restore and rejects unsafe sources', async () => {
+    const watch = { id: 'xflot:example', name: 'Example', openDate: '2026-11-01', closeDate: '2026-11-05', sourceUrl: 'https://www.xflot.com/ipo/example' }
+    const saved = createWorkspaceArchive(folios, settings, snapshots, { ...monitor, ipoWatches: [watch] })
+    const parsed = parseWorkspaceArchive(JSON.stringify(saved))
+    expect(parsed.archive.monitor.ipoWatches).toEqual([watch])
+    await restoreWorkspaceArchive(parsed.archive, captureWorkspaceRecords())
+    expect(JSON.parse(localStorage.getItem('finverse:monitor:v1')!).ipoWatches).toEqual([watch])
+    expect(() => parseWorkspaceArchive(JSON.stringify({ ...saved, monitor: { ...monitor, ipoWatches: [{ ...watch, sourceUrl: 'javascript:alert(1)' }] } }))).toThrow('IPO watch')
+  })
+
   it('round-trips saved news, reading preferences and timed snoozes in the existing Monitor record', async () => {
     const state: MonitorState = { ...monitor, reading, alerts: [{ ...monitor.alerts[0], state: 'snoozed', snoozedUntil: Date.now() + 3_600_000 }] }
     const original = createWorkspaceArchive(folios, settings, snapshots, state)

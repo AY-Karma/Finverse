@@ -75,6 +75,30 @@ async function renderImport(onImported?: () => void, targetAccountId?: string) {
 }
 
 describe('statement import review', () => {
+  it('keeps the original file picker labelled and available throughout review', async () => {
+    state.previewFile.mockResolvedValue(preview())
+    const view = await renderImport()
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
+    expect(input.getAttribute('aria-label')).toBe('Choose holdings files')
+    const describedIds = input.getAttribute('aria-describedby')!.split(' ')
+    expect(describedIds.every((id) => [...view.container.querySelectorAll('[id]')].some((element) => element.id === id))).toBe(true)
+    await view.upload()
+    const open = vi.spyOn(input, 'click')
+    await act(async () => view.container.querySelector<HTMLButtonElement>('.dropzone')!.click())
+    expect(open).toHaveBeenCalledOnce()
+    expect(view.container.querySelector('.import-preview')).not.toBeNull()
+    expect(state.commitImport).not.toHaveBeenCalled()
+  })
+
+  it('preserves complete large monetary totals in the original summary tiles', async () => {
+    state.previewFile.mockResolvedValue(preview({ positions: [{ ...holding(), quantity: 10000, invested: 3129186, lastPrice: 350.3403 }] }))
+    const view = await renderImport()
+    await view.upload()
+    const totals = view.container.querySelector('.import-quality[aria-label="Resulting portfolio totals"]')!
+    expect([...totals.querySelectorAll('strong')].map((value) => value.textContent)).toEqual(['1', '₹31,29,186', '₹35,03,403'])
+    expect(state.commitImport).not.toHaveBeenCalled()
+  })
+
   it('keeps alias typing out of portfolio calculations and saves the latest alias', async () => {
     const parsed = preview()
     state.folios = [account()]

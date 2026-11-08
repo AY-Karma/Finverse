@@ -1,0 +1,27 @@
+.mi-trend-trigger { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 52px; min-height: 44px; padding: 0 2px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-muted); }
+.mi-trend-trigger:hover, .mi-trend-trigger[aria-expanded='true'] { background: var(--surface-3); }
+.mi-trend-placeholder { color: var(--ink-muted); font-family: var(--font-mono); font-size: 16px; }
+.mi-sparkline { display: block; width: 48px; height: 22px; overflow: visible; }
+.mi-sparkline[data-tone='up'], .mi-trend-plot svg[data-tone='up'] { color: var(--mp-positive); }
+.mi-sparkline[data-tone='down'], .mi-trend-plot svg[data-tone='down'] { color: var(--mp-negative); }
+.mi-sparkline[data-tone='flat'], .mi-trend-plot svg[data-tone='flat'] { color: var(--mp-accent); }
+.mi-trend { padding: 0 var(--mi-inset) 16px; border-top: 1px solid var(--hairline); background: var(--surface-2); }
+.mi-trend-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mi-trend h3 { color: var(--ink); font-size: 14px; font-weight: 600; }
+.mi-trend-close { display: grid; place-items: center; flex: 0 0 36px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink-muted); }
+.mi-trend-close .action-icon { width: 17px; height: 17px; }
+.mi-trend-reading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--ink-muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.mi-trend-reading strong { color: var(--ink); font-family: var(--font-mono); font-size: 16px; font-weight: 550; }
+.mi-trend-plot { touch-action: pan-y; }
+.mi-trend-chart { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
+.mi-trend-scale { display: flex; flex-direction: column; justify-content: space-between; padding: 10px 0 30px; color: var(--ink-muted); font-family: var(--font-mono); font-size: 14px; }
+.mi-trend-scale > :only-child { margin-block: auto; }
+.mi-trend-series { min-width: 0; }
+.mi-trend-plot svg { display: block; width: 100%; height: 160px; }
+.mi-trend-grid { stroke: var(--hairline-strong); stroke-dasharray: 2 4; }
+.mi-trend-cursor { stroke: var(--ink-subtle); stroke-dasharray: 3 4; stroke-width: 1; opacity: .6; }
+.mi-trend-dates { display: flex; justify-content: space-between; gap: 12px; color: var(--ink-muted); font-size: 14px; }
+.mi-trend .mi-trend-source { margin-top: 12px; color: var(--ink-muted); font-size: 14px; line-height: 1.6; }
+.mi-trend-source a { display: inline-flex; align-items: center; gap: 4px; color: var(--mp-accent); text-decoration: none; }
+.mi-trend-source .action-icon { width: 12px; height: 12px; }
+.mi-trend-message { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 8px 0; color: var(--ink-muted); font-size: 14px; }

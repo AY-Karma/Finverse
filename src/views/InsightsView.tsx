@@ -12,6 +12,7 @@ import { buildContributionColumns, type ContributionDisplay } from '../contribut
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { PortfolioWelcome } from './PortfolioWelcome'
 import { HiddenValuesState } from './HiddenValuesState'
+import { RiskHelp } from './RiskHelp'
 import { SessionContributors } from './SessionContributors'
 import { WorstDrawdownChart } from './WorstDrawdownChart'
 import { DataHealthGuide, dataHealthColor } from './DataHealthGuide'
@@ -197,11 +198,11 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
   return (
     <div className="insights-page">
-      <div className="page-head enter d0">
+      <div className="page-head insights-heading enter d0">
         <div>
           <h1 className="page-title">Insights</h1>
         </div>
-        <p className="page-sub">A visual explanation of what moved your portfolio, where your exposure sits, and how your record compares with the market.</p>
+        <p className="page-sub">Movement, exposure and risk across your holdings.</p>
       </div>
 
       {!snapshot.valuationComplete && <p className="panel hint" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Allocation, concentration, and current P&L cover the {snapshot.pricedCount} priced holdings only. Incomplete portfolio values are not saved to tracked history.</p>}
@@ -209,12 +210,11 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
       <div className="insight-kpis enter d1" data-health-color={dataHealthColor(dataLabels.healthLabel)}>
         <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
           <span className="score-label insight-kpi-label"><span>{dataLabels.sessionLabel}</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: !hide && dataLabels.sessionValue != null && dataLabels.sessionValue < 0 ? 'red' : 'blue' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
-          <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
+          <strong className={hide || dataLabels.sessionValue == null || dataLabels.sessionValue === 0 ? '' : dataLabels.sessionValue > 0 ? 'up' : 'down'}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
           <span className="hint">{hide ? 'Session values hidden' : <>{snapshot.dailyChangePct != null && <>{formatPercent(snapshot.dailyChangePct)} · </>}{dataLabels.coverageLabel}</>}</span>
         </button>
-        {openKpi === 'session' && <div className="insight-kpi-detail enter" id="session-detail" role="region" aria-labelledby="session-kpi">
-          <div><span className="score-label">What contributed to the session move</span><strong>{dataLabels.sessionLabel}</strong><p className="hint">{dataLabels.sessionScope} · {dataLabels.coverageLabel}. Each amount is the price change multiplied by the quantity you hold.</p></div>
-          {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
+        {openKpi === 'session' && <div className="insight-kpi-detail insight-kpi-detail--movement enter" id="session-detail" role="region" aria-labelledby="session-kpi">
+          {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} compact />}
         </div>}
         <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">
           <span className="score-label insight-kpi-label"><span>Worst drawdown</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: 'red' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
@@ -248,8 +248,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <section className="panel insight-panel insight-panel--wide insight-panel--benchmark chart-open">
           <div className="performance-panel-header"><span className="panel-title">Market comparison</span>
               <details className="benchmark-menu">
-                <summary aria-label={`Portfolio compared with ${selectedBenchmark.label}. Choose a benchmark`}>
-                  <span>Compare with</span>
+                <summary aria-label={`Compare with ${selectedBenchmark.label}. Choose a benchmark`}>
+                  <span>Compare with</span>{' '}
                   <strong>{selectedBenchmark.label}</strong>
                   <i aria-hidden="true" />
                 </summary>
@@ -278,6 +278,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
               </details>
           </div>
           <div className="performance-comparison">
+          {hide ? <HiddenValuesState /> : <>
           {benchmarkSeries.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--portfolio">
               <span><i aria-hidden="true" />Portfolio</span>
@@ -312,6 +313,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
             ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (backcastLoading ? 'Building your comparison' : settings.allowExternalData ? 'Historical comparison unavailable' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
           </div>
           <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
+          </>}
           </div>
         </section>
 
@@ -393,14 +395,14 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
               onFocus={() => onFocus(sector.label)}
               onBlur={() => onFocus(null)}
               aria-pressed={active === index}
-              aria-label={`${sector.label}: ${sector.weight.toFixed(1)}%, ${formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
+              aria-label={`${sector.label} ${sector.weight.toFixed(1)}% ${context} ${formatValue(sector.value)}`}
             >
               <span className="expo-identity">
                 <i className="legend-swatch" style={{ background: rgb(seedOfColor(color).fill) }} />
                 <span className="expo-name" title={sector.label}>{sector.label}</span>
-              </span>
-              <strong className="expo-weight">{sector.weight.toFixed(1)}%</strong>
-              <span className="expo-meta">{context}</span>
+              </span>{' '}
+              <strong className="expo-weight">{sector.weight.toFixed(1)}%</strong>{' '}
+              <span className="expo-meta">{context}</span>{' '}
               <span className="expo-value">{formatValue(sector.value)}</span>
               <DitherBar className="expo-track" segments={[{ value: sector.value, color }]} scale={max} />
             </button>
@@ -427,9 +429,9 @@ const AllocationTile = memo(function AllocationTile({ item, active, highlight, o
   const matchesHighlight = highlight && matchesExposure(item, highlight)
   const exposureClass = !highlight ? '' : matchesHighlight ? ' allocation-tile--exposure-match' : ' allocation-tile--exposure-muted'
   const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
-  return <button type="button" className={`allocation-tile${active ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.id)} onFocus={() => onSelect(item.id)} onClick={() => onSelect(item.id)} aria-pressed={active} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
+  return <button type="button" className={`allocation-tile${active ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.id)} onFocus={() => onSelect(item.id)} onClick={() => onSelect(item.id)} aria-pressed={active} aria-label={`${item.symbol} ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
     <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
-    <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
+    <strong>{item.symbol}</strong>{' '}<span>{item.weight.toFixed(1)}%</span>
   </button>
 })
 
@@ -528,7 +530,7 @@ function RiskProfile({ risk, hideValues, coverage, historyStart, historyEnd }: {
       unit: ' days',
       watchAt: 30,
       highAt: 90,
-      reading: risk.daysBelowPeak == null ? 'Unavailable' : `${risk.daysBelowPeak} ${risk.daysBelowPeak === 1 ? 'day' : 'days'}`,
+      reading: risk.daysBelowPeak == null ? 'Unavailable' : risk.daysBelowPeak === 0 && current < 0 ? 'Less than 1 day' : `${risk.daysBelowPeak} ${risk.daysBelowPeak === 1 ? 'day' : 'days'}`,
       formula: 'Value = latest observation date − most recent peak date, in calendar days.',
       definition: 'Shows how long the latest value has been below its high within the loaded history. Equal highs reset the date; recovery shows 0 days. Earlier unseen peaks are not included.',
       basis: `${historyBasis} Meter scale: 0 to 180 days; longer periods fill the meter.`,
@@ -587,23 +589,13 @@ function RiskProfile({ risk, hideValues, coverage, historyStart, historyEnd }: {
                 <div>
                   <span className="risk-label">
                     {row.label}
-                    <button
-                      type="button"
-                      className="risk-help"
-                      aria-label={`Explain how ${row.label} is calculated and rated`}
-                      aria-expanded={isOpen}
-                      aria-controls={tooltipId}
-                      onClick={() => setOpenDefinition(isOpen ? null : row.id)}
-                    >
-                      i
-                      <span id={tooltipId} role="tooltip" className="risk-help-popover">
+                    <RiskHelp id={tooltipId} label={row.label} open={isOpen} onOpenChange={open => setOpenDefinition(open ? row.id : null)}>
                         <strong>{row.label}</strong>
                         <span>{row.definition}</span>
                         <span><b>Formula</b> {row.formula}</span>
                         <span><b>App guide</b> Good below {row.watchAt}{unit} · To watch from {row.watchAt}{unit} · High from {row.highAt}{unit}</span>
                         <small>{row.basis} App-defined screening bands.</small>
-                      </span>
-                    </button>
+                    </RiskHelp>
                   </span>
                   {row.id !== 'below-high' && row.id !== 'time-below-peak' && <span className="risk-summary">{row.summary}</span>}
                 </div>
@@ -634,7 +626,7 @@ function RiskProfile({ risk, hideValues, coverage, historyStart, historyEnd }: {
                     <dd><strong>{hideValues ? mask('') : <time dateTime={new Date(historyEnd).toISOString()}>{date(historyEnd)}</time>}</strong></dd>
                   </dl>
                 </div>
-                {!hideValues && risk.daysBelowPeak === 0 && <p className="risk-summary risk-recovery-note">Latest value is at its observed peak.</p>}
+                {!hideValues && risk.daysBelowPeak === 0 && <p className="risk-summary risk-recovery-note">{current < 0 ? 'Below peak since today.' : 'Latest value is at its observed peak.'}</p>}
               </div>}
 
               <div className="risk-track" role="img" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${reading}, ${statusLabel}. Bar scale 0 to ${row.scaleMax}${unit}.`}>

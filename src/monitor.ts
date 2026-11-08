@@ -2,6 +2,7 @@ import type { LiveQuote, Position } from './types'
 import { hasSupportedValuationCurrency, quoteKey } from './valuation'
 import { workspaceWritesBlocked } from './workspaceStorage'
 import { parseMonitorReadingState, type MonitorReadingState } from './monitorReading'
+import { isIpoDate, isIpoSourceUrl } from './ipoProtocol'
 
 export type RuleCondition = 'price_above' | 'price_below' | 'daily_move'
 export type AlertState = 'open' | 'reviewed' | 'snoozed'
@@ -41,7 +42,8 @@ export interface MonitorEvent {
   reminder: boolean
   unresolved?: boolean
 }
-export interface MonitorState { rules: MonitorRule[]; events: MonitorEvent[]; alerts: MonitorAlert[]; reading?: MonitorReadingState }
+export interface MonitorIpoWatch { id: string; name: string; openDate: string | null; closeDate: string; sourceUrl: string }
+export interface MonitorState { rules: MonitorRule[]; events: MonitorEvent[]; alerts: MonitorAlert[]; reading?: MonitorReadingState; ipoWatches?: MonitorIpoWatch[] }
 
 export const MONITOR_STORAGE_KEY = 'finverse:monitor:v1'
 export const emptyMonitorState = (): MonitorState => ({ rules: [], events: [], alerts: [] })
@@ -57,6 +59,18 @@ const hasOwn = (object: object, key: PropertyKey): boolean => Object.prototype.h
 
 export function validReminderDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T12:00:00Z`)) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value
+}
+
+export function parseIpoWatch(value: unknown): MonitorIpoWatch | null {
+  if (!record(value) || typeof value.id !== 'string' || !value.id.trim() || value.id.length > 200
+    || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200
+    || !isIpoDate(value.closeDate) || value.openDate !== null && !isIpoDate(value.openDate)
+    || typeof value.openDate === 'string' && value.openDate > value.closeDate || !isIpoSourceUrl(value.sourceUrl)) return null
+  return { id: value.id.trim(), name: value.name.trim(), openDate: value.openDate as string | null, closeDate: value.closeDate, sourceUrl: value.sourceUrl }
+}
+
+export function ipoWatchDue(watch: MonitorIpoWatch, now: number): boolean {
+  return watch.closeDate === new Date(now + 19_800_000).toISOString().slice(0, 10)
 }
 
 export function holdingIdentity(position: Position): string {
@@ -97,7 +111,11 @@ export function sanitizeMonitorState(value: unknown): MonitorState {
   if (value.reading !== undefined) {
     try { reading = parseMonitorReadingState(value.reading) } catch { /* Keep valid rules and alerts when reading preferences are malformed. */ }
   }
-  return { rules: unique(rules), events: unique(events), alerts: unique(alerts), ...(reading ? { reading } : {}) }
+  const ipoWatches = unique((Array.isArray(value.ipoWatches) ? value.ipoWatches.slice(0, MAX_ITEMS) : []).flatMap((item) => {
+    const watch = parseIpoWatch(item)
+    return watch ? [watch] : []
+  }))
+  return { rules: unique(rules), events: unique(events), alerts: unique(alerts), ...(reading ? { reading } : {}), ...(ipoWatches.length ? { ipoWatches } : {}) }
 }
 
 export function loadMonitorState(): { state: MonitorState; error: string } {

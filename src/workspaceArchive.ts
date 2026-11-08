@@ -1,6 +1,6 @@
 import type { AccountStatement, Folio, PortfolioSnapshot, Position, Settings } from './types'
 import type { MonitorAlert, MonitorEvent, MonitorMetric, MonitorRule, MonitorState } from './monitor'
-import { holdingIdentity } from './monitor'
+import { holdingIdentity, parseIpoWatch } from './monitor'
 import { parseMonitorReadingState } from './monitorReading'
 import { combinePositions } from './valuation'
 import { migrateFolioIdentities } from './instruments'
@@ -215,6 +215,7 @@ function parseMonitor(value: unknown): MonitorState {
     rules: unique(list(row.rules, 200, 'watch rules', parseRule), 'watch rule'),
     events: unique(list(row.events, 200, 'reminders', parseEvent), 'reminder'),
     alerts: unique(list(row.alerts, 200, 'historical alerts', parseAlert), 'alert'),
+    ...(row.ipoWatches !== undefined ? { ipoWatches: unique(list(row.ipoWatches, 200, 'IPO watches', (value) => parseIpoWatch(value) ?? fail('IPO watch')), 'IPO watch') } : {}),
     ...(row.reading !== undefined ? { reading: parseMonitorReadingState(row.reading) } : {}),
   }
 }

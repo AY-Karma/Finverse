@@ -17,6 +17,7 @@ vi.mock('../valuation', async (original) => {
 })
 vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => <section data-history-panel>Holding Price History</section> }))
 vi.mock('./PortfolioPerformance', () => ({ PortfolioPerformance: ({ scope }: { scope: string }) => <section className="portfolio-performance" data-scope={scope}>Portfolio performance</section> }))
+vi.mock('./MarketIndexTicker', () => ({ MarketIndexTicker: ({ allowed }: { allowed: boolean }) => <div className="tiker-wrap" data-indices-allowed={allowed}>{['NIFTY 50', 'Sensex', 'NIFTY Bank', 'NIFTY Next 50', 'NIFTY Midcap 50'].map((name) => <span className="ticker-item" key={name}>{name}</span>)}</div> }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
@@ -44,7 +45,7 @@ describe('overview valuation and visible work', () => {
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('shows LTP and daily price moves in the ticker and ledger, with neutral missing data and privacy masking', async () => {
+  it('shows holding price moves in the ledger while the quick view stays on public indices', async () => {
     const positions: Position[] = ['DOWN', 'UP', 'FLAT', 'MISSING', 'INVALID', 'REVIEW'].map((ticker) => ({
       id: ticker, ticker, name: ticker, type: 'stock', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120,
       ...(ticker === 'REVIEW' ? { identityIssue: 'Confirm venue' } : {}),
@@ -65,15 +66,8 @@ describe('overview valuation and visible work', () => {
     try {
       await render()
       const cells = [...container.querySelectorAll('.ticker-item')]
-      expect(cells[0].querySelector('.ticker-val')?.textContent).toBe('₹120.00')
-      expect(cells[0].querySelector('.ticker-delta')?.textContent).toBe('−₹5.00 (−4.00%)')
-      expect(cells[0].querySelector('.ticker-delta')?.classList.contains('down')).toBe(true)
-      expect(cells[1].querySelector('.ticker-delta')?.textContent).toBe('+₹2.00 (+1.69%)')
-      expect(cells[2].querySelector('.ticker-delta')?.textContent).toBe('₹0.00 (+0.00%)')
-      for (const cell of cells.slice(3, 6)) {
-        expect(cell.querySelector('.ticker-delta')?.textContent).toBe('— (—)')
-        expect(cell.querySelector('.ticker-delta')?.classList.contains('muted')).toBe(true)
-      }
+      expect(cells.map((cell) => cell.textContent)).toEqual(['NIFTY 50', 'Sensex', 'NIFTY Bank', 'NIFTY Next 50', 'NIFTY Midcap 50'])
+      expect(container.querySelector('.tiker-wrap')?.textContent).not.toMatch(/DOWN|MISSING|REVIEW/)
       const rows = [...container.querySelectorAll('.table--ledger > tbody > tr')]
       expect(rows[0].querySelector('.ltp-arrow')?.textContent).toBe('▼')
       expect(rows[0].querySelector('.last-trade-move')?.textContent).toBe('−₹5.00')
@@ -85,13 +79,13 @@ describe('overview valuation and visible work', () => {
 
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
       await render()
-      expect(container.querySelector('.ticker-item')?.textContent).not.toMatch(/₹|DOWN|4.00/)
+      expect(container.querySelector('.ticker-item')?.textContent).toBe('NIFTY 50')
       expect(container.querySelector('.last-trade')?.textContent).toBe('••••••••••••')
       expect(container.querySelector('.ltp-arrow')).toBeNull()
 
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: false, allowExternalData: false } }
       await render()
-      expect(container.querySelector('.ticker-delta')?.textContent).toBe('— (—)')
+      expect(container.querySelector('[data-indices-allowed]')?.getAttribute('data-indices-allowed')).toBe('false')
       expect(container.querySelector('.last-trade-move')?.textContent).toBe('—')
     } finally { await act(async () => root.unmount()) }
   })
@@ -203,8 +197,8 @@ describe('overview valuation and visible work', () => {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       await act(async () => container.querySelectorAll<HTMLButtonElement>('.scope-btn')[2].click())
       const summary = container.querySelector('.mf-summary')
-      expect(summary?.textContent).toContain('Portfolio XIRR')
-      expect(summary?.textContent).toContain('Requires dated cash flows')
+      expect(summary?.textContent).not.toContain('Portfolio XIRR')
+      expect(summary?.textContent).not.toContain('Requires dated cash flows')
       expect(summary?.textContent).not.toContain('18.00%')
       expect(container.textContent).toContain('+12.00%')
       expect(container.textContent).toContain('+24.00%')
@@ -263,7 +257,7 @@ describe('overview valuation and visible work', () => {
     }
   })
 
-  it('labels incomplete values, calculates covered P&L and formats only visible ledger/ticker data', async () => {
+  it('labels incomplete values, calculates covered P&L and keeps index work independent of holding count', async () => {
     const positions: Position[] = Array.from({ length: 5000 }, (_, i) => ({ id: String(i), ticker: `HOLD${i}`, name: `Holding ${i}`, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: i === 4999 ? null : 120 }))
     const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
     const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {} })
@@ -280,7 +274,7 @@ describe('overview valuation and visible work', () => {
       expect(container.querySelector('.score--session .score-value')?.textContent).toBe('Unavailable')
       expect(container.querySelector('.score--session')?.textContent).toContain('Awaiting updates')
       expect(snapshot.pnl).toBe(99_980)
-      expect(container.querySelectorAll('.ticker-item')).toHaveLength(48)
+      expect(container.querySelectorAll('.ticker-item')).toHaveLength(5)
       expect(state.format.mock.calls.length).toBeLessThan(1500)
     } finally { await act(async () => root.unmount()) }
   })
@@ -310,7 +304,8 @@ describe('overview valuation and visible work', () => {
       expect(session.querySelector('.score-value')?.classList.contains('down')).toBe(true)
       expect(session.querySelector('time')?.dateTime).toBe('2026-10-01')
       expect(session.textContent).toBe('Session move−₹7.0001 Oct 2026')
-      expect(session.querySelector('.score-label button')?.getAttribute('aria-label')).toBe('Open session insights')
+      expect(session.querySelector('.score-label button')?.getAttribute('aria-label')).toBeNull()
+      expect(session.querySelector('.score-label button')?.getAttribute('title')).toBe('Open Insights')
       expect(session.lastElementChild?.classList.contains('score-session-basis')).toBe(true)
       expect(container.querySelector('.daily-brief, .performer-half, .score-move')).toBeNull()
       expect(summary.textContent).not.toMatch(/Best performer|Worst performer|Today/)
@@ -343,6 +338,53 @@ describe('overview valuation and visible work', () => {
       expect(labels).not.toMatch(/WIN|LOSS/)
       expect(session.textContent).not.toMatch(/gained|lost|₹/)
     } finally { await act(async () => root.unmount()) }
+  })
+
+  it('keeps Overview session moves stock/ETF-only while fund values and sort semantics remain available', async () => {
+    const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    const positions: Position[] = [
+      { id: 'stock', ticker: 'STOCK', name: 'Stock', type: 'stock', quantity: 2, buyPrice: 100, invested: 200, lastPrice: 110 },
+      { id: 'etf', ticker: 'ETF', name: 'ETF', type: 'etf', quantity: 3, buyPrice: 45, invested: 135, lastPrice: 50 },
+      { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 5, buyPrice: 100, invested: 500, lastPrice: 120, mfScheme: { code: 123, name: 'Fund', source: 'confirmed' } },
+    ]
+    const folios = [{ id: 'scope', name: 'Scope', importedAt: Date.now(), positions }]
+    const quotes = {
+      [quoteKey(positions[0])]: { price: 110, change: 5, at: Date.now(), source: 'yahoo' as const },
+      [quoteKey(positions[1])]: { price: 50, change: 2, at: Date.now(), source: 'yahoo' as const },
+      [quoteKey(positions[2])]: { price: 120, change: 2, at: Date.now(), source: 'nav' as const },
+    }
+    state.store = { positions, rawPositions: positions, snapshot: investmentWorkspace.readSnapshot({ folios, quotes }), settings: { ...loadSettings(), hideValues: false, allowExternalData: true }, refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    expect(state.store.snapshot.dailyChange).toBe(26)
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      const movement = () => container.querySelector('.score--session .score-value')?.textContent
+      expect(movement()).toBe('+₹16.00')
+      expect(container.querySelector('.score--session')?.textContent).toContain('2 of 2 stocks + ETFs')
+      expect(container.querySelector('.score--session .score-value')?.getAttribute('aria-label')).toContain('stocks + ETFs move')
+      const symbolHeader = container.querySelector<HTMLTableCellElement>('.table--ledger th')!
+      const sortButton = symbolHeader.querySelector('button')!
+      expect(symbolHeader.getAttribute('aria-sort')).toBe('none')
+      await act(async () => sortButton.click())
+      expect(container.querySelector('.table--ledger th')?.getAttribute('aria-sort')).toBe('ascending')
+      expect(container.querySelector('.table--ledger th button')).toBe(sortButton)
+      await act(async () => container.querySelector<HTMLButtonElement>('.table--ledger th button')!.click())
+      expect(container.querySelector('.table--ledger th')?.getAttribute('aria-sort')).toBe('descending')
+      const choose = async (label: string) => act(async () => [...container.querySelectorAll<HTMLButtonElement>('.overview-actions .scope-btn')].find((button) => button.textContent?.startsWith(label))!.click())
+      await choose('Mutual Funds')
+      expect(container.querySelector('.score--session')).toBeNull()
+      expect(container.querySelectorAll('.scoreboard > .score')).toHaveLength(3)
+      expect(container.querySelector('.scoreboard--without-session')).not.toBeNull()
+      expect(container.querySelector('.score--current .score-value')?.textContent).toBe('₹600.00')
+      expect(container.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('mutual')
+      expect(container.querySelector('.panel--ledger')?.textContent).not.toContain('XIRR')
+      await choose('Equity')
+      expect(movement()).toBe('+₹16.00')
+      expect(container.querySelector('.score--current .score-value')?.textContent).toBe('₹370.00')
+      await choose('All')
+      expect(movement()).toBe('+₹16.00')
+    } finally { await act(async () => root.unmount()); canvas.mockRestore() }
   })
 
   it('labels incomplete session coverage without presenting it as a portfolio-wide move', async () => {

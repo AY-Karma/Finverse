@@ -224,6 +224,18 @@ export function InteractiveTrendChart({
   const visibleFirstAt = visibleRows[0]?.at ?? firstAt
   const visibleLastAt = visibleRows[visibleRows.length - 1]?.at ?? visibleFirstAt
   const visibleTimeSpan = Math.max(visibleLastAt - visibleFirstAt, 1)
+  const accessibleSummary = useMemo(() => {
+    if (!visibleRows.length) return 'No observations available.'
+    const series = lines.map((line) => {
+      const values = visibleRows.flatMap((row) => {
+        const value = row[line.key]
+        return typeof value === 'number' && Number.isFinite(value) ? [value] : []
+      })
+      if (!values.length) return `${line.label}: unavailable.`
+      return `${line.label}: ${valueFormatter(values[0])} at start, ${valueFormatter(values[values.length - 1])} at end. Lowest ${valueFormatter(Math.min(...values))}, highest ${valueFormatter(Math.max(...values))}.`
+    })
+    return `${DATE_FORMATTER.format(visibleFirstAt)} to ${DATE_FORMATTER.format(visibleLastAt)}. ${series.join(' ')}`
+  }, [visibleRows, lines, valueFormatter, visibleFirstAt, visibleLastAt])
   const dateTickCount = isRightScaleChart ? clamp(Math.floor(plotWidth / 140) + 1, 2, 5) : chartWidth < 480 ? 3 : 5
   const pointSpacing = plotWidth / Math.max(visiblePointCount - 1, 1)
   const primaryLine = lines[0]
@@ -488,6 +500,7 @@ export function InteractiveTrendChart({
       viewBox={`0 0 ${chartWidth} ${chartHeight}`}
       preserveAspectRatio="none"
       role="img"
+      aria-describedby={`trend-summary-${chartId}`}
       tabIndex={hasHistoryToPan || isPriceChart ? 0 : undefined}
       aria-label={`${yAxisLabel} trend. ${hasHistoryToPan ? 'Drag or swipe horizontally to move through history. ' : ''}${isPriceChart ? 'Move across the chart or use the left and right arrow keys to inspect values. Home and End jump to the first and last values.' : hasHistoryToPan ? 'Use arrow keys, Home, and End to navigate.' : 'Move across the chart to inspect values.'}`}
       onMouseMove={onMove}
@@ -500,6 +513,7 @@ export function InteractiveTrendChart({
       onKeyDown={onKeyDown}
       onClick={onChartClick}
     >
+      <desc id={`trend-summary-${chartId}`}>{accessibleSummary}</desc>
       <defs>
         <linearGradient id={`trend-area-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={primaryLine?.color ?? 'var(--primary)'} stopOpacity="0.22" /><stop offset="100%" stopColor={primaryLine?.color ?? 'var(--primary)'} stopOpacity="0" /></linearGradient>
         <linearGradient id={`comparison-gain-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#78dba0" stopOpacity="0.3" /><stop offset="100%" stopColor="#78dba0" stopOpacity="0.035" /></linearGradient>

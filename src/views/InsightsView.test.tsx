@@ -13,12 +13,12 @@ import { isRegularMarketOpen } from '../marketCalendar'
 import { InsightsView } from './InsightsView'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn(), chart: vi.fn(), classification: vi.fn() }))
+const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore>, build: vi.fn(), benchmark: vi.fn(), chart: vi.fn(), classification: vi.fn(), history: vi.fn() }))
 vi.mock('../marketCapReference', () => ({ loadMarketCapReference: state.classification, getCachedMarketCapReference: () => null }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))
 vi.mock('./HistoryPanel', () => ({ HistoryPanel: ({ scope }: { scope: string }) => <section data-history-scope={scope}>Holding Price History</section> }))
 vi.mock('../portfolioBackcast', async (original) => ({ ...await original<typeof import('../portfolioBackcast')>(), buildPortfolioBackcast: state.build }))
-vi.mock('../marketData', async (original) => ({ ...await original<typeof import('../marketData')>(), marketData: { benchmarkHistory: state.benchmark } }))
+vi.mock('../marketData', async (original) => ({ ...await original<typeof import('../marketData')>(), marketData: { benchmarkHistory: state.benchmark, history: state.history } }))
 vi.mock('./InteractiveTrendChart', () => ({ InteractiveTrendChart: (props: ComponentProps<typeof import('./InteractiveTrendChart').InteractiveTrendChart>) => {
   state.chart(props)
   const { lines, onReachStart, rows } = props
@@ -70,7 +70,70 @@ function expectExposureMatches(symbols: string[] = []) {
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
   root = undefined
+  vi.useRealTimers()
   vi.clearAllMocks()
+})
+
+it('removes comparison geometry and readouts while masked and restores loaded results without refetching', async () => {
+  await renderInsights([
+    { at: Date.UTC(2026, 0, 1), value: 100, invested: 100 },
+    { at: Date.UTC(2026, 2, 1), value: 115, invested: 100 },
+  ])
+  expect(container.querySelector('[data-chart="portfolio,benchmark"]')).not.toBeNull()
+  const requests = { backcast: state.build.mock.calls.length, benchmark: state.benchmark.mock.calls.length }
+  state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
+  state.chart.mockClear()
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  const comparison = container.querySelector('.performance-comparison')!
+  expect(comparison.querySelector('[data-chart], .insight-chart-readout')).toBeNull()
+  expect(comparison.textContent).toContain('Values are hidden')
+  expect(state.chart).not.toHaveBeenCalled()
+  state.store = { ...state.store, settings: { ...state.store.settings, hideValues: false } }
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  expect(container.querySelector('[data-chart="portfolio,benchmark"]')).not.toBeNull()
+  expect(state.build).toHaveBeenCalledTimes(requests.backcast)
+  expect(state.benchmark).toHaveBeenCalledTimes(requests.benchmark)
+})
+
+it('describes a same-day drop as less than one day below peak instead of claiming recovery', async () => {
+  await renderInsights([
+    { at: Date.parse('2026-11-04T09:00:00+05:30'), value: 120, invested: 100 },
+    { at: Date.parse('2026-11-04T12:00:00+05:30'), value: 110, invested: 100 },
+  ])
+  const time = container.querySelector('[data-risk="time-below-peak"]')!
+  expect(time.querySelector('.risk-reading > strong')?.textContent).toBe('Less than 1 day')
+  expect(time.textContent).toContain('Below peak since today.')
+  expect(time.textContent).not.toContain('Latest value is at its observed peak.')
+})
+
+it('keeps the last applied custom contribution results through incomplete dates and revisiting Insights', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-04T18:00:00+05:30'))
+  state.history.mockResolvedValue([{ date: '2026-09-30', close: 100 }, { date: '2026-11-04', close: 110 }])
+  await renderInsights([])
+  const show = (visible: boolean) => act(async () => root!.render(<Activity mode={visible ? 'visible' : 'hidden'}><InsightsView onRequestImport={vi.fn()} /></Activity>))
+  await show(true)
+  const period = container.querySelector<HTMLSelectElement>('[aria-label="Return contribution period"]')!
+  await act(async () => { period.value = 'custom'; period.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(state.history).not.toHaveBeenCalled()
+  const input = container.querySelector<HTMLInputElement>('[aria-label="Contribution start date"]')!
+  const setDate = (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await setDate('2026-10-01')
+  expect(container.querySelector('.holding-move-summary > strong')?.textContent).toBe('₹10.00')
+  expect(state.history).toHaveBeenCalledOnce()
+  await setDate('')
+  await setDate('2026-12-31')
+  expect(container.querySelector('.holding-move-summary > strong')?.textContent).toBe('₹10.00')
+  expect(state.history).toHaveBeenCalledOnce()
+  await show(false)
+  await show(true)
+  expect(container.querySelector('.holding-move-summary > strong')?.textContent).toBe('₹10.00')
+  expect(container.querySelector<HTMLSelectElement>('[aria-label="Return contribution period"]')?.value).toBe('custom')
+  expect(state.history).toHaveBeenCalledOnce()
 })
 
 it('opens import from the empty insights landing without fetching market data', async () => {
@@ -113,6 +176,8 @@ it('loads market cap before selection and retains the request and results across
 })
 
 it('keeps session totals and contributors on stocks and ETFs until same-session NAVs publish', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-30T18:00:00+05:30'))
   const positions: Position[] = [
     { id: 'stock', ticker: 'STOCK', name: 'Stock', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
     { id: 'etf', ticker: 'ETF', name: 'ETF', type: 'etf', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110 },
@@ -133,14 +198,15 @@ it('keeps session totals and contributors on stocks and ETFs until same-session 
   expect(card.querySelector('.hint')?.textContent).toContain('2 of 2 stocks + ETFs')
   await act(async () => card.click())
   expect(container.querySelectorAll('.session-contributors-row')).toHaveLength(2)
-  expect(container.querySelector('.session-contributors-total')?.textContent).toContain('+₹7.00')
+  expect(container.querySelector('.session-contributors-total')).toBeNull()
+  expect(container.querySelector('.session-contributors-note')).toBeNull()
   const published = { ...quotes, [quoteKey(positions[2])]: { ...quotes[quoteKey(positions[2])], at: Date.parse('2026-10-30T00:00:00+05:30') } }
   state.store.snapshot = investmentWorkspace.readSnapshot({ folios, quotes: published })
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(card.querySelector('strong')?.textContent).toBe('+₹9.00')
   expect(card.querySelector('.hint')?.textContent).toContain('3 of 3 session holdings')
   expect(container.querySelectorAll('.session-contributors-row')).toHaveLength(3)
-  expect(container.querySelector('.session-contributors-total')?.textContent).toContain('+₹9.00')
+  expect(container.querySelector('.session-contributors-total')).toBeNull()
   state.store.settings.hideValues = true
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(card.querySelector('strong')?.textContent).toBe('••••••')
@@ -353,7 +419,10 @@ it.each([[29, 'Good', 'lower'], [30, 'To watch', 'watch'], [89, 'To watch', 'wat
     expect(card.classList.contains(`risk-bar--${status}`)).toBe(true)
     expect(card.querySelector('.risk-status')?.textContent).toBe(label)
     expect(card.querySelectorAll('.risk-track-zone')).toHaveLength(3)
-    expect(card.querySelector('.risk-help-popover')?.textContent).toContain('Good below 30 days · To watch from 30 days · High from 90 days')
+    const help = card.querySelector<HTMLButtonElement>('.risk-help')!
+    await act(async () => help.click())
+    expect(help.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById(help.getAttribute('aria-controls')!)?.textContent).toContain('Good below 30 days · To watch from 30 days · High from 90 days')
   },
 )
 
@@ -423,7 +492,7 @@ it('hides exposure labels, counts and relative sizes while masked, then restores
 it('shows sector totals while highlighted and restores the selected holding on pointer leave', async () => {
   await renderInsights([], [], exposurePositions)
   expectExposureMatches()
-  const selected = container.querySelector<HTMLButtonElement>('.allocation-tile[aria-label^="BANK,"]')!
+  const selected = container.querySelector<HTMLButtonElement>('.allocation-tile[aria-label^="BANK "]')!
   await act(async () => selected.click())
   const detail = container.querySelector('.allocation-detail')!.textContent
   const technology = exposureControl('Technology')
@@ -446,7 +515,7 @@ it('shows combined fund-group values instead of the last hovered holding and cle
     { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 2, buyPrice: 100, invested: 200, lastPrice: 100 },
     { id: 'etf', ticker: 'ETF', name: 'ETF', type: 'etf', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 150 },
   ])
-  const stock = container.querySelector<HTMLButtonElement>('.allocation-tile[aria-label^="STOCK,"]')!
+  const stock = container.querySelector<HTMLButtonElement>('.allocation-tile[aria-label^="STOCK "]')!
   await act(async () => stock.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
   const detail = container.querySelector('.allocation-detail')!.textContent
   const mode = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('.exposure-mode button')].find((button) => button.textContent === label)!
@@ -601,7 +670,7 @@ it('keeps unpriced and zero-value imports visible outside weighted allocation ti
   ])
   const tiles = container.querySelectorAll('.allocation-tile')
   expect(tiles).toHaveLength(1)
-  expect(tiles[0].textContent).toBe('PRICED100.0%')
+  expect(tiles[0].textContent).toBe('PRICED 100.0%')
   expect(container.querySelector('.allocation-detail')?.textContent).toContain('₹200')
   const unmapped = container.querySelector('.allocation-unmapped')!
   expect(unmapped.textContent).toContain('MISSINGUnpriced')

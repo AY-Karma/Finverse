@@ -1,0 +1,40 @@
+.recap-artwork { display: block; width: 100%; height: clamp(150px, 24dvh, 220px); overflow: visible; color: var(--story-accent); }
+.recap-artwork--winners { color: var(--semantic-success); }
+.recap-artwork--laggards { color: var(--semantic-danger); }
+.recap-artwork--empty { color: var(--ink-faint); }
+.recap-chart-grid { stroke: var(--hairline); stroke-dasharray: 2 7; }
+.recap-chart-line, .recap-chart-glow { stroke: currentColor; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 1; animation: recap-line-draw 1.6s .1s cubic-bezier(.2,.7,.3,1) both; }
+.recap-chart-line { stroke-width: 2.5; }
+.recap-chart-glow { stroke-width: 9; opacity: .23; filter: blur(5px); }
+.recap-chart-area { animation: recap-art-arrive .9s .5s ease-out both; }
+.recap-chart-tip { animation: recap-art-arrive .4s 1.35s ease-out both; }
+.recap-chart-tip-ring { fill: currentColor; fill-opacity: .08; stroke: currentColor; stroke-opacity: .3; }
+.recap-document { animation: recap-document-arrive .7s cubic-bezier(.2,.7,.3,1) both; }
+.recap-document--back { animation-delay: .05s; }
+.recap-document--middle { animation-delay: .15s; }
+.recap-document--front { animation-delay: .25s; }
+.recap-document-row { animation: recap-art-arrive .4s ease-out both; }
+.recap-update-seal { animation: recap-seal-arrive .55s .5s cubic-bezier(.2,.7,.3,1) both; transform-origin: 264px 143px; }
+.recap-check { stroke-dasharray: 1; animation: recap-line-draw .7s .75s ease-out both; }
+.recap-covered-disc { transform-origin: 200px 110px; animation: recap-seal-arrive .8s cubic-bezier(.2,.7,.3,1) both; }
+.recap-covered-orbit { transform-origin: 200px 110px; animation: recap-orbit-arrive 1.2s .1s ease-out both; }
+.recap-artwork--covered { --recap-complete: #74dcc4; }
+[data-mode='light'] .recap-artwork--covered { --recap-complete: #168774; }
+.recap-covered-aura { transform-origin: 200px 110px; animation: recap-completion-bloom 2.8s ease-in-out 3; }
+.recap-covered-trail { stroke: var(--recap-complete); transform-origin: 200px 110px; animation: recap-completion-orbit 10s ease-out both; }
+.recap-covered-check { stroke: var(--recap-complete); }
+.recap-covered-disc { filter: drop-shadow(0 0 15px color-mix(in srgb, var(--story-accent) 25%, transparent)); }
+.recap-covered-satellite { transform-origin: 200px 110px; animation: recap-completion-orbit 10s ease-out both; }
+.recap-covered-sparks { stroke: var(--recap-complete); animation: recap-sparks-arrive 1.1s .45s ease-out both; }
+@keyframes recap-line-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes recap-art-arrive { from { opacity: 0; } to { opacity: 1; } }
+@keyframes recap-document-arrive { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes recap-seal-arrive { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: scale(1); } }
+@keyframes recap-orbit-arrive { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }
+@keyframes recap-completion-orbit { from { transform: rotate(-100deg); } to { transform: rotate(30deg); } }
+@keyframes recap-completion-bloom { 0%, 100% { opacity: .6; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.06); } }
+@keyframes recap-sparks-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: .85; transform: translateY(0); } }
+@media (max-height: 680px) { .recap-artwork { height: 120px; } }
+@media (prefers-reduced-motion: reduce) {
+  .recap-artwork *, .recap-document-row { animation: none !important; }
+}

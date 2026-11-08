@@ -6,13 +6,27 @@
 .holding-move-column > .score-label { display: block; margin-bottom: 14px; }
 .holding-move-identity { display: inline-flex; align-items: baseline; gap: 12px; min-width: 0; }
 .holding-move-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.holding-move-pct { flex: none; color: var(--ink-subtle); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.holding-move-help .risk-help-popover { top: calc(100% + 8px); left: 0; }
-.holding-move-details { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
-.holding-move-details > summary { cursor: pointer; font-size: .8rem; padding-block: 4px; }
-.holding-move-table-scroll { overflow-x: auto; margin-top: 12px; }
+.holding-move-pct { flex: none; color: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.holding-move-details { border-top: 1px solid var(--hairline); padding-top: 10px; min-width: 0; }
+.holding-move-details > summary, .holding-move-unavailable > summary { cursor: pointer; font-size: 12px; color: var(--ink-muted); padding-block: 6px; }
+.holding-move-details > summary > span, .holding-move-unavailable > summary > span { margin-left: 6px; color: var(--ink-subtle); font-variant-numeric: tabular-nums; }
+.holding-move-table-scroll { overflow: auto; max-height: 340px; margin-top: 8px; padding-right: 4px; }
 .holding-move-table-scroll table { width: 100%; border-collapse: collapse; font-size: .78rem; }
 .holding-move-table-scroll th, .holding-move-table-scroll td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.holding-move-table-scroll th:not(:first-child), .holding-move-table-scroll td:not(:first-child) { text-align: right; }
+.holding-move-table-scroll th { color: var(--ink-muted); font-size: 12px; font-weight: 500; }
+.holding-move-table-scroll th:first-child, .holding-move-table-scroll td:first-child { padding-left: 0; }
+.holding-move-table-scroll th:last-child, .holding-move-table-scroll td:last-child { padding-right: 0; }
 .holding-move-table-scroll td:not(:first-child) { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .holding-move-details .hint { overflow-wrap: anywhere; }
+.holding-market-moves--compact { gap: 14px; }
+.holding-move-ranked-list { display: grid; gap: 16px; padding: 0; margin: 0; list-style: none; }
+.holding-move-ranked-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 20px; align-items: baseline; }
+.holding-move-ranked-row .holding-move-identity { display: flex; font-size: 13px; }
+.holding-move-ranked-row > strong, .holding-move-remainder > strong { font: 550 13px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.holding-move-ranked-track { grid-column: 1 / -1; height: 6px; overflow: hidden; border-radius: 2px; background: var(--surface-2); }
+.holding-move-remainder { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink-muted); }
+.holding-move-remainder small { margin-left: 6px; color: var(--ink-subtle); font-size: 12px; }
+.holding-move-unavailable { padding-top: 8px; }
+.holding-move-unavailable .hint { margin: 6px 0 0; }
 @media (max-width: 600px) { .holding-move-column .contribution-row > div { gap: 8px; } }

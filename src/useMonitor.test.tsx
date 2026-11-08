@@ -14,6 +14,50 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { localStorage.clear(); state.positions = []; state.liveQuotes = {}; state.allowExternalData = false; state.workspaceReadOnly = false; state.refreshNow.mockReset(); vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('monitor workspace reload', () => {
+  it('saves IPO watches without holdings, prevents duplicates and past issues, and persists removal', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-08T08:00:00Z'))
+    const issue = { id: 'xflot:example', name: 'Example', status: 'OPEN' as const, openDate: '2026-11-06', closeDate: '2026-11-08', sourceUrl: 'https://www.xflot.com/ipo/example' }
+    let controller!: MonitorController
+    const Capture = () => { controller = useMonitor(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<Capture />))
+      await act(async () => { expect(controller.addIpoWatch(issue)).toBe(true) })
+      expect(controller.ipoWatches).toHaveLength(1)
+      expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).ipoWatches[0]).toMatchObject({ id: issue.id, closeDate: issue.closeDate })
+      await act(async () => {
+        expect(controller.addIpoWatch(issue)).toBe(false)
+        expect(controller.addIpoWatch({ ...issue, id: 'listed', status: 'LISTED' })).toBe(false)
+        expect(controller.addIpoWatch({ ...issue, id: 'past', closeDate: '2026-11-07' })).toBe(false)
+        expect(controller.addIpoWatch({ ...issue, id: 'unknown', closeDate: null })).toBe(false)
+      })
+      expect(controller.ipoWatches).toHaveLength(1)
+      await act(async () => controller.deleteIpoWatch(issue.id))
+      expect(controller.ipoWatches).toEqual([])
+      expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).ipoWatches).toEqual([])
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('does not add an IPO watch when storage fails or the workspace is read-only', async () => {
+    const issue = { id: 'xflot:example', name: 'Example', status: 'UPCOMING' as const, openDate: '2030-01-01', closeDate: '2030-01-03', sourceUrl: 'https://www.xflot.com/ipo/example' }
+    let controller!: MonitorController
+    const Capture = () => { controller = useMonitor(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<Capture />))
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError') })
+      await act(async () => { expect(controller.addIpoWatch(issue)).toBe(false) })
+      expect(controller.ipoWatches).toEqual([])
+      expect(controller.statusMessage).toContain('could not be saved')
+      state.workspaceReadOnly = true
+      await act(async () => root.render(<Capture />))
+      await act(async () => { expect(controller.addIpoWatch(issue)).toBe(false) })
+      expect(controller.ipoWatches).toEqual([])
+      expect(controller.statusMessage).toContain('Reload it before making changes')
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('writes each reading change once and still persists later rule changes', async () => {
     const position: Position = { id: 'holding', ticker: 'EXAMPLE', name: 'Example', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110 }
     state.positions = [position]

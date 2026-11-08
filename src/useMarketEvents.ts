@@ -32,5 +32,5 @@ export function useMarketEvents(positions: Position[], allowed: boolean, masked:
     return () => controller.abort()
   }, [key, monitoredPositions, allowed, masked, revision])
 
-  return { feed: allowed && !masked && result?.key === key ? result.feed : EMPTY_FEED, loading: allowed && !masked && loading, refresh: () => setRevision((value) => value + 1) }
+  return { feed: allowed && !masked && result?.key === key ? result.feed : EMPTY_FEED, loading: allowed && !masked && loading, ready: !allowed || masked || monitoredPositions.length === 0 || result?.key === key, refresh: () => setRevision((value) => value + 1) }
 }

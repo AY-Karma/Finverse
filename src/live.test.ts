@@ -15,6 +15,7 @@ import {
 } from './live'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -40,6 +41,12 @@ describe('market status text', () => {
     expect(isMarketOpen(new Date('2026-09-23T10:00:00.000Z'))).toBe(false)
   })
 
+  it('keeps quotes refreshing during the announced Sunday Muhurat session', () => {
+    expect(isMarketOpen(new Date('2026-11-08T08:49:59Z'))).toBe(false)
+    expect(isMarketOpen(new Date('2026-11-08T08:50:00Z'))).toBe(true)
+    expect(isMarketOpen(new Date('2026-11-08T10:00:00Z'))).toBe(false)
+  })
+
   it('reports partial quote retention without treating skipped daily NAVs as failures', () => {
     expect(quoteRefreshIssueText({ quotes: {}, updated: 7, failed: 1, skipped: 2 }))
       .toBe('1 quote retained from previous or imported values.')
@@ -48,6 +55,24 @@ describe('market status text', () => {
 })
 
 describe('market data client', () => {
+  it('refreshes only the missing completed NSE close in an otherwise covered cached range', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-07T06:00:00Z'))
+    const stored = new Map<string, string>([['finverse:history:v2:CACHECLOSE.NS', JSON.stringify({
+      from: '2026-10-01', to: '2026-11-07', at: Date.now(),
+      points: [{ date: '2026-10-30', close: 100 }, { date: '2026-11-02', close: 101 }, { date: '2026-11-05', close: 105 }],
+    })]])
+    vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key), key: (index: number) => [...stored.keys()][index] ?? null, get length() { return stored.size } })
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ points: [{ date: '2026-11-05', close: 105 }, { date: '2026-11-06', close: 107 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-10-30T00:00:00+05:30')
+    const to = new Date('2026-11-06T23:59:59+05:30')
+    expect(await fetchHistory('CACHECLOSE.NS', from, to)).toEqual([{ date: '2026-10-30', close: 100 }, { date: '2026-11-02', close: 101 }, { date: '2026-11-05', close: 105 }, { date: '2026-11-06', close: 107 }])
+    expect(String(fetcher.mock.calls[0][0])).toContain('from=2026-11-05&to=2026-11-06')
+    await fetchHistory('CACHECLOSE.NS', from, to)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['equity', 'fund'])('starts independent quote requests while the %s provider is pending', async (slowProvider) => {
     const equity = normalizePosition({ ...position('INFY'), exchangeSource: 'explicit', identityVersion: 2 })
     const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', mfScheme: { code: 709, name: 'Fund Direct Growth', source: 'confirmed' } }
@@ -118,6 +143,8 @@ describe('market data client', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
   it.each([{ nav: '120', fundChange: 10, total: 40 }, { nav: '110', fundChange: 0, total: 20 }])('includes a confirmed fund change in a complete same-session portfolio move: $fundChange', async ({ nav, fundChange, total }) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-25T15:00:00Z'))
     const equity = normalizePosition({ ...position('RELIANCE'), exchangeSource: 'explicit', identityVersion: 2 })
     const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', quantity: 2, mfScheme: { code: 701, name: 'Fund Direct Growth', source: 'confirmed' } }
     vi.stubGlobal('fetch', vi.fn(async (url) => String(url).startsWith('/api/quotes')

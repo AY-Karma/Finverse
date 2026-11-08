@@ -1,7 +1,8 @@
-import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, portfolioPulse, quoteKey } from '../valuation'
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
+import { investmentWorkspace } from '../investmentWorkspace'
 import { needsInstrumentReview } from '../instruments'
 import { getFolioFreshness } from '../importFreshness'
 import type { LiveQuote, Position } from '../types'
@@ -13,6 +14,9 @@ import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
 import { DitherBar } from './DitherBar'
 import { PortfolioWelcome } from './PortfolioWelcome'
+import { MarketIndexTicker } from './MarketIndexTicker'
+import { OverviewNotifications } from './OverviewNotifications'
+import './overviewQuality.css'
 const PortfolioPerformance = lazy(() => import('./PortfolioPerformance').then((module) => ({ default: module.PortfolioPerformance })))
 
 const LEDGER_PAGE_SIZE = 100
@@ -38,7 +42,7 @@ interface LedgerRow {
   pnl: number | null
 }
 
-export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anchor?: string) => void; onRequestImport: () => void }) {
+export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo: (view: View, anchor?: string) => void; onRequestImport: () => void; highlightsEntry?: ReactNode }) {
   const { positions, rawPositions, settings, refreshNow, snapshot, marketDataRefreshing, marketDataResult, quoteLastCheckedAt, quoteNextRefreshAt } = useStore()
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>(null)
@@ -114,15 +118,19 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
     [scopePositions, live],
   )
 
+  const sessionSnapshot = useMemo(() => {
+    if (mfCount === 0) return snapshot
+    const folios = snapshot.folios.map((folio) => ({
+      ...folio,
+      positions: folio.positions.filter((position) => position.type !== 'mutual-fund'),
+    }))
+    return investmentWorkspace.readSnapshot({ folios, quotes: live })
+  }, [snapshot, live, mfCount])
+
   const pulse = useMemo(
     () => portfolioPulse(scopePositions, live),
     [scopePositions, live],
   )
-  const tapeItems = useMemo(
-    () => tickerItems(scopePositions, hideValues, live),
-    [scopePositions, hideValues, live],
-  )
-
   // Hooks are all called unconditionally — no early return may happen above these.
   const ledgerRows: LedgerRow[] = useMemo(
     () =>
@@ -181,7 +189,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   }, [scope, stats])
 
   if (positions.length === 0) {
-    return <PortfolioWelcome onRequestImport={onRequestImport} />
+    return <PortfolioWelcome onRequestImport={onRequestImport} headingAction={<>{highlightsEntry}<OverviewNotifications onGoTo={onGoTo} /></>} />
   }
 
   if (scopePositions.length === 0) {
@@ -206,14 +214,15 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   }
 
   const pnlUp = stats.pnl >= 0
-  const dataLabels = portfolioDataLabels(snapshot)
+  const showSession = scope !== 'mutual' && equityCount > 0
+  const dataLabels = portfolioDataLabels(sessionSnapshot)
   const dailyMove = dataLabels.sessionValue
   const dailyMoveText = dailyMove == null
     ? '—'
     : `${dailyMove >= 0 ? '+' : ''}${formatCurrency(dailyMove)}`
   const dailyMoveDirection = dailyMove == null || dailyMove === 0 ? '' : dailyMove > 0 ? 'up' : 'down'
-  const sessionDate = snapshot.dailyChangeDate
-    ? SESSION_DATE_FORMAT.format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`)) : null
+  const sessionDate = sessionSnapshot.dailyChangeDate
+    ? SESSION_DATE_FORMAT.format(new Date(`${sessionSnapshot.dailyChangeDate}T00:00:00+05:30`)) : null
 
   const toggleSort = (field: SortField) => {
     setSort((prev) => {
@@ -231,10 +240,10 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
   const sortCls = (field: SortField) =>
     sort && sort.field === field ? 'th-sort th-sort--active' : 'th-sort'
 
-  const Th = ({ field, children }: { field: SortField; children: string }) => (
-    <th>
+  const renderHeader = (field: SortField, label: string) => (
+    <th key={field} aria-sort={sort?.field === field ? sort.dir === 'asc' ? 'ascending' : 'descending' : 'none'}>
       <button className={sortCls(field)} onClick={() => toggleSort(field)}>
-        {children}
+        {label}
         <span className="th-sort-icon">{sortIcon(field)}</span>
       </button>
     </th>
@@ -263,6 +272,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
         <div className="overview-heading">
           <div className="overview-title-row">
             <h1 className="page-title">Overview</h1>
+            {highlightsEntry}
             {(foliosNeedReview || pendingListings > 0) && <div className="overview-notices">
               {foliosNeedReview && <div className="overview-review overview-review--folios">
                 <button className="btn overview-review-action overview-review-action--red" type="button" onClick={() => onGoTo('settings', 'manage-holdings')}>
@@ -280,7 +290,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
         <div className="page-sub overview-sub">
           <div className="overview-actions">
             <Scope />
-            <div className="overview-tools">
+            <div className="overview-tools"><OverviewNotifications onGoTo={onGoTo} pendingListings={pendingListings} foliosNeedReview={foliosNeedReview} />
               <button
                 className={`icon-btn${refreshing ? ' icon-btn--spinning' : ''}`}
                 onClick={onManualRefresh}
@@ -312,7 +322,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
       </div>
 
       {/* Scoreboard */}
-      <section className="scoreboard enter d1" aria-label="Portfolio summary">
+      <section className={`scoreboard enter d1${showSession ? '' : ' scoreboard--without-session'}`} aria-label="Portfolio summary">
         <div className="score score--current">
           <div className="score-label">
             {stats.valuationComplete ? 'Current value' : 'Priced holdings value'}
@@ -324,26 +334,26 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
             </div>
           )}
         </div>
-        <div className="score score--session" role="group" aria-label="Session summary">
+        {showSession && <div className="score score--session" role="group" aria-label="Session summary">
           <div className="score-label">
-            <button type="button" className="session-insights-link" aria-label="Open session insights" title="Open Insights" onClick={() => onGoTo('insights')}>
+            <button type="button" className="session-insights-link" title="Open Insights" onClick={() => onGoTo('insights')}>
               {dataLabels.isPartialSession ? 'Reported move' : 'Session move'}<ActionIcon name="insights" />
             </button>
           </div>
           <div className={`score-value${hideValues || !dailyMoveDirection ? '' : ` ${dailyMoveDirection}`}`}
-            aria-label={hideValues ? 'Session movement hidden' : `${dataLabels.sessionLabel} ${dataLabels.isPartialSession ? 'reported holdings' : 'portfolio'} move: ${dailyMove == null ? 'Unavailable' : dailyMoveText}`}>
+            aria-label={hideValues ? 'Session movement hidden' : `${dataLabels.sessionLabel} ${dataLabels.isPartialSession ? 'reported holdings' : mfCount > 0 ? 'stocks + ETFs' : 'portfolio'} move: ${dailyMove == null ? 'Unavailable' : dailyMoveText}`}>
             {mask(dailyMove == null ? 'Unavailable' : dailyMoveText)}
           </div>
           <div className="score-foot score-session-basis" title={hideValues ? undefined : dataLabels.coverageLabel}>
-            {sessionDate ? <time dateTime={snapshot.dailyChangeDate!}>{sessionDate}</time> : 'Awaiting updates'}
-            {!hideValues && dataLabels.sessionTotal > 0 && (dataLabels.isPartialSession || dataLabels.sessionTotal < snapshot.positions.length) && <span>{snapshot.dailyChangeCount} of {dataLabels.sessionTotal} {dataLabels.sessionHoldings}</span>}
+            {sessionDate ? <time dateTime={sessionSnapshot.dailyChangeDate!}>{sessionDate}</time> : 'Awaiting updates'}
+            {!hideValues && dataLabels.sessionTotal > 0 && (mfCount > 0 || dataLabels.isPartialSession || dataLabels.sessionTotal < sessionSnapshot.positions.length) && <span>{sessionSnapshot.dailyChangeCount} of {dataLabels.sessionTotal} {mfCount > 0 ? 'stocks + ETFs' : dataLabels.sessionHoldings}</span>}
           </div>
-        </div>
-        <div className="score">
+        </div>}
+        <div className="score score--secondary">
           <div className="score-label">Invested</div>
           <div className="score-value">{mask(formatCurrency(stats.invested))}</div>
         </div>
-        <div className="score">
+        <div className="score score--secondary">
           <div className="score-label">{stats.valuationComplete ? 'Unrealized P&L' : 'Priced holdings P&L'}</div>
           <div className={`score-value${stats.pricedCount ? pnlUp ? ' up' : ' down' : ''}`}>
             {mask(stats.pricedCount ? `${pnlUp ? '+' : ''}${formatCurrency(stats.pnl)}` : 'Unpriced')}
@@ -355,19 +365,7 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
         </div>
       </section>
 
-      {/* Ticker tape */}
-      <div className="tiker-wrap enter d3">
-        <div className="ticker">
-          <div className="ticker-track">
-            {tapeItems.map((t, i) => (
-              <TickerCell key={i} t={t} hideValues={hideValues} />
-            ))}
-            {tapeItems.map((t, i) => (
-              <TickerCell key={`dup-${i}`} t={t} hideValues={hideValues} />
-            ))}
-          </div>
-        </div>
-      </div>
+      <MarketIndexTicker allowed={settings.allowExternalData} />
 
       {/* Panels */}
       <div className="span-grid enter d4">
@@ -400,11 +398,6 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
                 <span className={`mf-sum-value ${mfSummary.pnl >= 0 ? 'up' : 'down'}`}>
                   {stats.pricedCount > 0 ? mask(formatPercent(mfSummary.pnlPct)) : '—'}
                 </span>
-              </div>
-              <div className="mf-sum-item">
-                <span className="mf-sum-label">Portfolio XIRR</span>
-                <span className="mf-sum-value">—</span>
-                <span className="hint">Requires dated cash flows</span>
               </div>
             </div>
           )}
@@ -449,12 +442,12 @@ export function Overview({ onGoTo, onRequestImport }: { onGoTo: (view: View, anc
             <table className="table table--ledger">
               <thead>
                 <tr>
-                  <Th field="symbol">Symbol</Th>
-                  <Th field="qty">Qty</Th>
-                  <Th field="buy">Buy</Th>
-                  <Th field="ltp">Last Trade</Th>
-                  <Th field="value">Value</Th>
-                  <Th field="pnl">P&L</Th>
+                  {renderHeader('symbol', 'Symbol')}
+                  {renderHeader('qty', 'Qty')}
+                  {renderHeader('buy', 'Buy')}
+                  {renderHeader('ltp', 'Last Trade')}
+                  {renderHeader('value', 'Value')}
+                  {renderHeader('pnl', 'P&L')}
                 </tr>
               </thead>
               <tbody>
@@ -582,6 +575,8 @@ function MFLedger({
   const [sort, setSort] = useState<{ field: string; dir: SortDir } | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [page, setPage] = useState(0)
+  const hasImportedXirr = rows.some((position) => position.xirr != null
+    || membersOf.get(position.id)?.some((member) => member.xirr != null))
   const mask = (s: string) => (hideValues ? '••••••' : s)
 
   const sorted = useMemo(() => {
@@ -633,10 +628,10 @@ function MFLedger({
   const cls = (field: string) =>
     sort && sort.field === field ? 'th-sort th-sort--active' : 'th-sort'
 
-  const Th = ({ field, children }: { field: string; children: string }) => (
-    <th>
+  const renderHeader = (field: string, label: string) => (
+    <th key={field} aria-sort={sort?.field === field ? sort.dir === 'asc' ? 'ascending' : 'descending' : 'none'}>
       <button className={cls(field)} onClick={() => toggle(field)}>
-        {children}
+        {label}
         <span className="th-sort-icon">{icon(field)}</span>
       </button>
     </th>
@@ -669,19 +664,19 @@ function MFLedger({
         <option value="value-asc">Value: low to high</option>
         <option value="returns-desc">Returns: high to low</option>
         <option value="returns-asc">Returns: low to high</option>
-        <option value="xirr-desc">XIRR: high to low</option>
-        <option value="xirr-asc">XIRR: low to high</option>
+        {hasImportedXirr && <option value="xirr-desc">XIRR: high to low</option>}
+        {hasImportedXirr && <option value="xirr-asc">XIRR: low to high</option>}
       </select>
     </div>
     <table className="table">
       <thead>
         <tr>
-          <Th field="scheme">Scheme</Th>
-          <Th field="units">Units</Th>
-          <Th field="invested">Invested</Th>
-          <Th field="value">Current Value</Th>
-          <Th field="returns">Returns</Th>
-          <Th field="xirr">XIRR</Th>
+          {renderHeader('scheme', 'Scheme')}
+          {renderHeader('units', 'Units')}
+          {renderHeader('invested', 'Invested')}
+          {renderHeader('value', 'Current Value')}
+          {renderHeader('returns', 'Returns')}
+          {hasImportedXirr && renderHeader('xirr', 'XIRR')}
           <th>AMC / Folio</th>
         </tr>
       </thead>
@@ -716,16 +711,16 @@ function MFLedger({
                 <td className={livePriceOf(p, live) == null ? 'muted' : value >= p.invested ? 'up' : 'down'}>
                   {returns == null ? '—' : mask(formatPercent(returns))}
                 </td>
-                <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'} title={expandable ? 'Merged XIRR requires dated cash flows. Expand to view imported entry XIRRs.' : undefined}>
+                {hasImportedXirr && <td className={p.xirr != null ? (p.xirr >= 0 ? 'up' : 'down') : 'muted'} title={expandable ? 'Merged XIRR requires dated cash flows. Expand to view imported entry XIRRs.' : undefined}>
                   {p.xirr != null ? mask(formatPercent(p.xirr)) : '—'}
-                </td>
+                </td>}
                 <td className="muted">
                   {mask([p.amc, p.folio].filter(Boolean).join(' · ') || '—')}
                 </td>
               </tr>
               {open && expandable && (
                 <tr className="trow--nested">
-                  <td colSpan={7}>
+                  <td colSpan={hasImportedXirr ? 7 : 6}>
                     <LedgerMembers
                       members={members}
                       live={live}
@@ -764,7 +759,7 @@ function MFLedger({
               <div className="ledger-mobile-detail">
                 <div className="ledger-mobile-detail-wide"><span>Scheme</span><strong>{mask(fund.name || fund.ticker)}</strong></div>
                 <div><span>Invested</span><strong>{mask(formatCost(fund.invested, hasSupportedValuationCurrency(fund)))}</strong></div>
-                <div><span>XIRR</span><strong>{fund.xirr == null ? '—' : mask(formatPercent(fund.xirr))}</strong></div>
+                {fund.xirr != null && <div><span>Imported XIRR</span><strong>{mask(formatPercent(fund.xirr))}</strong></div>}
                 {fund.amc && <div className="ledger-mobile-detail-wide"><span>AMC</span><strong>{mask(fund.amc)}</strong></div>}
                 {fund.folio && <div><span>Folio</span><strong>{mask(fund.folio)}</strong></div>}
                 {members.length > 1 && <LedgerMembers members={members} live={live} hideValues={hideValues} />}
@@ -847,41 +842,6 @@ function valueOf(p: PositionLike, live: Record<string, LiveQuote>): number {
 /** General return: (current value − invested) ÷ invested × 100. */
 function mfReturnPct(p: PositionLike, live: Record<string, LiveQuote>): number | null {
   return positionPnlPct(p, live)
-}
-
-interface TickerCellData {
-  sym: string
-  val: string
-  delta: number | null
-  pct: number | null
-}
-
-function tickerItems(
-  positions: ReturnType<typeof useStore>['positions'],
-  hideValues: boolean,
-  live: Record<string, LiveQuote>,
-): TickerCellData[] {
-  const mask = (s: string) => (hideValues ? '••••••' : s)
-  return positions
-    .slice(0, 24)
-    .map((p) => {
-      const price = livePriceOf(p, live)
-      const { delta, pct } = dailyPriceMove(p, live)
-      return { sym: mask(p.ticker), val: mask(price == null ? 'Unpriced' : formatCurrency(price)), delta, pct }
-    })
-}
-
-function TickerCell({ t, hideValues }: { t: TickerCellData; hideValues: boolean }) {
-  const trend = hideValues ? 'muted' : moveTrend(t.delta ?? t.pct)
-  return (
-    <div className="ticker-item">
-      <span className="ticker-sym">{t.sym}</span>
-      <span className="ticker-val">{t.val}</span>
-      <span className={`ticker-delta ${trend}`} title={hideValues ? undefined : 'Day move'}>
-        {hideValues ? '••••••' : `${t.delta == null ? '—' : signedPrice(t.delta)} (${t.pct == null ? '—' : formatPercent(t.pct)})`}
-      </span>
-    </div>
-  )
 }
 
 function dailyPriceMove(position: Position, live: Record<string, LiveQuote>): { delta: number | null; pct: number | null } {

@@ -63,8 +63,11 @@ describe('portfolio import dialog', () => {
     const dialog = container.querySelector('dialog')!
     const close = container.querySelector<HTMLButtonElement>('[aria-label="Close portfolio import"]')!
     expect(dialog.open).toBe(false)
-    expect([...container.querySelectorAll('.import-source-card strong')].map((item) => item.textContent)).toEqual(['Zerodha', 'Groww', 'INDmoney', 'Angel One', 'Local files'])
+    expect([...container.querySelectorAll('.import-source-card strong')].map((item) => item.textContent)).toEqual(['Local files', 'Zerodha', 'Groww', 'INDmoney', 'Angel One'])
     expect(container.querySelectorAll('.import-source-mark img')).toHaveLength(5)
+    expect(container.querySelector('.import-source-grid')?.firstElementChild?.classList.contains('import-source-card--local')).toBe(true)
+    expect(container.querySelector('input[type="file"]')?.getAttribute('aria-label')).toBe('Choose holdings files')
+    expect(container.querySelector('.import-broker-help')).toBeNull()
     expect(container.textContent).not.toContain('Loading import')
     expect(state.previewFile).not.toHaveBeenCalled()
 

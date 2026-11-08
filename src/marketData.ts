@@ -6,6 +6,7 @@ import {
   fetchLiveQuotes,
   fetchNavHistory,
   fetchYahooPrice,
+  fetchYahooPrices,
   resolveYahooSymbolCandidates,
   type HistoryPoint,
   type LiveQuotesResult,
@@ -17,6 +18,14 @@ export interface MarketDataAdapter {
   history(position: Position, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
   benchmarkHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
   quote(symbol: string, signal?: AbortSignal): Promise<{ price: number; change: number | null; pct: number | null; at: number } | null>
+  quotes(symbols: string[], signal?: AbortSignal): Promise<Map<string, PublicMarketQuote>>
+}
+
+export interface PublicMarketQuote {
+  price: number
+  change: number | null
+  pct: number | null
+  at: number
 }
 
 interface BenchmarkDefinition {
@@ -35,6 +44,7 @@ export const BENCHMARKS: BenchmarkDefinition[] = [
   { id: 'nifty-200', label: 'NIFTY 200', symbol: '^CNX200', region: 'India' },
   { id: 'nifty-midcap-50', label: 'NIFTY Midcap 50', symbol: '^NSEMDCP50', region: 'India' },
   { id: 'sensex', label: 'S&P BSE Sensex', symbol: '^BSESN', region: 'India' },
+  { id: 'nifty-bank', label: 'NIFTY Bank', symbol: '^NSEBANK', region: 'India' },
   { id: 'sp-500', label: 'S&P 500', symbol: '^GSPC', region: 'Global' },
   { id: 'nasdaq-composite', label: 'NASDAQ Composite', symbol: '^IXIC', region: 'Global' },
   { id: 'dow-jones', label: 'Dow Jones', symbol: '^DJI', region: 'Global' },
@@ -64,4 +74,5 @@ export const marketData: MarketDataAdapter = {
     return fetchHistory(symbol, from, to, signal)
   },
   quote: fetchYahooPrice,
+  quotes: fetchYahooPrices,
 }

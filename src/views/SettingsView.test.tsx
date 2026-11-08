@@ -88,24 +88,15 @@ describe('workspace settings', () => {
     } finally { HTMLElement.prototype.scrollIntoView = originalScroll }
   })
 
-  it('describes browser storage and keeps market access opt-in', async () => {
-    state.settings = { ...state.settings, allowExternalData: false }
+  it('describes data handling without exposing the retired market-data toggle', async () => {
     await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     expect(container.querySelector('[aria-label="Manage holdings"]')).not.toBeNull()
     expect([...container.querySelectorAll('.data-handling-card h4')].map((item) => item.textContent)).toEqual(['Portfolio & history', 'Market data'])
     expect(container.textContent).toContain('Holdings and tracked history use local storage.')
-    const externalData = container.querySelector<HTMLInputElement>('#external-data')!
-    expect(externalData.getAttribute('role')).toBe('switch')
-    expect(container.querySelector(`#${externalData.getAttribute('aria-describedby')}`)?.textContent).toContain('Allow quote')
-    expect(externalData.closest('.setting-row')?.querySelector('.setting-toggle-status')?.textContent).toBe('Off')
-    expect(container.querySelector('.data-handling-card:last-child .data-destination')?.textContent).toBe('Blocked')
-    expect(externalData.checked).toBe(false)
-    await act(async () => externalData.click())
-    expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, allowExternalData: true })
-    state.settings = state.setSettings.mock.lastCall![0]
-    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
-    expect(externalData.checked).toBe(true)
-    expect(externalData.closest('.setting-row')?.querySelector('.setting-toggle-status')?.textContent).toBe('On')
+    expect(state.settings.allowExternalData).toBe(true)
+    expect(container.querySelector('#external-data, [role="switch"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Data & privacy"]')).toBeNull()
+    expect(state.setSettings).not.toHaveBeenCalled()
     expect(container.querySelector('.data-handling-card:last-child .data-destination')?.textContent).toBe('Identifiers only')
   })
 })

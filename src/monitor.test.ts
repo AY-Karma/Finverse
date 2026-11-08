@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { emptyMonitorState, evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, monitorRuleObservation, monitorRuleObservations, reconcileMonitorRules, sanitizeMonitorState, type MonitorAlert, type MonitorRule } from './monitor'
+import { emptyMonitorState, evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, ipoWatchDue, monitorRuleObservation, monitorRuleObservations, reconcileMonitorRules, sanitizeMonitorState, type MonitorAlert, type MonitorRule } from './monitor'
 import type { Position } from './types'
 import * as valuation from './valuation'
 
@@ -14,6 +14,28 @@ const rule: MonitorRule = {
   threshold: 47.05,
   active: true,
 }
+
+describe('IPO watch persistence', () => {
+  const watch = { id: 'xflot:example', name: 'Example', openDate: '2026-11-06', closeDate: '2026-11-08', sourceUrl: 'https://www.xflot.com/ipo/example' }
+
+  it('retains valid unique watches and rejects malformed dates, chronology and source links', () => {
+    const loaded = sanitizeMonitorState({ version: 1, ipoWatches: [watch, watch,
+      { ...watch, id: 'bad-date', closeDate: '2026-11-31' },
+      { ...watch, id: 'backwards', openDate: '2026-11-09' },
+      { ...watch, id: 'bad-url', sourceUrl: 'javascript:alert(1)' },
+    ] })
+    expect(loaded.ipoWatches).toEqual([watch])
+    expect(sanitizeMonitorState({ version: 1, rules: [], events: [], alerts: [] })).toEqual(emptyMonitorState())
+    expect(sanitizeMonitorState({ version: 1, ipoWatches: Array.from({ length: 201 }, (_, index) => ({ ...watch, id: String(index) })) }).ipoWatches).toHaveLength(200)
+  })
+
+  it('is due only on the closing calendar day in India, including the UTC date boundary', () => {
+    expect(ipoWatchDue(watch, Date.parse('2026-11-07T18:29:59Z'))).toBe(false)
+    expect(ipoWatchDue(watch, Date.parse('2026-11-07T18:30:00Z'))).toBe(true)
+    expect(ipoWatchDue(watch, Date.parse('2026-11-08T18:29:59Z'))).toBe(true)
+    expect(ipoWatchDue(watch, Date.parse('2026-11-08T18:30:00Z'))).toBe(false)
+  })
+})
 
 describe('watch rule uniqueness', () => {
   it('rejects the same instrument, condition, and numeric level, including paused rules', () => {

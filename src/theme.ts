@@ -7,6 +7,13 @@ export const BLUE_ACCENT = {
   spark: 'rgba(59, 130, 246, 0.14)',
 }
 
+export const LIGHT_BLUE_ACCENT = {
+  ...BLUE_ACCENT,
+  primary: '#2563eb',
+  primaryHover: '#1d4ed8',
+  primaryFocus: '#1d4ed8',
+}
+
 let themeTransition: ViewTransition | undefined
 let themeRequest = 0
 
@@ -16,13 +23,14 @@ export function applyTheme({ density, mode }: { density: Density; mode: Mode }):
   themeTransition?.skipTransition()
   themeTransition = undefined
   delete root.dataset.themeTransition
-  root.style.setProperty('--primary', BLUE_ACCENT.primary)
-  root.style.setProperty('--primary-hover', BLUE_ACCENT.primaryHover)
-  root.style.setProperty('--primary-focus', BLUE_ACCENT.primaryFocus)
-  root.style.setProperty('--spark', BLUE_ACCENT.spark)
   root.dataset.density = density
   const update = () => {
     if (request !== themeRequest) return
+    const accent = mode === 'light' ? LIGHT_BLUE_ACCENT : BLUE_ACCENT
+    root.style.setProperty('--primary', accent.primary)
+    root.style.setProperty('--primary-hover', accent.primaryHover)
+    root.style.setProperty('--primary-focus', accent.primaryFocus)
+    root.style.setProperty('--spark', accent.spark)
     root.dataset.mode = mode
     const themeColorMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
     if (themeColorMeta) themeColorMeta.content = mode === 'light' ? '#f2f2ef' : '#0d0d0c'

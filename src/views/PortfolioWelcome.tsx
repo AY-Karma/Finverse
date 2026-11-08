@@ -36,7 +36,7 @@ const WELCOME_CONTENT = {
 
 type WelcomeVariant = keyof typeof WELCOME_CONTENT
 
-export function PortfolioWelcome({ onRequestImport, variant = 'overview', children }: { onRequestImport: () => void; variant?: WelcomeVariant; children?: ReactNode }) {
+export function PortfolioWelcome({ onRequestImport, variant = 'overview', headingAction, children }: { onRequestImport: () => void; variant?: WelcomeVariant; headingAction?: ReactNode; children?: ReactNode }) {
   const id = useId()
   const content = WELCOME_CONTENT[variant]
 
@@ -44,6 +44,7 @@ export function PortfolioWelcome({ onRequestImport, variant = 'overview', childr
     <section className={`portfolio-welcome portfolio-welcome--${variant} enter`} aria-labelledby={`${id}-title`}>
       <div className="portfolio-welcome-topline">
         <span>{content.area}</span>
+        {headingAction}
       </div>
 
       <div className="portfolio-welcome-main">

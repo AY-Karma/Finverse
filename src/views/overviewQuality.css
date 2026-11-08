@@ -1,0 +1,70 @@
+.scoreboard .score-value {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.scoreboard--without-session { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) {
+  .scoreboard--without-session { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scoreboard--without-session .score--current { grid-column: 1 / -1; }
+  .scoreboard--without-session .score--secondary { border-top: 1px solid var(--hairline-strong); }
+}
+
+.performance-retry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+  color: var(--ink-subtle);
+  font-size: 12px;
+}
+
+.panel--portfolio .alloc-more { display: block; }
+.alloc-more > summary {
+  padding: 12px 0;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.alloc-more > summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+.panel--portfolio .alloc-bottom { display: block; }
+.panel--portfolio .alloc-split { grid-template-rows: auto auto; align-content: start; }
+.panel--portfolio .portfolio-allocation { display: block; }
+.panel--portfolio { grid-template-rows: auto auto; align-content: start; }
+@media (max-width: 768px) {
+  .overview-head .overview-heading { order: 0; }
+  .overview-title-row > .page-title { margin-top: 0; }
+  .span-grid > .panel--portfolio { order: -1; }
+}
+
+@media (max-width: 560px) {
+  .scoreboard > .score--secondary {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 16px 20px;
+    text-align: right;
+  }
+  .scoreboard > .score--secondary::before { display: none; }
+  .scoreboard > .score--secondary .score-label { justify-content: flex-start; text-align: left; }
+  .scoreboard > .score--secondary .score-value { margin-top: 0; font-size: 24px; }
+  .scoreboard > .score--secondary .score-foot { grid-column: 2; margin-top: 0; }
+}
+
+@media (max-width: 380px) {
+  .scoreboard > .score--secondary {
+    display: flex;
+    padding: 14px 12px;
+    gap: 5px;
+    text-align: center;
+  }
+  .scoreboard > .score--secondary .score-label { justify-content: center; text-align: center; }
+}

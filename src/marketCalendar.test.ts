@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { getMarketCalendarInfo, isRegularMarketOpen } from './marketCalendar'
+import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from './marketCalendar'
 
 describe('NSE regular-session calendar', () => {
+  it.each([
+    ['2026-11-08T08:49:59Z', false],
+    ['2026-11-08T08:50:00Z', true],
+    ['2026-11-08T09:59:59Z', true],
+    ['2026-11-08T10:00:00Z', false],
+    ['2026-11-15T08:50:00Z', false],
+  ])('polls during the announced Muhurat session at %s without inventing regular sessions', (now, open) => {
+    const date = new Date(now)
+    expect(isSpecialMarketOpen(date)).toBe(open)
+    expect(isRegularMarketOpen(date)).toBe(false)
+  })
+
   it('skips the Friday holiday and weekend when finding the last close and next open', () => {
     const calendar = getMarketCalendarInfo(new Date('2026-10-04T06:00:00Z'))
     expect(calendar.lastSessionClose?.toISOString()).toBe('2026-10-01T10:00:00.000Z')

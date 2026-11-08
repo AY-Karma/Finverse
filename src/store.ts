@@ -195,7 +195,7 @@ function clearRetiredStorage(): void {
 
 export function loadSettings(): Settings {
   const defaults: Settings = {
-    currency: 'INR', allowExternalData: false,
+    currency: 'INR', allowExternalData: true,
     density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false,
   }
   clearRetiredStorage()
@@ -209,7 +209,7 @@ export function loadSettings(): Settings {
   }
   const settings: Settings = {
     currency: defaults.currency,
-    allowExternalData: parsed.allowExternalData === true,
+    allowExternalData: defaults.allowExternalData,
     density: parsed.density === 'compact' ? 'compact' : defaults.density,
     accent: defaults.accent,
     mode: parsed.mode === 'light' ? 'light' : defaults.mode,

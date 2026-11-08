@@ -1,0 +1,15 @@
+.sector-story { align-self: stretch; width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 0 14px; font-variant-numeric: tabular-nums; }
+.sector-story-lanes { flex: 1; min-height: 0; display: grid; grid-template-rows: repeat(var(--sector-count), minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.sector-story-lanes > li { min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.sector-story-figures { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.sector-story-figures > span { color: var(--ink); font-size: 16px; line-height: 1.35; overflow-wrap: anywhere; }
+.sector-story-figures > strong { min-width: 0; font: 550 clamp(18px, 2.8cqh, 22px)/1.25 var(--font-body); letter-spacing: -.025em; text-align: right; overflow-wrap: anywhere; }
+.sector-story-track { position: relative; height: 18px; background: repeating-linear-gradient(90deg, var(--hairline) 0 1px, transparent 1px 12.5%); }
+.sector-story-track::before { content: ''; position: absolute; inset: 50% 0 auto; height: 1px; background: var(--hairline); }
+.sector-story-zero { position: absolute; z-index: 1; left: 50%; top: -5px; bottom: -5px; width: 1px; background: var(--ink-subtle); }
+.sector-story-bar { position: absolute; left: var(--sector-start); top: 3px; bottom: 3px; width: var(--sector-length); min-width: 2px; background: linear-gradient(90deg, color-mix(in srgb, currentColor 24%, transparent), currentColor); border-radius: 0 3px 3px 0; transform-origin: left; animation: sector-lane-enter .6s cubic-bezier(.2, .7, .2, 1) var(--sector-delay) both; }
+.sector-story-bar > b { position: absolute; right: 0; top: -2px; bottom: -2px; width: 3px; background: currentColor; border-radius: 2px; }
+.sector-story-bar--negative { background: linear-gradient(90deg, currentColor, color-mix(in srgb, currentColor 24%, transparent)); border-radius: 3px 0 0 3px; transform-origin: right; }
+.sector-story-bar--negative > b { left: 0; right: auto; }
+@keyframes sector-lane-enter { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .sector-story-bar { animation: none; } }

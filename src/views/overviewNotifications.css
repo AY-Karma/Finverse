@@ -1,0 +1,23 @@
+.overview-notifications { position: relative; flex: none; }
+.overview-tools { position: relative; }
+.overview-tools .overview-notifications { position: static; }
+.overview-head:has(.overview-notifications[open]), .portfolio-welcome:has(.overview-notifications[open]) { position: relative; z-index: 30; }
+.overview-bell { position: relative; list-style: none; }
+.overview-bell::-webkit-details-marker { display: none; }
+.overview-bell[data-action-due='true']::after { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border: 2px solid var(--surface-1); border-radius: 50%; background: var(--primary); content: ''; }
+.overview-notification-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: min(340px, calc(100vw - 40px)); max-height: min(460px, 65vh); overflow: auto; padding: 16px; border: 1px solid var(--hairline-strong); border-radius: var(--r-md); background: var(--surface-1); color: var(--ink); box-shadow: 0 12px 32px rgb(0 0 0 / .18); text-align: left; }
+.overview-notification-panel h2 { margin: 0 0 12px; font: 600 16px/1.5 var(--font-body); }
+.overview-notification-panel p { margin: 8px 0; color: var(--ink-muted); font-size: 14px; line-height: 1.5; }
+.overview-notification-panel ul { margin: 0; padding: 0; list-style: none; }
+.overview-notification-panel li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hairline); }
+.overview-notice-link { display: grid; flex: 1; min-width: 0; gap: 4px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: 400 14px/1.5 var(--font-body); overflow-wrap: anywhere; }
+.overview-notice-link span { color: var(--ink-muted); }
+.overview-notice-done { min-height: 44px; padding: 4px; border: 0; background: transparent; color: var(--ink); font: 400 14px/1.5 var(--font-body); }
+.mi-watch-action { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+.mi-watch-action button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
+.mi-watch-action span { color: var(--ink-muted); font-size: 14px; }
+.ipo-watch-rules { padding: 16px 20px; border-top: 1px solid var(--hairline); }
+.ipo-watch-rules h3 { margin: 0 0 8px; font-size: 15px; }
+.ipo-watch-rule { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; font-size: 14px; }
+.ipo-watch-rule > div { min-width: 0; overflow-wrap: anywhere; }
+.ipo-watch-rule p { margin: 4px 0 0; color: var(--ink-muted); line-height: 1.5; }

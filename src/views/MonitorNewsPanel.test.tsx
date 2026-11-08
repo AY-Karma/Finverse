@@ -295,14 +295,15 @@ describe('portfolio news', () => {
     loadFeed.mockResolvedValue(feed(titles.map((title, index) => ({ ...story(String(index), []), title }))))
     await renderPanel()
     const badges = [...container.querySelectorAll('.mn-tone')]
-    expect(badges.map((badge) => badge.textContent)).toEqual(['+ Positive', '\u2212 Negative', '\u00b1 Mixed', '? Unclear'])
-    for (const [index, status] of ['positive', 'negative', 'mixed', 'unknown'].entries()) {
+    expect(badges.map((badge) => badge.textContent)).toEqual(['+ Positive', '\u2212 Negative', '\u00b1 Mixed'])
+    for (const [index, status] of ['positive', 'negative', 'mixed'].entries()) {
       expect(badges[index].classList.contains(`mn-tone-${status}`)).toBe(true)
       expect(badges[index].getAttribute('role')).toBe('img')
-      expect(badges[index].getAttribute('aria-label')).toContain(`Estimated headline tone: ${status === 'unknown' ? 'unclear' : status}.`)
+      expect(badges[index].getAttribute('aria-label')).toContain(`Estimated headline tone: ${status}.`)
       expect(badges[index].getAttribute('title')).toBe(badges[index].getAttribute('aria-label'))
     }
-    expect(badges[3].getAttribute('aria-label')).toContain('does not establish a clear financial direction')
+    expect(container.querySelectorAll('article')).toHaveLength(4)
+    expect(container.querySelector('.mn-tone-unknown')).toBeNull()
     expect(container.querySelector('.mn-scope')).toBeNull()
   })
 
