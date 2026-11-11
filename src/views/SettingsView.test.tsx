@@ -25,6 +25,24 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
 
 describe('workspace settings', () => {
+  it('dismisses listing review outside its box without stealing focus or retaining its deep link', async () => {
+    state.positions = [{ id: 'test', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120, exchangeSource: 'inferred' }]
+    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
+    const trigger = container.querySelector<HTMLButtonElement>('#listing-review-trigger')!
+    await act(async () => trigger.click())
+    window.history.replaceState({}, '', '/app/settings#instrument-review')
+    await act(async () => container.querySelector<HTMLElement>('#instrument-review-content')!.click())
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    const outside = container.querySelector<HTMLButtonElement>('.mode-toggle button')!
+    outside.focus()
+    await act(async () => outside.click())
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(outside)
+    expect(window.location.hash).toBe('')
+    await act(async () => trigger.click())
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+  })
+
   it('requests the shared portfolio import without changing Settings navigation', async () => {
     const onRequestImport = vi.fn()
     await act(async () => root.render(<SettingsView onRequestImport={onRequestImport} />))

@@ -3,7 +3,7 @@ import { combinedPositionMembers, computePortfolioStats, effectivePrice as liveP
 import { useStore } from '../useStore'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { investmentWorkspace } from '../investmentWorkspace'
-import { needsInstrumentReview } from '../instruments'
+import { hasVerifiedNsePricing, needsInstrumentReview } from '../instruments'
 import { getFolioFreshness } from '../importFreshness'
 import type { LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
@@ -38,6 +38,7 @@ interface LedgerRow {
   costSupported: boolean
   ltp: number | null
   dayMove: number | null
+  importedPrice: boolean
   value: number
   pnl: number | null
 }
@@ -78,6 +79,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
       if (!result.ok && result.reason === 'disabled') return
       if (!result.ok) {
         if (result.reason === 'failed') setRefreshError('No market quote was updated. Try again later.')
+        if (result.reason === 'no-live-listings') setRefreshError('No verified NSE match is available for live prices. Imported values are retained.')
         return
       }
       setRefreshAvailableAt(Date.now() + result.retryInMs)
@@ -91,7 +93,12 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
   const live = settings.allowExternalData ? snapshot.quotes : EMPTY_QUOTES
   const fetchingMarketData = refreshing || marketDataRefreshing
   const refreshCooldownSeconds = Math.max(0, Math.ceil((refreshAvailableAt - Date.now()) / 1000))
-  const marketDataIssue = quoteRefreshIssueText(marketDataResult)
+  const unmappedBse = positions.filter((position) => position.exchange === 'BSE' && !hasVerifiedNsePricing(position) && hasSupportedValuationCurrency(position))
+  const importedPriceIds = new Set(unmappedBse.map((position) => position.id))
+  const mappingNotice = unmappedBse.length ? hideValues
+    ? 'Some holdings use imported prices. An NSE match is needed for live updates.'
+    : `${unmappedBse.length} BSE holding${unmappedBse.length === 1 ? ' uses' : 's use'} imported prices. An NSE match is needed for live updates.` : null
+  const marketDataIssue = [mappingNotice, quoteRefreshIssueText(marketDataResult)].filter(Boolean).join(' ') || null
 
   const MASK = '••••••'
   const mask = (s: string) => (hideValues ? MASK : s)
@@ -108,6 +115,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
         : positions.filter((p) => (scope === 'mutual' ? p.type === 'mutual-fund' : p.type !== 'mutual-fund')),
     [positions, scope],
   )
+  const importedValueOnly = scopePositions.length > 0 && scopePositions.every((position) => importedPriceIds.has(position.id))
 
   // Raw import rows grouped per combined holding (keyed by the merged position
   // id) so a user can expand any combined ledger row into its original entries.
@@ -122,10 +130,11 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
     if (mfCount === 0) return snapshot
     const folios = snapshot.folios.map((folio) => ({
       ...folio,
-      positions: folio.positions.filter((position) => position.type !== 'mutual-fund'),
+      positions: folio.positions.filter((position) => scope === 'mutual' || equityCount === 0
+        ? position.type === 'mutual-fund' : position.type !== 'mutual-fund'),
     }))
     return investmentWorkspace.readSnapshot({ folios, quotes: live })
-  }, [snapshot, live, mfCount])
+  }, [snapshot, live, mfCount, equityCount, scope])
 
   const pulse = useMemo(
     () => portfolioPulse(scopePositions, live),
@@ -146,6 +155,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
           costSupported: hasSupportedValuationCurrency(p),
           ltp: price,
           dayMove: dailyPriceMove(p, live).delta,
+          importedPrice: importedPriceIds.has(p.id),
           value,
           pnl,
         }
@@ -214,7 +224,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
   }
 
   const pnlUp = stats.pnl >= 0
-  const showSession = scope !== 'mutual' && equityCount > 0
+  const fundSession = mfCount > 0 && (scope === 'mutual' || equityCount === 0)
   const dataLabels = portfolioDataLabels(sessionSnapshot)
   const dailyMove = dataLabels.sessionValue
   const dailyMoveText = dailyMove == null
@@ -313,19 +323,18 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
           </div>
           <div className="overview-meta">
             <MarketRefreshStatus externalEnabled={settings.allowExternalData} refreshing={fetchingMarketData}
-              lastCheckedAt={quoteLastCheckedAt} nextRefreshAt={quoteNextRefreshAt} />
-            {refreshError && <span className="hint down" role="alert">{refreshError}</span>}
-            {!refreshError && marketDataIssue && <span className="hint down" role="status">{marketDataIssue}</span>}
+              lastCheckedAt={quoteLastCheckedAt} nextRefreshAt={quoteNextRefreshAt}
+              issue={refreshError || marketDataIssue} issueRole={refreshError ? 'alert' : 'status'} />
             <MarketCalendar now={marketNow} />
           </div>
         </div>
       </div>
 
       {/* Scoreboard */}
-      <section className={`scoreboard enter d1${showSession ? '' : ' scoreboard--without-session'}`} aria-label="Portfolio summary">
+      <section className="scoreboard enter d1" aria-label="Portfolio summary">
         <div className="score score--current">
           <div className="score-label">
-            {stats.valuationComplete ? 'Current value' : 'Priced holdings value'}
+            {stats.valuationComplete ? importedValueOnly ? 'Imported value' : 'Current value' : 'Priced holdings value'}
           </div>
           <div className="score-value">{mask(stats.pricedCount ? formatCurrency(stats.currentValue) : 'Unpriced')}</div>
           {!stats.valuationComplete && (
@@ -334,21 +343,21 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
             </div>
           )}
         </div>
-        {showSession && <div className="score score--session" role="group" aria-label="Session summary">
+        <div className="score score--session" role="group" aria-label="Session summary">
           <div className="score-label">
             <button type="button" className="session-insights-link" title="Open Insights" onClick={() => onGoTo('insights')}>
-              {dataLabels.isPartialSession ? 'Reported move' : 'Session move'}<ActionIcon name="insights" />
+              {fundSession ? dataLabels.isPartialSession ? 'Reported NAV move' : 'NAV move' : dataLabels.isPartialSession ? 'Reported move' : 'Session move'}<ActionIcon name="insights" />
             </button>
           </div>
           <div className={`score-value${hideValues || !dailyMoveDirection ? '' : ` ${dailyMoveDirection}`}`}
-            aria-label={hideValues ? 'Session movement hidden' : `${dataLabels.sessionLabel} ${dataLabels.isPartialSession ? 'reported holdings' : mfCount > 0 ? 'stocks + ETFs' : 'portfolio'} move: ${dailyMove == null ? 'Unavailable' : dailyMoveText}`}>
+            aria-label={hideValues ? 'Session movement hidden' : `${dataLabels.sessionLabel} ${fundSession ? 'published NAV' : dataLabels.isPartialSession ? 'reported holdings' : mfCount > 0 ? 'stocks + ETFs' : 'portfolio'} move: ${dailyMove == null ? 'Unavailable' : dailyMoveText}`}>
             {mask(dailyMove == null ? 'Unavailable' : dailyMoveText)}
           </div>
           <div className="score-foot score-session-basis" title={hideValues ? undefined : dataLabels.coverageLabel}>
-            {sessionDate ? <time dateTime={sessionSnapshot.dailyChangeDate!}>{sessionDate}</time> : 'Awaiting updates'}
-            {!hideValues && dataLabels.sessionTotal > 0 && (mfCount > 0 || dataLabels.isPartialSession || dataLabels.sessionTotal < sessionSnapshot.positions.length) && <span>{sessionSnapshot.dailyChangeCount} of {dataLabels.sessionTotal} {mfCount > 0 ? 'stocks + ETFs' : dataLabels.sessionHoldings}</span>}
+            {sessionDate ? <time dateTime={sessionSnapshot.dailyChangeDate!}>{sessionDate}</time> : fundSession ? 'Awaiting published NAVs' : 'Awaiting updates'}
+            {!hideValues && dataLabels.sessionTotal > 0 && (mfCount > 0 || dataLabels.isPartialSession || dataLabels.sessionTotal < sessionSnapshot.positions.length) && <span>{sessionSnapshot.dailyChangeCount} of {dataLabels.sessionTotal} {fundSession ? 'published NAVs' : mfCount > 0 ? 'stocks + ETFs' : dataLabels.sessionHoldings}</span>}
           </div>
-        </div>}
+        </div>
         <div className="score score--secondary">
           <div className="score-label">Invested</div>
           <div className="score-value">{mask(formatCurrency(stats.invested))}</div>
@@ -475,7 +484,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
                         <td>{mask(fmtUnits(r.qty))}</td>
                         <td>{mask(formatCost(r.buy, r.costSupported))}</td>
                         <td>
-                          <LastTrade price={r.ltp} dayMove={r.dayMove} hideValues={hideValues} />
+                          <LastTrade price={r.ltp} dayMove={r.dayMove} hideValues={hideValues} imported={r.importedPrice} />
                         </td>
                         <td>{mask(r.ltp == null ? 'Unpriced' : formatCurrency(r.value))}</td>
                         <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
@@ -511,8 +520,8 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
                         <span className="ledger-mobile-secondary">Qty {mask(fmtUnits(row.qty))} · Avg {mask(formatCost(row.buy, row.costSupported))}</span>
                       </span>
                       <span className="ledger-mobile-primary ledger-mobile-primary--right">
-                        <span className="ledger-mobile-value">{mask(row.ltp == null ? 'Unpriced' : formatCurrency(row.value))}</span>
-                        <span className={`ledger-mobile-secondary ${row.pnl == null ? '' : pnlUp ? 'up' : 'down'}`}>
+                        <span className="ledger-mobile-value">{mask(row.ltp == null ? 'Unpriced' : formatCurrency(row.value))}{row.importedPrice && !hideValues && <span className="muted"> · Imported</span>}</span>
+                        <span className={`ledger-mobile-secondary ${hideValues || row.pnl == null ? '' : pnlUp ? 'up' : 'down'}`}>
                           {row.pnl == null ? 'P&L unavailable' : mask(`${pnlUp ? '+' : ''}${formatCurrency(row.pnl)}`)}
                         </span>
                         <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
@@ -520,7 +529,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
                     </button>
                     {open && (
                       <div className="ledger-mobile-detail">
-                        <div><span>Last trade</span><strong><LastTrade price={row.ltp} dayMove={row.dayMove} hideValues={hideValues} /></strong></div>
+                        <div><span>Last trade</span><strong><LastTrade price={row.ltp} dayMove={row.dayMove} hideValues={hideValues} imported={row.importedPrice} /></strong></div>
                         <div><span>Buy price</span><strong>{mask(formatCost(row.buy, row.costSupported))}</strong></div>
                         <div><span>Quantity</span><strong>{mask(fmtUnits(row.qty))}</strong></div>
                         {members.length > 1 && <LedgerMembers members={members} live={live} hideValues={hideValues} />}
@@ -749,7 +758,7 @@ function MFLedger({
               </span>
               <span className="ledger-mobile-primary ledger-mobile-primary--right">
                 <span className="ledger-mobile-value">{mask(livePriceOf(fund, live) == null ? 'Unpriced' : formatCurrency(value))}</span>
-                <span className={`ledger-mobile-secondary ${returns == null ? '' : returns >= 0 ? 'up' : 'down'}`}>
+                <span className={`ledger-mobile-secondary ${hideValues || returns == null ? '' : returns >= 0 ? 'up' : 'down'}`}>
                   {returns == null ? 'Return unavailable' : mask(formatPercent(returns))}
                 </span>
                 <span className="ledger-mobile-chevron" aria-hidden="true">⌄</span>
@@ -863,7 +872,7 @@ function signedPrice(value: number): string {
   return `${value > 0 ? '+' : ''}${formatCurrency(value)}`
 }
 
-function LastTrade({ price, dayMove, hideValues }: { price: number | null; dayMove: number | null; hideValues: boolean }) {
+function LastTrade({ price, dayMove, hideValues, imported = false }: { price: number | null; dayMove: number | null; hideValues: boolean; imported?: boolean }) {
   const trend = moveTrend(dayMove)
   return (
     <span className="last-trade">
@@ -871,8 +880,8 @@ function LastTrade({ price, dayMove, hideValues }: { price: number | null; dayMo
         {!hideValues && dayMove != null && dayMove !== 0 && <span className="ltp-arrow" aria-hidden="true">{dayMove > 0 ? '▲' : '▼'}</span>}
         {hideValues ? '••••••' : price == null ? '—' : formatCurrency(price)}
       </span>
-      <span className={`last-trade-move ${hideValues ? 'muted' : trend}`} aria-label={hideValues ? 'Day move hidden' : 'Day move'}>
-        {hideValues ? '••••••' : dayMove == null ? '—' : signedPrice(dayMove)}
+      <span className={`last-trade-move ${imported ? 'last-trade-source' : ''} ${hideValues ? 'muted' : trend}`} aria-label={hideValues ? 'Day move hidden' : imported ? 'Price source' : 'Day move'}>
+        {hideValues ? '••••••' : imported ? 'Imported' : dayMove == null ? '—' : signedPrice(dayMove)}
       </span>
     </span>
   )

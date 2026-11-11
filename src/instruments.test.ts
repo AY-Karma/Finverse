@@ -1,7 +1,7 @@
 import './test/storage'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
-import { migrateFolioIdentities, normalizePosition } from './instruments'
+import { BSE_PRICING_NOTICE, migrateFolioIdentities, needsInstrumentReview, normalizePosition, pricingProviderSymbol } from './instruments'
 import { parseSpreadsheetWithDiagnostics } from './spreadsheet'
 import { exportPortfolioCsv, investmentWorkspace } from './investmentWorkspace'
 import { loadFolios, saveFolios } from './store'
@@ -10,6 +10,66 @@ import { resolveYahooSymbol } from './live'
 import type { Position } from './types'
 
 afterEach(() => localStorage.clear())
+
+it('preserves canonical BSE grouping while keeping its live prices unavailable', () => {
+  const imported = position({ ticker: '500325', exchange: 'BSE', providerSymbol: 'RELIANCE.BO', isin: 'INE002A01018',
+    currency: 'INR', exchangeSource: 'explicit', identityVersion: 2 })
+  const first = normalizePosition({ ...imported, id: 'first' })
+  const second = normalizePosition({ ...imported, id: 'second' })
+  expect(first.identityIssue).toBe(BSE_PRICING_NOTICE)
+  expect(quoteKey(first)).toBe(quoteKey(second))
+  expect(quoteKey(first)).toContain('RELIANCE.BO')
+  expect(quoteKey(first)).not.toContain('unresolved')
+  expect(needsInstrumentReview(first)).toBe(false)
+  expect(pricingProviderSymbol(first)).toBeUndefined()
+  expect(resolveYahooSymbol(first)).toBeNull()
+  const merged = combinePositions([first, second])
+  expect(merged).toHaveLength(1)
+  expect(merged[0]).toMatchObject({ quantity: 20, invested: 2000, lastPrice: 120, exchange: 'BSE', providerSymbol: 'RELIANCE.BO' })
+  expect(computePortfolioStats(merged).currentValue).toBe(2400)
+  expect(normalizePosition(first)).toEqual(first)
+})
+
+it.each([
+  { providerSymbol: '500325.BO' },
+  { providerSymbol: 'RELIANCE.NS' },
+  { providerSymbol: 'RELIANCE' },
+  { providerSymbol: '^BSESN' },
+  { isin: 'invalid-isin' },
+])('keeps invalid BSE identities unresolved instead of treating them as an unavailable price: %j', (invalid) => {
+  const imported = position({ ticker: 'RELIANCE', exchange: 'BSE', providerSymbol: 'RELIANCE.BO', isin: 'INE002A01018',
+    currency: 'INR', exchangeSource: 'explicit', identityVersion: 2, ...invalid })
+  const first = normalizePosition({ ...imported, id: 'first' })
+  const second = normalizePosition({ ...imported, id: 'second' })
+  expect(first.identityIssue).toBeTruthy()
+  expect(first.identityIssue).not.toBe(BSE_PRICING_NOTICE)
+  expect(needsInstrumentReview(first)).toBe(true)
+  expect(quoteKey(first)).toContain('unresolved')
+  expect(combinePositions([first, second])).toHaveLength(2)
+  expect(resolveYahooSymbol(first)).toBeNull()
+})
+
+it('retains legacy BSE review requirements even when the recorded provider symbol is valid', () => {
+  const imported = position({ ticker: '500325', exchange: 'BSE', providerSymbol: 'RELIANCE.BO', isin: 'INE002A01018', currency: 'INR' })
+  const [migrated] = migrateFolioIdentities([{ id: 'account', name: 'Account', importedAt: 1, positions: [imported] }])
+  const holding = migrated.positions[0]
+  expect(holding.identityIssue).toContain('not verified')
+  expect(holding.identityIssue).not.toBe(BSE_PRICING_NOTICE)
+  expect(needsInstrumentReview(holding)).toBe(true)
+  expect(quoteKey(holding)).toContain('unresolved')
+  expect(resolveYahooSymbol(holding)).toBeNull()
+})
+
+it('does not treat inferred BSE metadata as a verified canonical identity', () => {
+  const imported = position({ ticker: 'RELIANCE', exchange: 'BSE', providerSymbol: 'RELIANCE.BO', isin: 'INE002A01018',
+    currency: 'INR', exchangeSource: 'inferred', identityVersion: 2 })
+  const first = normalizePosition({ ...imported, id: 'first' })
+  const second = normalizePosition({ ...imported, id: 'second' })
+  expect(needsInstrumentReview(first)).toBe(true)
+  expect(quoteKey(first)).toContain('unresolved')
+  expect(combinePositions([first, second])).toHaveLength(2)
+  expect(resolveYahooSymbol(first)).toBeNull()
+})
 
 function position(overrides: Partial<Position> = {}): Position {
   return { id: 'row', ticker: 'SAME', name: 'Synthetic holding', type: 'stock', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120, ...overrides }
@@ -46,8 +106,8 @@ describe('listing identity import', () => {
       ['500112', 10, 100, 'BSE', 'SBIN.BO'],
     ])
     expect(mapped).toMatchObject({ ticker: '500112', exchange: 'BSE', currency: 'INR', providerSymbol: 'SBIN.BO' })
-    expect(mapped.identityIssue).toBeUndefined()
-    expect(resolveYahooSymbol(mapped)).toBe('SBIN.BO')
+    expect(mapped.identityIssue).toContain('BSE prices are not fetched')
+    expect(resolveYahooSymbol(mapped)).toBeNull()
   })
 
   it('retains unsupported venue and currency text for review without requesting NSE prices', () => {

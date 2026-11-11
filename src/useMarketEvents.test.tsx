@@ -1,15 +1,67 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { describe, expect, it, vi } from 'vitest'
-import { createMarketEventsLoader, loadMarketEvents } from './marketEvents'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMarketEventsLoader, EVENTS_REFRESH_MS, loadMarketEvents } from './marketEvents'
 import { useMarketEvents } from './useMarketEvents'
 import type { Position } from './types'
 
 vi.mock('./marketEvents', async (importOriginal) => ({ ...await importOriginal<typeof import('./marketEvents')>(), loadMarketEvents: vi.fn() }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+beforeEach(() => Object.defineProperty(document, 'hidden', { configurable: true, value: false }))
+afterEach(() => vi.useRealTimers())
 
 describe('company event requests', () => {
+  it('checks visible Monitor events at fifteen minutes, pauses hidden, and catches up once', async () => {
+    vi.useFakeTimers()
+    const load = vi.mocked(loadMarketEvents)
+    load.mockReset().mockResolvedValue({ events: [], issues: [], fetchedAt: Date.now() })
+    const positions: Position[] = [{ id: 'infy', ticker: 'INFY', name: 'Infosys', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
+    const root = createRoot(document.createElement('div'))
+    let masked = false
+    function Capture() { useMarketEvents(positions, true, masked, true); return null }
+    try {
+      await act(async () => root.render(<Capture />))
+      await act(async () => { await vi.advanceTimersByTimeAsync(EVENTS_REFRESH_MS - 1) })
+      expect(load).toHaveBeenCalledOnce()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(load).toHaveBeenCalledTimes(2)
+      expect(load.mock.lastCall?.[1]?.forceRefresh).toBe(false)
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(EVENTS_REFRESH_MS * 3)
+      })
+      expect(load).toHaveBeenCalledTimes(2)
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+      expect(load).toHaveBeenCalledTimes(3)
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+      expect(load).toHaveBeenCalledTimes(3)
+      masked = true
+      await act(async () => root.render(<Capture />))
+      await act(async () => { await vi.advanceTimersByTimeAsync(EVENTS_REFRESH_MS * 2) })
+      expect(load).toHaveBeenCalledTimes(3)
+    } finally { await act(async () => root.unmount()); load.mockReset() }
+  })
+
+  it('does not poll events used only for prepared highlights', async () => {
+    vi.useFakeTimers()
+    const load = vi.mocked(loadMarketEvents)
+    load.mockReset().mockResolvedValue({ events: [], issues: [], fetchedAt: Date.now() })
+    const positions: Position[] = [{ id: 'infy', ticker: 'INFY', name: 'Infosys', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
+    const root = createRoot(document.createElement('div'))
+    function Capture() { useMarketEvents(positions, true, false); return null }
+    try {
+      await act(async () => root.render(<Capture />))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(EVENTS_REFRESH_MS * 4)
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      expect(load).toHaveBeenCalledOnce()
+    } finally { await act(async () => root.unmount()); load.mockReset() }
+  })
+
   it('clears obsolete events on an empty successful refresh of a mixed stock and fund portfolio', async () => {
     const now = Date.now()
     const event = { id: 'results', symbol: 'INFY', title: 'Financial Results', kind: 'results', date: new Date(now).toISOString().slice(0, 10), dateLabel: 'Meeting date', source: 'NSE', sourceUrl: 'https://www.nseindia.com/companies-listing/corporate-filings-board-meetings' }

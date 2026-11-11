@@ -45,9 +45,10 @@ const WIRE_SOURCES = [
   { name: 'Google News Markets', url: '/api/news?source=wire-google' },
 ] as const
 
-const WIRE_CACHE_MS = 15 * 60 * 1000
+export const NEWS_REFRESH_MS = 5 * 60 * 1000
+const WIRE_CACHE_MS = NEWS_REFRESH_MS
 const WIRE_FAILURE_CACHE_MS = 5 * 60 * 1000
-const SEARCH_CACHE_MS = 15 * 60 * 1000
+const SEARCH_CACHE_MS = NEWS_REFRESH_MS
 const SEARCH_FAILURE_CACHE_MS = 2 * 60 * 1000
 const MAX_SEARCH_CACHE_ENTRIES = 64
 const NEWS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000

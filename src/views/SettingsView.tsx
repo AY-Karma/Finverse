@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Mode } from '../types'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
@@ -11,6 +11,19 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
   const showListingReview = reviewOpen && positions.some((position) => position.type !== 'mutual-fund')
   const update = (patch: Partial<typeof settings>) => setSettings({ ...settings, ...patch })
 
+  useEffect(() => {
+    if (!showListingReview) return
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target instanceof Node)) return
+      const box = document.getElementById('instrument-review-content')?.closest('.listing-review')
+      if (!box || box.contains(event.target)) return
+      setReviewOpen(false)
+      if (window.location.hash === '#instrument-review') window.history.replaceState({}, '', window.location.pathname + window.location.search)
+    }
+    document.addEventListener('click', dismiss)
+    return () => document.removeEventListener('click', dismiss)
+  }, [showListingReview])
+
   const closeListingReview = () => {
     setReviewOpen(false)
     if (window.location.hash === '#instrument-review') window.history.replaceState({}, '', window.location.pathname + window.location.search)
@@ -19,14 +32,14 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
 
   return (
     <>
-      <div className="page-head settings-page-head enter d0">
+      <div className="page-head settings-page-head">
         <div>
           <h1 className="page-title">Settings</h1>
         </div>
         <span className="settings-save-status" role="status">{settingsSaved ? 'Saved automatically' : 'Preferences not saved'}</span>
       </div>
 
-      <div className="settings-page enter d1">
+      <div className="settings-page">
         <ManageHoldings onRequestImport={onRequestImport} reviewOpen={showListingReview} onReviewListings={showListingReview ? closeListingReview : () => setReviewOpen(true)} />
         <section className="settings-section" aria-label="Preferences">
           <SettingsSectionHeader

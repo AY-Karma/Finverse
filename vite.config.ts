@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
 import { handleHistoryRequest } from './api/history'
@@ -49,6 +49,9 @@ function localMarketDataApi(): Plugin {
 
 export default defineConfig({
   plugins: [react(), localMarketDataApi()],
+  test: {
+    exclude: [...configDefaults.exclude, 'docs/**'],
+  },
   optimizeDeps: { entries: ['index.html'] },
   build: {
     rollupOptions: {

@@ -74,6 +74,33 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
+it.each(['session', 'drawdown', 'top-five', 'data-health'])('keeps %s details interactive inside and dismisses them outside', async (id) => {
+  await renderInsights([
+    { at: Date.UTC(2026, 0, 1), value: 100, invested: 100 },
+    { at: Date.UTC(2026, 2, 1), value: 115, invested: 100 },
+  ])
+  document.body.append(container)
+  try {
+    const trigger = container.querySelector<HTMLButtonElement>(`#${id}-kpi`)!
+    await act(async () => trigger.click())
+    const detail = container.querySelector<HTMLElement>(`#${id}-detail`)!
+    expect(detail).not.toBeNull()
+    await act(async () => detail.click())
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    const nextId = id === 'session' ? 'drawdown' : 'session'
+    const nextTrigger = container.querySelector<HTMLButtonElement>(`#${nextId}-kpi`)!
+    await act(async () => nextTrigger.click())
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(nextTrigger.getAttribute('aria-expanded')).toBe('true')
+    await act(async () => document.body.click())
+    expect(nextTrigger.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('.insight-kpi-detail')).toBeNull()
+    await act(async () => trigger.click())
+    await act(async () => trigger.click())
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  } finally { container.remove() }
+})
+
 it('removes comparison geometry and readouts while masked and restores loaded results without refetching', async () => {
   await renderInsights([
     { at: Date.UTC(2026, 0, 1), value: 100, invested: 100 },
@@ -624,6 +651,38 @@ it('explains unavailable drawdown without claiming completed requests are loadin
   state.store.settings.allowExternalData = false
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(detail.textContent).toContain('Enable external market data in Settings')
+})
+
+it('keeps comparison copy in loading state while benchmark prices are still pending', async () => {
+  state.benchmark.mockImplementationOnce(() => new Promise(() => {}))
+  await renderInsights([])
+  const comparison = container.querySelector('.performance-comparison')!
+  expect(comparison.textContent).toContain('Building your comparison')
+  expect(comparison.textContent).not.toContain('Historical comparison unavailable')
+  expect(comparison.querySelector('.insight-chart-footnote')?.textContent).toContain('Building the historical comparison')
+})
+
+it('does not describe completed unavailable comparison history as reconstruction in progress', async () => {
+  await renderInsights([])
+  const comparison = container.querySelector('.performance-comparison')!
+  expect(comparison.textContent).toContain('Historical comparison unavailable')
+  expect(comparison.textContent).not.toContain('is reconstructing')
+})
+
+it('retries missing portfolio history without fetching the already loaded benchmark again', async () => {
+  await renderInsights([])
+  const benchmarkCalls = state.benchmark.mock.calls.length
+  state.build.mockResolvedValue({
+    points: [
+      { at: Date.UTC(2026, 0, 1), value: 100, invested: 100 },
+      { at: Date.UTC(2026, 2, 1), value: 110, invested: 100 },
+    ],
+    coveredPositions: state.store.snapshot.positions,
+    holdingsIncluded: 1, holdingsTotal: 1,
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('.benchmark-retry')!.click())
+  expect(container.querySelector('[data-chart="portfolio,benchmark"]')).not.toBeNull()
+  expect(state.benchmark).toHaveBeenCalledTimes(benchmarkCalls)
 })
 
 it('clears the drawdown loading state when external data is switched off', async () => {

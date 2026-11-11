@@ -7,6 +7,7 @@ const NSE_SERIES_SUFFIX = /-(EQ|BE|SM|ST|T|BL|Z|E|B|N|W)$/i
 const EXCHANGES: Exchange[] = ['NSE', 'BSE', 'NASDAQ', 'NYSE', 'LSE', 'OTHER']
 const ISIN_PATTERN = /^[A-Z]{2}[A-Z0-9]{9}\d$/
 const LEGACY_IDENTITY_NOTICE = 'The original listing metadata was not verified. Confirm the exchange and provider symbol before using market data.'
+export const BSE_PRICING_NOTICE = 'BSE prices are not fetched. An NSE match by ISIN is needed for live updates; imported values are retained.'
 
 function clean(value: string | undefined): string {
   return (value ?? '').trim()
@@ -51,12 +52,13 @@ function normalizeListing(position: Position): Position {
   else if (type !== 'stock' && type !== 'etf') issue = 'Confirm the supported holding type before using market data.'
   else if (isin && !ISIN_PATTERN.test(isin)) issue = 'The ISIN is invalid. Correct it before using market data.'
   else if (ISIN_PATTERN.test(ticker) && canonicalSymbol(providerSymbol) === ticker) issue = 'An ISIN alone does not identify a supported listing. Confirm the ticker and venue.'
-  else if (exchange === 'BSE' && isNumericBseScripCode(providerSymbol)) issue = 'The numeric BSE mapping is not verified. Confirm the matching BSE provider symbol; imported values are retained.'
+  else if (exchange === 'BSE' && isNumericBseScripCode(providerSymbol)) issue = 'The numeric BSE mapping cannot provide live prices. An NSE match by ISIN is needed; imported values are retained.'
   else if (!position.providerSymbol && (!isMarketSymbol(ticker) || (!/[A-Z]/.test(ticker) && exchangeSource === 'inferred' && !symbolExchange(position.ticker)))) issue = 'The holding needs a ticker and a confirmed exchange. Names and numeric scrip codes are not inferred as NSE listings.'
   else if (!isMarketSymbol(providerSymbol) || providerSymbol.startsWith('^')) issue = 'The provider symbol is invalid or unsupported. Correct the listing before using market data.'
   else if ((symbolExchange(providerSymbol) && symbolExchange(providerSymbol) !== exchange)
     || (symbolExchange(position.ticker) && symbolExchange(position.ticker) !== exchange)) issue = 'The ticker or provider symbol conflicts with the exchange. Confirm the intended listing.'
   else if ((exchange === 'NSE' && !/\.NS$/.test(providerSymbol)) || (exchange === 'BSE' && !/\.BO$/.test(providerSymbol))) issue = 'The provider symbol needs the correct listing suffix for this exchange.'
+  else if (exchange === 'BSE') issue = clean(position.identityIssue) || BSE_PRICING_NOTICE
   return {
     ...position, type, ticker, exchange, currency, providerSymbol: providerSymbol || undefined, isin: isin || undefined,
     identityVersion: 2, exchangeSource, identityIssue: issue || clean(position.identityIssue) || undefined,
@@ -68,7 +70,7 @@ function normalizeListing(position: Position): Position {
 }
 
 function listingKey(position: Position): string {
-  if (position.identityIssue) return `EQ:v2:unresolved:${position.id}`
+  if (position.identityIssue && (position.identityIssue !== BSE_PRICING_NOTICE || position.exchangeSource !== 'explicit')) return `EQ:v2:unresolved:${position.id}`
   if (hasVerifiedNsePricing(position)) position = { ...position, ...position.pricingListing }
   // ISIN identifies the security; venue/provider/currency identify the listing used for pricing.
   return ['EQ:v2', position.type, position.exchange || '', position.currency || '', position.providerSymbol || '', position.isin || '']
@@ -88,7 +90,8 @@ export function instrumentKey(position: Position): string { return listingIdenti
 
 export function needsInstrumentReview(position: Position): boolean {
   if (hasVerifiedNsePricing(position)) return false
-  return !!position.identityIssue || (position.type !== 'mutual-fund' && position.exchangeSource !== 'explicit')
+  return (!!position.identityIssue && position.identityIssue !== BSE_PRICING_NOTICE)
+    || (position.type !== 'mutual-fund' && position.exchangeSource !== 'explicit')
 }
 
 export function hasVerifiedNsePricing(position: Position): boolean {
@@ -98,7 +101,8 @@ export function hasVerifiedNsePricing(position: Position): boolean {
 }
 
 export function pricingProviderSymbol(position: Position): string | undefined {
-  return hasVerifiedNsePricing(position) ? position.pricingListing!.providerSymbol : position.providerSymbol
+  return hasVerifiedNsePricing(position) ? position.pricingListing!.providerSymbol
+    : position.exchange === 'NSE' && /\.NS$/.test(position.providerSymbol ?? '') ? position.providerSymbol : undefined
 }
 
 export function hasInrDenomination(position: Pick<Position, 'currency' | 'reportedCurrency'>): boolean {

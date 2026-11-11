@@ -21,6 +21,40 @@ vi.mock('./MarketIndexTicker', () => ({ MarketIndexTicker: ({ allowed }: { allow
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
+  it('identifies an unmatched BSE portfolio as imported values in the collapsed view', async () => {
+    const holding: Position = { id: 'bse-only', ticker: 'UNMATCHED', name: 'Unmatched company', type: 'stock', exchange: 'BSE', currency: 'INR', providerSymbol: 'UNMATCHED.BO', identityVersion: 2, exchangeSource: 'explicit', quantity: 1, buyPrice: 80, invested: 80, lastPrice: 100 }
+    const folios = [{ id: 'bse', name: 'Imported file', importedAt: Date.now(), positions: [holding] }]
+    state.store = { positions: [holding], rawPositions: [holding], snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: loadSettings(), refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div'), root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(container.querySelector('.scoreboard')?.textContent).toContain('Imported value')
+      expect(container.querySelector('.overview-meta')?.textContent).toContain('1 BSE holding uses imported prices')
+      expect(container.querySelector('.overview-meta')?.textContent).toContain('NSE match is needed')
+      expect(container.querySelector('.last-trade-source')?.textContent).toBe('Imported')
+      expect(container.querySelector('.ledger-mobile-value')?.textContent).toContain('Imported')
+      state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(container.querySelector('.overview-meta')?.textContent).not.toContain('BSE')
+      expect(container.querySelector('.ledger-mobile-value')?.textContent).not.toContain('Imported')
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('masks mutual-fund return colours on mobile while retaining visible returns when unmasked', async () => {
+    const fund: Position = { id: 'fund', ticker: 'Fund', name: 'Test Fund Growth', type: 'mutual-fund', quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120, currency: 'INR' }
+    const folios = [{ id: 'fund-folio', name: 'Fund', importedAt: Date.now(), positions: [fund] }]
+    state.store = { positions: [fund], rawPositions: [fund], snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: { ...loadSettings(), hideValues: false, allowExternalData: false }, refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div'), root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      await act(async () => container.querySelectorAll<HTMLButtonElement>('.scope-switch button')[2].click())
+      expect(container.querySelector('.ledger-mobile-list .up')).not.toBeNull()
+      state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(container.querySelector('.ledger-mobile-list .up, .ledger-mobile-list .down')).toBeNull()
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('opens the existing import flow from the empty portfolio welcome', async () => {
     const refreshNow = vi.fn()
     const onRequestImport = vi.fn()
@@ -82,6 +116,8 @@ describe('overview valuation and visible work', () => {
       expect(container.querySelector('.ticker-item')?.textContent).toBe('NIFTY 50')
       expect(container.querySelector('.last-trade')?.textContent).toBe('••••••••••••')
       expect(container.querySelector('.ltp-arrow')).toBeNull()
+
+      expect(container.querySelector('.ledger-mobile-list .up, .ledger-mobile-list .down')).toBeNull()
 
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: false, allowExternalData: false } }
       await render()
@@ -340,7 +376,7 @@ describe('overview valuation and visible work', () => {
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('keeps Overview session moves stock/ETF-only while fund values and sort semantics remain available', async () => {
+  it('keeps mixed session moves stock/ETF-only and restores the scoped published NAV move', async () => {
     const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
     const positions: Position[] = [
       { id: 'stock', ticker: 'STOCK', name: 'Stock', type: 'stock', quantity: 2, buyPrice: 100, invested: 200, lastPrice: 110 },
@@ -373,9 +409,11 @@ describe('overview valuation and visible work', () => {
       expect(container.querySelector('.table--ledger th')?.getAttribute('aria-sort')).toBe('descending')
       const choose = async (label: string) => act(async () => [...container.querySelectorAll<HTMLButtonElement>('.overview-actions .scope-btn')].find((button) => button.textContent?.startsWith(label))!.click())
       await choose('Mutual Funds')
-      expect(container.querySelector('.score--session')).toBeNull()
-      expect(container.querySelectorAll('.scoreboard > .score')).toHaveLength(3)
-      expect(container.querySelector('.scoreboard--without-session')).not.toBeNull()
+      expect(movement()).toBe('+₹10.00')
+      expect(container.querySelector('.score--session')?.textContent).toContain('NAV move')
+      expect(container.querySelector('.score--session')?.textContent).toContain('1 of 1 published NAVs')
+      expect(container.querySelector('.score--session .score-value')?.getAttribute('aria-label')).toContain('published NAV move')
+      expect(container.querySelectorAll('.scoreboard > .score')).toHaveLength(4)
       expect(container.querySelector('.score--current .score-value')?.textContent).toBe('₹600.00')
       expect(container.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('mutual')
       expect(container.querySelector('.panel--ledger')?.textContent).not.toContain('XIRR')

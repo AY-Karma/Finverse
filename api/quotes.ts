@@ -13,6 +13,7 @@ import { getMarketCalendarInfo } from '../src/marketCalendar.js'
 const UPSTREAM_TIMEOUT_MS = 4_000
 const YAHOO_SYMBOL_LIMIT = 20
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000
+const BSE_QUOTES_DISABLED = 'Delayed BSE quotes are disabled. Use a verified NSE pricing mapping.'
 
 interface QuoteHandlerDependencies {
   fetcher: typeof fetch
@@ -44,7 +45,7 @@ const RESPONSE_HEADERS = {
 
 const CACHE_HEADERS = {
   ...RESPONSE_HEADERS,
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=15, must-revalidate',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=1, must-revalidate',
 }
 
 function json(data: unknown, status: number, cache = false): Response {
@@ -64,6 +65,7 @@ function parseSymbols(request: Request): { symbols: string[] } | { error: string
   if (requested.some((symbol) => !isMarketSymbol(symbol))) {
     return { error: 'Symbols must use a supported market symbol format.' }
   }
+  if (requested.every((symbol) => symbol.endsWith('.BO'))) return { error: BSE_QUOTES_DISABLED }
   return { symbols: [...new Set(requested)].sort() }
 }
 
@@ -85,6 +87,7 @@ async function fetchYahooQuoteChunk(
   symbols: string[],
   fetcher: typeof fetch,
   signal: AbortSignal,
+  now: number,
 ): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
   const url = new URL('https://query1.finance.yahoo.com/v7/finance/spark')
   url.searchParams.set('symbols', symbols.join(','))
@@ -109,6 +112,8 @@ async function fetchYahooQuoteChunk(
       const meta = item.response?.[0]?.meta
       if (!symbol || !symbols.includes(symbol) || !meta) continue
       if (!finitePositive(meta.regularMarketPrice) || !finitePositive(meta.regularMarketTime)) continue
+      const marketTime = meta.regularMarketTime * 1000
+      if (!Number.isFinite(marketTime) || marketTime > now + 300_000) continue
       const previousClose = finitePositive(meta.chartPreviousClose)
         ? meta.chartPreviousClose
         : finitePositive(meta.previousClose)
@@ -119,7 +124,7 @@ async function fetchYahooQuoteChunk(
         price: meta.regularMarketPrice,
         previousClose,
         ...movement(meta.regularMarketPrice, previousClose),
-        marketTime: new Date(meta.regularMarketTime * 1000).toISOString(),
+        marketTime: new Date(marketTime).toISOString(),
         source: 'yahoo',
       })
     }
@@ -131,7 +136,7 @@ async function fetchYahooQuoteChunk(
   }
 }
 
-async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal: AbortSignal): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
+async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal: AbortSignal, now: number): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
   const chunks: string[][] = []
   for (let start = 0; start < symbols.length; start += YAHOO_SYMBOL_LIMIT) chunks.push(symbols.slice(start, start + YAHOO_SYMBOL_LIMIT))
   const results: Awaited<ReturnType<typeof fetchYahooQuoteChunk>>[] = []
@@ -139,7 +144,7 @@ async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal
   await Promise.all(Array.from({ length: Math.min(2, chunks.length) }, async () => {
     while (cursor < chunks.length && !signal.aborted) {
       const index = cursor++
-      results[index] = await fetchYahooQuoteChunk(chunks[index], fetcher, signal)
+      results[index] = await fetchYahooQuoteChunk(chunks[index], fetcher, signal, now)
     }
   }))
   const errors = [...new Set(results.flatMap((result) => result.error ? [result.error] : []))]
@@ -189,10 +194,10 @@ export function createQuoteHandler(
     const parsed = parseSymbols(request)
     if ('error' in parsed) return json({ error: parsed.error }, 400)
 
-    return budget(parsed.symbols.join(','), 15_000, async (signal) => {
+    return budget(parsed.symbols.join(','), 1_000, async (signal) => {
       const started = Date.now()
       const fetchedAt = now()
-      const yahoo = await fetchYahooQuotes(parsed.symbols, fetcher, signal)
+      const yahoo = await fetchYahooQuotes(parsed.symbols.filter((symbol) => !symbol.endsWith('.BO')), fetcher, signal, fetchedAt)
       const calendar = getMarketCalendarInfo(new Date(fetchedAt))
       const completedDate = calendar.available && calendar.lastSessionClose
         ? new Date(calendar.lastSessionClose.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10) : null
@@ -201,7 +206,7 @@ export function createQuoteHandler(
       const stale = new Set(yahoo.quotes.filter((quote) => !isCurrent(quote)).map((quote) => quote.symbol))
       const available = new Map<string, MarketQuotePayload & { resolvedSymbol?: string }>(yahoo.quotes.filter(isCurrent).map((quote) => [quote.symbol, quote]))
       const missing = parsed.symbols.filter((symbol) => symbol.endsWith('.NS') && !available.has(symbol))
-      if (missing.length) {
+      if (missing.length && available.size === 0) {
         const controller = new AbortController()
         const recoverySignal = AbortSignal.any([signal, controller.signal])
         const recover = async () => {
@@ -212,7 +217,7 @@ export function createQuoteHandler(
           const changed = (await renames).filter((item): item is { symbol: string; current: string } => !!item.current && !available.has(item.symbol))
           if (recoverySignal.aborted || !changed.length) return
           const currentSymbols = [...new Set(changed.map((item) => item.current))]
-          const retried = await fetchYahooQuotes(currentSymbols, fetcher, recoverySignal)
+          const retried = await fetchYahooQuotes(currentSymbols, fetcher, recoverySignal, fetchedAt)
           if (recoverySignal.aborted) return
           const currentQuotes = new Map(retried.quotes.filter(isCurrent).map((quote) => [quote.symbol, quote]))
           const recordResolved = () => {
@@ -247,7 +252,7 @@ export function createQuoteHandler(
         .filter((symbol) => !returned.has(symbol))
         .map((symbol) => ({
           symbol,
-          message: stale.has(symbol) ? `The provider quote is older than the last completed NSE session (${completedDate}).` : yahoo.error ?? 'No quote returned by the provider.',
+          message: symbol.endsWith('.BO') ? BSE_QUOTES_DISABLED : stale.has(symbol) ? `The provider quote is older than the last completed NSE session (${completedDate}).` : yahoo.error ?? 'No quote returned by the provider.',
         }))
       const payload: QuotesPayload = {
         provider: providerFor(quotes),

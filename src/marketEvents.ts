@@ -8,6 +8,7 @@ export interface MarketEvent extends MarketEventPayload { holdingId: string; ins
 export interface MarketEventsFeed { events: MarketEvent[]; issues: MarketEventIssue[]; fetchedAt: number; sourceFailed?: boolean }
 type Options = { signal?: AbortSignal; forceRefresh?: boolean }
 const MAX_CONCURRENT_BATCHES = 3
+export const EVENTS_REFRESH_MS = 15 * 60_000
 const KINDS = ['results', 'meeting', 'dividend', 'corporate-action', 'filing']
 const DATE_LABELS = ['Meeting date', 'Ex-date', 'Published']
 
@@ -73,7 +74,7 @@ export function createMarketEventsLoader(fetcher: typeof fetch = fetch, now: () 
       if (!response.ok && !issues.length) throw new Error('Company events unavailable')
       const feed = { events, issues, fetchedAt: value.fetchedAt }
       if (cache.size >= 32) cache.delete(cache.keys().next().value!)
-      cache.set(key, { until: now() + (issues.length ? 60_000 : 300_000), feed })
+      cache.set(key, { until: now() + (issues.length ? 60_000 : EVENTS_REFRESH_MS), feed })
       return feed
     } catch (error) {
       if (signal?.aborted) throw signal.reason ?? error

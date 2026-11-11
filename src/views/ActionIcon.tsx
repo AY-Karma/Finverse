@@ -20,6 +20,7 @@ const ICON_PATHS = {
   external: 'M14 3h7v7m0-7L10 14M10 3H3v18h18v-7',
   calendar: 'M5 5h14a2 2 0 0 1 2 2v13H3V7a2 2 0 0 1 2-2Zm2-3v6m10-6v6M3 11h18m-13 4h2m4 0h2',
   bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-11 12a2 2 0 0 0 4 0',
+  warning: 'm12 3 10 18H2L12 3Zm0 6v5m0 3h.01',
 } as const
 
 export type ActionIconName = keyof typeof ICON_PATHS

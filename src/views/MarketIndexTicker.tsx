@@ -22,9 +22,11 @@ export function MarketIndexTicker({ allowed }: { allowed: boolean }) {
     const direction = trend > 0 ? 'up' : trend < 0 ? 'down' : 'muted'
     return <div className="ticker-item" key={index.id} title={quote ? `${index.label} · As of ${observed.format(quote.at)} IST${saved ? ' · Saved quote' : delayed ? ' · Delayed quote' : ''}` : `${index.label} · Quote unavailable`}>
       <span className="ticker-sym">{index.label}</span>
-      <span className="ticker-val">{quote ? level.format(quote.price) : loading ? 'Loading…' : 'Unavailable'}</span>
-      {quote && <span className={`ticker-delta ${direction}`}>{quote.change === null ? '—' : move.format(quote.change)} ({quote.pct === null ? '—' : `${move.format(quote.pct)}%`})</span>}
-      {quote && (saved || delayed) && <span className="ticker-status muted">{saved ? 'Saved' : 'Delayed'}</span>}
+      <span className="ticker-quote">
+        <span className="ticker-val">{quote ? level.format(quote.price) : loading ? 'Loading…' : 'Unavailable'}</span>
+        {quote && <span className={`ticker-delta ${direction}`}>{quote.change === null ? '—' : move.format(quote.change)} ({quote.pct === null ? '—' : `${move.format(quote.pct)}%`})</span>}
+        {quote && (saved || delayed) && <span className="ticker-status muted">{saved ? 'Saved' : 'Delayed'}</span>}
+      </span>
     </div>
   })}</TickerTape>
 }

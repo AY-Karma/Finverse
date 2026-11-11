@@ -712,57 +712,49 @@ body {
   line-height: 1;
 }
 
-/* ============ Ticker tape ============ */
+/* ============ Market index strip ============ */
 .tiker-wrap {
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
-  overflow: hidden;
   background: var(--surface-1);
+  overflow: hidden;
 }
 .ticker {
-  display: flex;
-  gap: 0;
-  padding: 10px 0;
-  overflow: hidden;
-  white-space: nowrap;
-  position: relative;
-}
-.ticker-track {
-  display: flex;
-  width: max-content;
-}
-.ticker-group {
-  display: flex;
-  flex: 0 0 auto;
-  min-width: var(--ticker-min-width, 0px);
-  gap: var(--sp-lg);
-  padding-right: var(--sp-lg);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 6px 0;
 }
 .ticker-item {
-  display: inline-flex;
-  flex-shrink: 0;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
   align-items: center;
-  gap: var(--sp-sm);
+  justify-content: center;
+  gap: 8px;
   font-family: var(--font-mono);
   font-size: 14px;
-  padding: 0 var(--sp-lg);
+  padding: 6px 12px;
   border-right: 1px solid var(--hairline);
 }
+.ticker-item:last-child { border-right: 0; }
 .ticker-sym {
+  max-width: 100%;
+  text-transform: uppercase;
   font-weight: 600;
   color: var(--ink);
 }
+.ticker-quote { display: inline-flex; flex-direction: column; min-width: 0; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .ticker-val {
   color: var(--ink-subtle);
 }
 .ticker-delta {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .ticker-delta.up { color: var(--semantic-success); }
 .ticker-delta.down { color: var(--semantic-danger); }
-@media (prefers-reduced-motion: reduce) {
-  .ticker { overflow-x: auto; }
-  .ticker-group[aria-hidden='true'] { display: none; }
+@media (max-width: 1000px) {
+  .ticker-item { gap: 4px; padding: 4px 8px; }
 }
 
 /* ============ Grid / panels ============ */
@@ -3629,6 +3621,7 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;

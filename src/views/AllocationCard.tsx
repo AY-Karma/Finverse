@@ -129,7 +129,7 @@ export function AllocationCard({
           </div>
         </div>
 
-        <details className="alloc-more" open>
+        <details className="alloc-more">
           <summary>Composition details</summary>
           <div className="alloc-more-content">
             <section className="alloc-more-section">

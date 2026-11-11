@@ -29,12 +29,12 @@ export function loadIpos(force = false): Promise<IpoFeed> {
       const body = await response.text()
       if (body.length > 2 * 1024 * 1024) throw new Error('IPO response is too large.')
       const value: unknown = JSON.parse(body)
-      if (!response.ok || !isIpoFeed(value) || value.fetchedAt > Date.now() + 300_000) throw new Error('IPO feed unavailable.')
+      if (!response.ok || !isIpoFeed(value) || value.fetchedAt > Date.now() + 300_000 || Date.now() - value.fetchedAt >= MAX_AGE_MS) throw new Error('IPO feed unavailable.')
       if (!value.issues.length && cached?.issues.length && value.warnings.length) throw new Error('IPO feed unavailable.')
-      snapshot = value
+      snapshot = Date.now() - value.fetchedAt >= CACHE_MS ? { ...value, stale: true } : value
       checkedAt = Date.now()
-      try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(value)) } catch { /* Memory caching still works. */ }
-      return value
+      try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot)) } catch { /* Memory caching still works. */ }
+      return snapshot
     } catch {
       checkedAt = Date.now()
       if (cached) {

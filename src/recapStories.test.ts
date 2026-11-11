@@ -73,7 +73,7 @@ describe('recap story sequence', () => {
     ]]))
     const stories = buildRecapStories(snapshot([folio(positions)]), histories, monthly, '2026-11-07')
     expect(stories.find((story) => story.kind === 'winners')).toMatchObject({ metricLabel: 'FAST', metric: '+20.00%', chart: [100, 120], rows: [{ label: 'LARGE', value: '+5.00%' }] })
-    expect(stories.find((story) => story.kind === 'laggards')).toMatchObject({ metricLabel: 'DOWN', metric: '-10.00%', chart: [100, 90] })
+    expect(stories.find((story) => story.kind === 'laggards')).toMatchObject({ metricLabel: 'DOWN', metric: '−10.00%', chart: [100, 90] })
   })
 
   it('keeps recorded folio changes exclusive to Monthly', () => {

@@ -44,7 +44,7 @@ describe('workspace identity startup migration', () => {
     const migrated = JSON.parse(localStorage.getItem('finverse:folios')!)[0]
     expect(migrated).toMatchObject({ id: folio.id, name: folio.name, importedAt: 100 })
     expect(migrated.positions[0]).toMatchObject({ ...position, instrumentKey: 'EQ:v2:unresolved:holding', identityVersion: 2, exchangeSource: 'inferred' })
-    expect(migrated.positions[0].identityIssue).toContain('not verified')
+    expect(migrated.positions[0].identityIssue).toContain('numeric BSE mapping')
     expect(JSON.parse(localStorage.getItem('finverse:portfolio-snapshots')!)).toEqual([{ ...snapshot, dataQuality: 'legacy-instrument-identity' }])
     expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(settings)
     expect(localStorage.getItem('finverse:history:v2:500112.NS')).toBeNull()

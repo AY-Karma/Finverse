@@ -32,6 +32,37 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('collapses source and scheme boxes only after an outside click, preserving inside actions', async () => {
+    state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const onRequestImport = vi.fn()
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const sources = container.querySelector<HTMLDetailsElement>('.import-source-files')!
+      const schemes = container.querySelector<HTMLDetailsElement>('.fund-review')!
+      await act(async () => sources.querySelector('summary')!.click())
+      expect(sources.open).toBe(true)
+      await act(async () => container.querySelector<HTMLElement>('.imported-portfolio-head')!.click())
+      expect(sources.open).toBe(true)
+      await act(async () => sources.querySelector<HTMLButtonElement>('.folio-review-actions button')!.click())
+      expect(onRequestImport).toHaveBeenCalledExactlyOnceWith(folio.id)
+      expect(sources.open).toBe(true)
+      await act(async () => schemes.querySelector('summary')!.click())
+      expect(sources.open).toBe(false)
+      expect(schemes.open).toBe(true)
+      await act(async () => schemes.querySelector<HTMLElement>('.fund-scheme-content')!.click())
+      expect(schemes.open).toBe(true)
+      await act(async () => document.body.click())
+      expect(schemes.open).toBe(false)
+      await act(async () => sources.querySelector('summary')!.click())
+      expect(sources.open).toBe(true)
+      await act(async () => sources.querySelector('summary')!.click())
+      expect(sources.open).toBe(false)
+    } finally { await act(async () => root.unmount()); container.remove() }
+  })
+
   it('groups sources in one portfolio and keeps targeted update and delete together', async () => {
     state.folios = [folio, { ...folio, id: 'funds', name: 'funds.xlsx', positions: [{ ...position, id: 'fund', type: 'mutual-fund' }] }]
     state.positions = state.folios.flatMap((item) => item.positions)

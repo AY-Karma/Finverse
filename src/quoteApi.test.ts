@@ -36,6 +36,19 @@ function yahooBatchResponse(symbols: string[]) {
 }
 
 describe('GET /api/quotes', () => {
+  it.each([1e20, NOW / 1000 + 3600])('isolates a provider timestamp anomaly (%s) without losing healthy batch members', async (invalidTime) => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ spark: { result: [
+      { symbol: 'AAPL', response: [{ meta: { regularMarketPrice: 100, chartPreviousClose: 99, regularMarketTime: invalidTime } }] },
+      { symbol: 'MSFT', response: [{ meta: { regularMarketPrice: 200, chartPreviousClose: 198, regularMarketTime: NOW / 1000 } }] },
+    ] } }))
+    const handler = createQuoteHandler({ fetcher, now: () => NOW })
+    const response = await handler(new Request('http://localhost/api/quotes?symbols=AAPL,MSFT'))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.quotes).toEqual([expect.objectContaining({ symbol: 'MSFT', price: 200, marketTime: new Date(NOW).toISOString() })])
+    expect(body.errors).toEqual([{ symbol: 'AAPL', message: 'No quote returned by the provider.' }])
+  })
+
   it.each([21, 25])('splits %i public quote symbols into Yahoo requests of at most twenty', async (count) => {
     const symbols = Array.from({ length: count }, (_, index) => `S${String(index).padStart(2, '0')}.NS`)
     const fetcher = vi.fn<typeof fetch>(async (input) => {
@@ -55,7 +68,7 @@ describe('GET /api/quotes', () => {
     expect(state.resolveSymbol).not.toHaveBeenCalled()
   })
 
-  it('preserves a healthy Yahoo chunk and recovers only the failed chunk through NSE', async () => {
+  it('returns healthy chunks promptly and recovers a separately targeted missing chunk through NSE', async () => {
     const symbols = Array.from({ length: 25 }, (_, index) => `S${String(index).padStart(2, '0')}.NS`)
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input))
@@ -68,12 +81,18 @@ describe('GET /api/quotes', () => {
     const handler = createQuoteHandler({ fetcher, now: () => NOW })
     const response = await handler(new Request(`http://localhost/api/quotes?${new URLSearchParams({ symbols: symbols.join(',') })}`))
     const body = await response.json()
-    expect(body.provider).toBe('mixed')
-    expect(body.quotes).toHaveLength(25)
+    expect(body.provider).toBe('yahoo-unofficial')
+    expect(body.quotes).toHaveLength(20)
     expect(body.quotes.slice(0, 20).every((quote: { source: string; price: number }) => quote.source === 'yahoo' && quote.price === 100)).toBe(true)
-    expect(body.quotes.slice(20).every((quote: { source: string; price: number }) => quote.source === 'nse-close' && quote.price === 200)).toBe(true)
+    expect(body.errors.map((error: { symbol: string }) => error.symbol)).toEqual(symbols.slice(20))
+    expect(state.resolveSymbol).not.toHaveBeenCalled()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    const recovered = await handler(new Request(`http://localhost/api/quotes?${new URLSearchParams({ symbols: symbols.slice(20).join(',') })}`))
+    const recoveredBody = await recovered.json()
+    expect(recoveredBody.quotes).toHaveLength(5)
+    expect(recoveredBody.quotes.every((quote: { source: string; price: number }) => quote.source === 'nse-close' && quote.price === 200)).toBe(true)
     expect(state.resolveSymbol.mock.calls.map(([symbol]) => symbol)).toEqual(symbols.slice(20))
-    expect(body.errors).toEqual([])
+    expect(recoveredBody.errors).toEqual([])
   })
 
   it('keeps both Yahoo chunk errors when neither chunk nor NSE can provide quotes', async () => {
@@ -93,13 +112,13 @@ describe('GET /api/quotes', () => {
     expect(body.errors[0].message).toContain('HTTP 503')
   })
 
-  it('reuses a recent batch but fetches a new provider response after 15 seconds', async () => {
+  it('reuses a recent batch but fetches a new provider response after one second', async () => {
     let now = NOW
     const fetcher = vi.fn<typeof fetch>(async () => yahooResponse())
     const handler = createQuoteHandler({ fetcher, now: () => now })
     const request = () => handler(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS'))
     await request()
-    now += 14_999
+    now += 999
     await request()
     expect(fetcher).toHaveBeenCalledTimes(1)
     now += 1
@@ -117,7 +136,7 @@ describe('GET /api/quotes', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=15, must-revalidate')
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1, must-revalidate')
     expect(fetcher).toHaveBeenCalledTimes(1)
     expect(String(fetcher.mock.calls[0]?.[0])).toContain('symbols=RELIANCE.NS')
     expect(state.resolveSymbol).not.toHaveBeenCalled()
@@ -139,7 +158,7 @@ describe('GET /api/quotes', () => {
     })
   })
 
-  it('fills a missing member of a successful Yahoo batch from NSE without replacing its healthy quote', async () => {
+  it('does not hold a healthy batch member behind unrelated NSE fallback work', async () => {
     const fetcher = vi.fn<typeof fetch>(async (input) => String(input).includes('/finance/spark') ? yahooResponse() : new Response(
       'SYMBOL,SERIES,DATE1,PREV_CLOSE,CLOSE_PRICE\nRELIANCE,EQ,24-Aug-2026,1300,1200\nTCS,EQ,24-Aug-2026,3900,4000\n',
     ))
@@ -147,12 +166,13 @@ describe('GET /api/quotes', () => {
     const response = await handler(new Request('http://localhost/api/quotes?symbols=TCS.NS,RELIANCE.NS'))
     const body = await response.json()
     expect(response.status).toBe(200)
-    expect(body.provider).toBe('mixed')
+    expect(body.provider).toBe('yahoo-unofficial')
     expect(body.quotes).toEqual([
       expect.objectContaining({ symbol: 'RELIANCE.NS', price: 1309.8, source: 'yahoo' }),
-      expect.objectContaining({ symbol: 'TCS.NS', price: 4000, source: 'nse-close' }),
     ])
-    expect(body.errors).toEqual([])
+    expect(body.errors).toEqual([{ symbol: 'TCS.NS', message: 'No quote returned by the provider.' }])
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(state.resolveSymbol).not.toHaveBeenCalled()
   })
 
   it('replaces a frozen NSE quote with a current official close', async () => {
@@ -225,11 +245,10 @@ describe('GET /api/quotes', () => {
       return new Response('SYMBOL,SERIES,DATE1,PREV_CLOSE,CLOSE_PRICE\nTMPV,EQ,24-Aug-2026,340,350\n')
     })
     const handler = createQuoteHandler({ fetcher, now: () => NOW })
-    const response = await handler(new Request('http://localhost/api/quotes?symbols=TATAMOTORS.NS,RELIANCE.NS'))
+    const response = await handler(new Request('http://localhost/api/quotes?symbols=TATAMOTORS.NS'))
     const body = await response.json()
     expect(response.status).toBe(200)
     expect(body.quotes).toEqual([
-      expect.objectContaining({ symbol: 'RELIANCE.NS', price: 1309.8, source: 'yahoo' }),
       expect.objectContaining({ symbol: 'TATAMOTORS.NS', resolvedSymbol: 'TMPV.NS', price: 350, source }),
     ])
     expect(body.errors).toEqual([])
@@ -246,7 +265,7 @@ describe('GET /api/quotes', () => {
     expect(body.errors).toEqual([{ symbol: 'UNKNOWN.NS', message: 'No quote returned by the provider.' }])
   })
 
-  it('returns healthy quotes before the request budget expires when rename resolution stalls', async () => {
+  it('returns healthy quotes without starting stalled recovery or waiting for a recovery deadline', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     state.resolveSymbol.mockReturnValue(new Promise(() => {}))
@@ -255,9 +274,15 @@ describe('GET /api/quotes', () => {
     ))
     try {
       const handler = createQuoteHandler({ fetcher, now: () => NOW })
-      const pending = handler(new Request('http://localhost/api/quotes?symbols=UNKNOWN.NS,RELIANCE.NS'))
+      let response: Response | undefined
+      const pending = handler(new Request('http://localhost/api/quotes?symbols=UNKNOWN.NS,RELIANCE.NS')).then((value) => { response = value; return value })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(response).toBeDefined()
+      expect(state.resolveSymbol).not.toHaveBeenCalled()
+      expect(fetcher).toHaveBeenCalledOnce()
       await vi.advanceTimersByTimeAsync(8_000)
-      const response = await pending
+      await pending
+      if (!response) throw new Error('Healthy quote response was not delivered.')
       const body = await response.json()
       expect(response.status).toBe(200)
       expect(body.quotes).toEqual([expect.objectContaining({ symbol: 'RELIANCE.NS', source: 'yahoo' })])
@@ -295,6 +320,48 @@ describe('GET /api/quotes', () => {
         source: 'nse-close',
       },
     ])
+  })
+
+  it('bounds stalled recovery when no live batch member is usable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    state.resolveSymbol.mockReturnValue(new Promise(() => {}))
+    const fetcher = vi.fn<typeof fetch>(async (input) => new Response('', { status: String(input).includes('/finance/spark') ? 503 : 404 }))
+    try {
+      const handler = createQuoteHandler({ fetcher, now: () => NOW })
+      let response: Response | undefined
+      const pending = handler(new Request('http://localhost/api/quotes?symbols=UNKNOWN.NS')).then((value) => { response = value; return value })
+      await vi.advanceTimersByTimeAsync(7_999)
+      expect(response).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      await pending
+      if (!response) throw new Error('The bounded recovery did not return.')
+      expect(response.status).toBe(502)
+      expect(await response.json()).toMatchObject({ quotes: [], errors: [{ symbol: 'UNKNOWN.NS', message: 'Quote provider returned HTTP 503.' }] })
+      expect(state.resolveSymbol).toHaveBeenCalledExactlyOnceWith('UNKNOWN.NS')
+    } finally { vi.useRealTimers() }
+  })
+
+  it('rejects delayed BSE-only quote requests before calling any provider', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+    const handler = createQuoteHandler({ fetcher, now: () => NOW })
+    const response = await handler(new Request('http://localhost/api/quotes?symbols=500325.BO'))
+    expect(response.status).toBe(400)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(state.resolveSymbol).not.toHaveBeenCalled()
+    expect(await response.json()).toEqual({ error: 'Delayed BSE quotes are disabled. Use a verified NSE pricing mapping.' })
+  })
+
+  it('returns valid NSE quotes while excluding delayed BSE members from the upstream batch', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => yahooResponse())
+    const handler = createQuoteHandler({ fetcher, now: () => NOW })
+    const response = await handler(new Request('http://localhost/api/quotes?symbols=500325.BO,RELIANCE.NS'))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(new URL(String(fetcher.mock.calls[0][0])).searchParams.get('symbols')).toBe('RELIANCE.NS')
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(body.quotes).toEqual([expect.objectContaining({ symbol: 'RELIANCE.NS', source: 'yahoo' })])
+    expect(body.errors).toEqual([{ symbol: '500325.BO', message: 'Delayed BSE quotes are disabled. Use a verified NSE pricing mapping.' }])
   })
 
   it('rejects malformed symbols before making an upstream request', async () => {

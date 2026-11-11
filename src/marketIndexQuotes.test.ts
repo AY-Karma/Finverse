@@ -10,17 +10,30 @@ const quote = (price = 25_000, at = now): PublicMarketQuote => ({ price, change:
 beforeEach(() => { vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(now); provider.quotes.mockReset() })
 afterEach(() => { vi.useRealTimers() })
 
-describe('public Indian index quotes', () => {
-  it('batches all five fixed indices and shares concurrent loads and fresh cache', async () => {
+describe('fixed public index quotes', () => {
+  it('batches only Bank Nifty and NIFTY 50 and shares concurrent loads and fresh cache', async () => {
     const { MARKET_INDICES, loadMarketIndexQuotes } = await import('./marketIndexQuotes')
     provider.quotes.mockResolvedValue(new Map(MARKET_INDICES.map((index) => [index.symbol, quote()])))
     const [first, second] = await Promise.all([loadMarketIndexQuotes(), loadMarketIndexQuotes()])
     expect(first).toBe(second)
     expect(provider.quotes).toHaveBeenCalledTimes(1)
-    expect(provider.quotes.mock.calls[0][0]).toEqual(['^NSEI', '^BSESN', '^NSEBANK', '^NSMIDCP', '^NSEMDCP50'])
-    expect(Object.keys(first.quotes)).toHaveLength(5)
+    expect(provider.quotes.mock.calls[0][0]).toEqual(['^NSEBANK', '^NSEI'])
+    expect(MARKET_INDICES.map((index) => index.id)).toEqual(['nifty-bank', 'nifty-50'])
+    expect(Object.keys(first.quotes)).toHaveLength(2)
     expect(await loadMarketIndexQuotes()).toBe(first)
     expect(provider.quotes).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes a healthy pair at one second rather than returning an older cache', async () => {
+    const { loadMarketIndexQuotes } = await import('./marketIndexQuotes')
+    provider.quotes.mockResolvedValue(new Map([['^NSEI', quote()], ['^NSEBANK', quote()]]))
+    await loadMarketIndexQuotes()
+    vi.advanceTimersByTime(999)
+    await loadMarketIndexQuotes()
+    expect(provider.quotes).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(1)
+    await loadMarketIndexQuotes()
+    expect(provider.quotes).toHaveBeenCalledTimes(2)
   })
 
   it('retains valid previous observations on partial and failed refreshes', async () => {
@@ -31,31 +44,63 @@ describe('public Indian index quotes', () => {
     provider.quotes.mockResolvedValueOnce(new Map([['^NSEI', quote(25_100, Date.now())]]))
     const partial = await loadMarketIndexQuotes()
     expect(partial.quotes['^NSEI'].price).toBe(25_100)
-    expect(partial.quotes['^BSESN']).toEqual(quote())
-    expect(partial.unavailable).toContain('^BSESN')
+    expect(partial.quotes['^NSEBANK']).toEqual(quote())
+    expect(partial.unavailable).toContain('^NSEBANK')
     expect(partial.unavailable).not.toContain('^NSEI')
     vi.advanceTimersByTime(INDEX_REFRESH_MS)
     provider.quotes.mockRejectedValueOnce(new Error('Temporary outage'))
     const failed = await loadMarketIndexQuotes()
     expect(failed.quotes).toEqual(partial.quotes)
-    expect(failed.unavailable).toHaveLength(5)
+    expect(failed.unavailable).toHaveLength(2)
   })
 
-  it('rejects invalid, future and older observations and excludes unrelated symbols', async () => {
+  it('keeps a thirty-second retry window after the whole batch fails', async () => {
+    const { loadMarketIndexQuotes, INDEX_REFRESH_MS } = await import('./marketIndexQuotes')
+    provider.quotes.mockRejectedValueOnce(new Error('Provider unavailable'))
+      .mockResolvedValue(new Map([['^NSEI', quote()], ['^NSEBANK', quote()]]))
+    await loadMarketIndexQuotes()
+    vi.advanceTimersByTime(INDEX_REFRESH_MS)
+    await loadMarketIndexQuotes()
+    expect(provider.quotes).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(30_000 - INDEX_REFRESH_MS)
+    await loadMarketIndexQuotes()
+    expect(provider.quotes).toHaveBeenCalledTimes(2)
+  })
+
+  it('bypasses the fresh cache for a final session-close check', async () => {
+    const { loadMarketIndexQuotes } = await import('./marketIndexQuotes')
+    provider.quotes.mockResolvedValueOnce(new Map([['^NSEI', quote()]]))
+    await loadMarketIndexQuotes()
+    provider.quotes.mockResolvedValueOnce(new Map([['^NSEI', quote(25_100, now + 1_000)]]))
+    vi.advanceTimersByTime(1_000)
+    expect((await loadMarketIndexQuotes(undefined, true)).quotes['^NSEI'].price).toBe(25_100)
+    expect(provider.quotes).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains a newer observation and excludes unrelated symbols', async () => {
     const { INDEX_REFRESH_MS, loadMarketIndexQuotes } = await import('./marketIndexQuotes')
     provider.quotes.mockResolvedValueOnce(new Map([
-      ['^NSEI', quote()], ['^BSESN', quote(-1)], ['^NSEBANK', quote(100, now + 600_000)],
-      ['^NSMIDCP', { ...quote(), price: NaN }], ['^NSEMDCP50', { ...quote(), change: NaN, pct: Infinity }],
-      ['PRIVATE.NS', quote()],
+      ['^NSEI', quote()], ['^NSEBANK', { ...quote(), change: NaN, pct: Infinity }],
+      ['^GSPC', quote()], ['PRIVATE.NS', quote()],
     ]))
     const first = await loadMarketIndexQuotes()
-    expect(Object.keys(first.quotes)).toEqual(['^NSEI', '^NSEMDCP50'])
-    expect(first.quotes['^NSEMDCP50']).toMatchObject({ change: null, pct: null })
+    expect(Object.keys(first.quotes)).toEqual(['^NSEBANK', '^NSEI'])
+    expect(first.quotes['^NSEBANK']).toMatchObject({ change: null, pct: null })
     vi.advanceTimersByTime(INDEX_REFRESH_MS)
     provider.quotes.mockResolvedValueOnce(new Map([['^NSEI', quote(20_000, now - 1_000)]]))
     const next = await loadMarketIndexQuotes()
     expect(next.quotes['^NSEI']).toEqual(quote())
     expect(next.unavailable).toContain('^NSEI')
+  })
+
+  it.each([
+    quote(-1), quote(NaN), quote(100, now + 600_000), quote(100, 0), quote(100, NaN),
+  ])('rejects invalid or future observations without losing the other index', async (invalid) => {
+    const { loadMarketIndexQuotes } = await import('./marketIndexQuotes')
+    provider.quotes.mockResolvedValueOnce(new Map([['^NSEI', quote()], ['^NSEBANK', invalid]]))
+    const result = await loadMarketIndexQuotes()
+    expect(Object.keys(result.quotes)).toEqual(['^NSEI'])
+    expect(result.unavailable).toEqual(['^NSEBANK'])
   })
 
   it('cancels a load without admitting data after the caller leaves', async () => {

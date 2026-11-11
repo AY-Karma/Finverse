@@ -2,7 +2,7 @@
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadMarketFeed, type LoadedMarketFeed, type NewsItem } from '../marketNews'
+import { loadMarketFeed, NEWS_REFRESH_MS, type LoadedMarketFeed, type NewsItem } from '../marketNews'
 import { holdingIdentity } from '../monitor'
 import { emptyMonitorReadingState, newsReadingKey, updateArticleReading } from '../monitorReading'
 import * as readingOperations from '../monitorReading'
@@ -76,6 +76,7 @@ async function selectHolding(holding: string | Position) {
 }
 
 beforeEach(() => {
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false })
   savedReading = emptyMonitorReadingState()
   saveSucceeds = true
   loadFeed.mockReset()
@@ -90,6 +91,7 @@ afterEach(async () => {
   if (root) await act(async () => { root!.unmount() })
   root = undefined
   container?.remove()
+  vi.useRealTimers()
 })
 
 describe('portfolio news', () => {
@@ -111,14 +113,14 @@ describe('portfolio news', () => {
     expect(loadFeed).toHaveBeenCalledTimes(2)
   })
 
-  it('does not regroup or reassess unchanged headlines while typing with a queued refresh', async () => {
+  it('does not regroup or reassess unchanged headlines while typing after an automatic list update', async () => {
     const items = Array.from({ length: 150 }, (_,index) => story(String(index), []))
     loadFeed.mockResolvedValueOnce(feed(items))
     await renderPanel()
     await clickButton('Save: Headline 0')
     loadFeed.mockResolvedValueOnce(feed([{ ...story('new', []), publishedAt: 2000 }, ...items]))
     await clickButton('Refresh market news')
-    expect(container.textContent).toContain('Show 1 new headline')
+    expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline new')
     const group = vi.spyOn(readingOperations, 'groupNewsItems')
     const classify = vi.spyOn(headlineTone, 'classifyHeadline')
     try {
@@ -130,8 +132,8 @@ describe('portfolio news', () => {
       })
       expect(group).not.toHaveBeenCalled()
       expect(classify).not.toHaveBeenCalled()
-      expect(container.querySelectorAll('.mn-stories article')).toHaveLength(150)
-      expect(container.textContent).toContain('Show 1 new headline')
+      expect(container.querySelectorAll('.mn-stories article')).toHaveLength(151)
+      expect(container.querySelector('.mn-new-button')).toBeNull()
     } finally { group.mockRestore(); classify.mockRestore() }
   })
 
@@ -187,16 +189,64 @@ describe('portfolio news', () => {
     expect(container.querySelector('.mn-saved .mn-story--opened')).not.toBeNull()
   })
 
-  it('queues new headlines until the user chooses to update the list', async () => {
+  it('automatically prepends new headlines without a separate load action or duplicates', async () => {
     await renderPanel()
     const previous = [...container.querySelectorAll('.mn-story-title')].map((link) => link.textContent)
     loadFeed.mockResolvedValueOnce(feed([{ ...story('new', []), publishedAt: 2000 }, story('holding', ['HDFCBANK']), story('market', [])]))
     await clickButton('Refresh market news')
-    expect([...container.querySelectorAll('.mn-story-title')].map((link) => link.textContent)).toEqual(previous)
-    expect(savedReading.articles.some((article) => article.item.title === 'Headline new')).toBe(false)
-    await clickButton('Show 1 new headline')
+    expect([...container.querySelectorAll('.mn-story-title')].slice(1).map((link) => link.textContent)).toEqual(previous)
+    expect(container.querySelector('.mn-new-button')).toBeNull()
     expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline new')
     expect(savedReading.articles.some((article) => article.item.title === 'Headline new')).toBe(true)
+    await clickButton('Refresh market news')
+    expect(container.querySelectorAll('.mn-stories article')).toHaveLength(3)
+  })
+
+  it('retains the visible article position when refreshed headlines are prepended', async () => {
+    const items = [story('first', []), story('reading', []), story('last', [])]
+    loadFeed.mockResolvedValueOnce(feed(items))
+    await renderPanel()
+    const scroll = container.querySelector<HTMLElement>('.mn-feed-scroll')!
+    scroll.scrollTop = 100
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 300 } as DOMRect)
+    for (const article of container.querySelectorAll<HTMLElement>('.mn-stories article')) {
+      vi.spyOn(article, 'getBoundingClientRect').mockImplementation(() => {
+        const index = [...container.querySelectorAll('.mn-stories article')].indexOf(article)
+        return { top: index * 80 - scroll.scrollTop, bottom: (index + 1) * 80 - scroll.scrollTop } as DOMRect
+      })
+    }
+    loadFeed.mockResolvedValueOnce(feed([{ ...story('new', []), publishedAt: 2000 }, ...items]))
+    await clickButton('Refresh market news')
+    expect(scroll.scrollTop).toBe(180)
+    expect(container.querySelector('.mn-story-title')?.textContent).toContain('Headline new')
+  })
+
+  it('refreshes at five minutes, pauses while hidden and catches up once without clearing stories', async () => {
+    vi.useFakeTimers()
+    await renderPanel()
+    await act(async () => { await vi.advanceTimersByTimeAsync(NEWS_REFRESH_MS - 1) })
+    expect(loadFeed).toHaveBeenCalledOnce()
+    loadFeed.mockResolvedValueOnce(feed([{ ...story('new', []), publishedAt: 2000 }]))
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(loadFeed).toHaveBeenCalledTimes(2)
+    expect(container.querySelectorAll('.mn-stories article')).toHaveLength(3)
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(NEWS_REFRESH_MS * 3)
+    })
+    expect(loadFeed).toHaveBeenCalledTimes(2)
+    let resolve!: (feed: LoadedMarketFeed) => void
+    loadFeed.mockImplementationOnce(() => new Promise((finish) => { resolve = finish }))
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(loadFeed).toHaveBeenCalledTimes(3)
+    expect(container.querySelectorAll('.mn-stories article')).toHaveLength(3)
+    await act(async () => { await vi.advanceTimersByTimeAsync(NEWS_REFRESH_MS * 2) })
+    expect(loadFeed).toHaveBeenCalledTimes(3)
+    await act(async () => { resolve({ items: [], issues: [{ source: 'Publisher', message: 'Unavailable' }], fetchedAt: 0 }) })
+    expect(container.querySelectorAll('.mn-stories article')).toHaveLength(3)
+    expect(container.querySelector('.mn-issues')?.textContent).toContain('Showing available headlines')
   })
 
   it('groups identical publisher coverage with access to each original source', async () => {

@@ -65,7 +65,17 @@ export function useStoryHistory(positions: Position[], enabled: boolean, today: 
         loadedRequests.current.delete(key)
         loadedRequests.current.set(key, { attempt, at: Date.now() })
         if (loadedRequests.current.size > 8) loadedRequests.current.delete(loadedRequests.current.keys().next().value!)
-        setStates((current) => ({ ...Object.fromEntries(Object.entries(current).filter(([stored]) => loadedRequests.current.has(stored))), [key]: { histories, benchmarks, loading: false, ready: true, failed } }))
+        setStates((current) => {
+          const previous = current[key]
+          for (const position of holdings) {
+            const holdingKey = quoteKey(position)
+            if (!histories[holdingKey]?.length && previous?.histories[holdingKey]?.length) histories[holdingKey] = previous.histories[holdingKey]
+          }
+          for (const benchmark of benchmarks) {
+            if (!benchmark.points.length) benchmark.points = previous?.benchmarks.find((item) => item.label === benchmark.label)?.points ?? []
+          }
+          return { ...Object.fromEntries(Object.entries(current).filter(([stored]) => loadedRequests.current.has(stored))), [key]: { histories, benchmarks, loading: false, ready: true, failed } }
+        })
       }
     }
     void run()

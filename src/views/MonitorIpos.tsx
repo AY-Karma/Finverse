@@ -171,23 +171,25 @@ function IssueRow({ issue, expanded, trendExpanded, onToggle, onToggleTrend, his
 
 function FeedContext({ feed }: { feed: IpoFeed }) {
   const gmpSource = feed.sources.find((source) => source.name === 'GMP Today' && source.updatedAt)
-  const [notesOpen, setNotesOpen] = useState(false)
   const notesId = useId()
   return <footer className="mi-footer">
-    <div className="mi-source-line" aria-label="IPO data sources">
-      <span className="mi-source-label">Data from</span>
-      <a href="https://www.xflot.com/" target="_blank" rel="noopener noreferrer" aria-label="Xflot: IPO directory">Xflot <ActionIcon name="external" /></a>
-      <a href="https://gmptoday.in/" target="_blank" rel="noopener noreferrer" aria-label="GMP Today: GMP tracker">GMP Today <ActionIcon name="external" /></a>
-    </div>
-    <button className="mi-data-notes-toggle" type="button" aria-expanded={notesOpen} aria-controls={notesId} onClick={() => setNotesOpen(!notesOpen)}>Data notes <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></button>
-    {gmpSource?.updatedAt && <p className="mi-source-time"><span>GMP page updated</span><time dateTime={new Date(gmpSource.updatedAt).toISOString()}>{updated.format(gmpSource.updatedAt)} IST</time></p>}
-    <div className="mi-data-notes" id={notesId} hidden={!notesOpen}>
-      <p>Xflot supplies issue details. GMP Today supplies reported premiums.</p>
+    <details className="mi-disclaimer" aria-labelledby={notesId}>
+      <summary><ActionIcon name="warning" /><h3 id={notesId}>Disclaimer</h3><svg className="mi-disclaimer-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary>
+      <div className="mi-disclaimer-body">
       <p>{feed.disclaimer ?? 'GMP is reported by public trackers and does not guarantee listing gains.'}</p>
-      <p>{feed.fetchedAt ? `IPO list checked ${updated.format(feed.fetchedAt)} IST.` : 'IPO list update time unavailable.'} Source-page updates are not dealer quote times.</p>
-      {feed.warnings.map((warning) => <p key={warning}>{warning}</p>)}
-      {feed.stale && <p>Some sources are dated or could not be refreshed. Showing the last available data.</p>}
-    </div>
+      <div className="mi-disclaimer-groups">
+        <div><h4>Data sources</h4><p className="mi-source-line"><a href="https://www.xflot.com/" target="_blank" rel="noopener noreferrer">Xflot</a> supplies issue details. <a href="https://gmptoday.in/" target="_blank" rel="noopener noreferrer">GMP Today</a> supplies reported premiums.</p></div>
+        <div><h4>Updates</h4><dl className="mi-update-times">
+          {gmpSource?.updatedAt && <div className="mi-source-time"><dt>GMP page updated</dt><dd><time dateTime={new Date(gmpSource.updatedAt).toISOString()}>{updated.format(gmpSource.updatedAt)} IST</time></dd></div>}
+          <div><dt>IPO list checked</dt><dd>{feed.fetchedAt ? <time dateTime={new Date(feed.fetchedAt).toISOString()}>{updated.format(feed.fetchedAt)} IST</time> : 'Update time unavailable'}</dd></div>
+        </dl><p>Source-page updates are not dealer quote times.</p></div>
+        {(feed.warnings.length > 0 || feed.stale) && <div className="mi-coverage"><h4>Coverage</h4>
+          {feed.warnings.length > 0 && <ul>{feed.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+          {feed.stale && <p>Some sources are dated or could not be refreshed. Showing the last available data.</p>}
+        </div>}
+      </div>
+      </div>
+    </details>
   </footer>
 }
 
@@ -199,19 +201,20 @@ export function MonitorIpos({ allowed, ...watchActions }: { allowed: boolean } &
   const [expanded, setExpanded] = useState<{ id: string; view: 'details' | 'trend' } | null>(null)
   const [showAll, setShowAll] = useState(false)
   const boardIssues = (feed?.issues ?? []).filter((issue) => board === 'ALL' || issue.board === board)
-  const today = new Date((feed?.fetchedAt ?? Date.now()) + 19_800_000).toISOString().slice(0, 10)
+  const today = new Date(Date.now() + 19_800_000).toISOString().slice(0, 10)
   const recentFrom = new Date(Date.parse(`${today}T00:00:00Z`) - 6 * 86_400_000).toISOString().slice(0, 10)
-  const periodIssues = boardIssues.filter((issue) => inPeriod(issue, period, recentFrom, today)).sort((a, b) => sortIssues(a, b, sort))
+  const compareIssues = (a: IpoIssue, b: IpoIssue) => period === 'UPCOMING' ? a.name.localeCompare(b.name) : sortIssues(a, b, sort)
+  const periodIssues = boardIssues.filter((issue) => inPeriod(issue, period, recentFrom, today)).sort(compareIssues)
   const recentCount = boardIssues.filter((issue) => inPeriod(issue, 'RECENT', recentFrom, today)).length
-  const sortingGmp = sort === 'GMP_HIGH' || sort === 'GMP_LOW'
-  const historyTargets = sortingGmp || showAll ? [...periodIssues] : periodIssues.slice(0, 4)
+  const sortingGmp = period !== 'UPCOMING' && (sort === 'GMP_HIGH' || sort === 'GMP_LOW')
+  const historyTargets = period === 'UPCOMING' ? [] : sortingGmp || showAll ? [...periodIssues] : periodIssues.slice(0, 4)
   const expandedIssue = periodIssues.find((issue) => issue.id === expanded?.id)
   if (expandedIssue && !historyTargets.includes(expandedIssue)) historyTargets.push(expandedIssue)
   const { histories, retry: retryHistory } = useIpoGmpHistory(historyTargets, allowed, expanded?.view === 'trend' ? expanded.id : undefined)
   const filtered = periodIssues.map((issue) => {
     const slug = ipoTrendSlug(issue), history = slug ? histories[slug] : undefined
     return history?.gmp ? { ...issue, gmp: history.gmp } : issue
-  }).sort((a, b) => sortIssues(a, b, sort))
+  }).sort(compareIssues)
   const displayed = showAll ? filtered : filtered.slice(0, 4)
   const sortingHistory = sortingGmp && periodIssues.some((issue) => { const slug = ipoHistorySlug(issue); return slug && histories[slug]?.status === 'loading' })
   const changePeriod = (next: Period) => { setPeriod(next); setExpanded(null); setShowAll(false) }
@@ -222,18 +225,19 @@ export function MonitorIpos({ allowed, ...watchActions }: { allowed: boolean } &
       {allowed && <button className="mi-refresh" type="button" onClick={refresh} disabled={loading} aria-label="Refresh IPOs" title={loading ? 'Updating IPOs' : 'Refresh IPOs'}><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16.5 7a7 7 0 0 0-12-2L2.5 7m0-4v4h4m-3 6a7 7 0 0 0 12 2l2-2m0 4v-4h-4" /></svg></button>}
     </header>
     {!allowed ? <div className="mi-message"><p>Market data is paused for this workspace.</p><button type="button" className="mp-text-button" onClick={() => window.location.reload()}>Reload workspace</button></div> : <>
-      <div className="mi-filters"><IpoSelector label="IPO board" options={BOARDS} value={board} onChange={(value) => { setBoard(value); setExpanded(null); setShowAll(false) }} /><IpoSelector label="Sort IPOs" options={SORTS} value={sort} onChange={(value) => { setSort(value); setExpanded(null); setShowAll(false) }} /></div>
+      <div className="mi-filters" data-simple={period === 'UPCOMING'}><IpoSelector label="IPO board" options={BOARDS} value={board} onChange={(value) => { setBoard(value); setExpanded(null); setShowAll(false) }} />{period !== 'UPCOMING' && <IpoSelector label="Sort IPOs" options={SORTS} value={sort} onChange={(value) => { setSort(value); setExpanded(null); setShowAll(false) }} />}</div>
       <div className="mi-controls"><div className="mi-periods" role="group" aria-label="IPO status">
         {(['OPEN', 'UPCOMING', 'RECENT'] as const).map((value) => <button type="button" key={value} aria-pressed={period === value} onClick={() => changePeriod(value)}>{STATUS[value]}</button>)}
       </div>{period === 'RECENT' && <span className="mi-period-scope">Past 7 days</span>}</div>
       {loading && !feed && <div className="mi-loading" role="status"><p>Loading IPOs…</p><span /><span /><span /></div>}
-      {error && !feed && <div className="mi-message" role="status"><p>{error}</p><button type="button" className="mp-text-button" onClick={refresh}>Try again</button></div>}
+      {error && !feed && <div className="mi-failure" role="status"><span className="mi-failure-icon" aria-hidden="true"><ActionIcon name="warning" /></span><div><strong>IPOs are unavailable</strong><p>{error}</p></div><button type="button" className="mi-retry" onClick={refresh} disabled={loading}>Try again<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 0 0-11-2L3 7m0-4v4h4m-3 6a6.5 6.5 0 0 0 11 2l2-2m0 4v-4h-4" /></svg></button></div>}
       {feed && <>
         <p className="mi-availability" data-limited={feed.stale || feed.warnings.length > 0} role={feed.stale || feed.warnings.length ? 'status' : undefined}>{feed.stale ? 'Saved data may be out of date · Unofficial GMP' : feed.warnings.length ? 'Limited coverage · Unofficial GMP' : 'Unofficial GMP'}</p>
         {sortingHistory && <p className="mi-sort-status" role="status">Loading historical GMP for sorting…</p>}
         {displayed.length > 0 ? <div className="mi-list">
-          <div className="mi-columns" aria-hidden="true"><span>Company</span><span>Price band</span><span>Reported GMP</span></div>
+          {period !== 'UPCOMING' && <div className="mi-columns" aria-hidden="true"><span>Company</span><span>Price band</span><span>Reported GMP</span></div>}
           {displayed.map((issue) => {
+            if (period === 'UPCOMING') return <article className="mi-issue mi-upcoming-row" key={issue.id}><span className="mi-name">{issue.name}</span><span className="mi-meta">{issue.board === 'SME' ? 'SME' : 'Mainboard'}</span></article>
             const slug = ipoTrendSlug(issue)
             const history = slug ? histories[slug] : undefined
             return <IssueRow key={issue.id} issue={issue} history={history} {...watchActions} expanded={expanded?.id === issue.id && expanded.view === 'details'} trendExpanded={expanded?.id === issue.id && expanded.view === 'trend'} onRetryHistory={() => { if (slug) retryHistory(slug) }} onToggle={() => setExpanded(expanded?.id === issue.id && expanded.view === 'details' ? null : { id: issue.id, view: 'details' })} onToggleTrend={() => setExpanded(expanded?.id === issue.id && expanded.view === 'trend' ? null : { id: issue.id, view: 'trend' })} />

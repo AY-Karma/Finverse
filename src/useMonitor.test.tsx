@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { Activity, act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { emptyMonitorState, holdingIdentity, MONITOR_STORAGE_KEY } from './monitor'
@@ -14,6 +14,83 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { localStorage.clear(); state.positions = []; state.liveQuotes = {}; state.allowExternalData = false; state.workspaceReadOnly = false; state.refreshNow.mockReset(); vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('monitor workspace reload', () => {
+  it('explains unavailable NSE pricing without telling an enabled user to enable external data', async () => {
+    state.allowExternalData = true
+    state.refreshNow.mockResolvedValue({ ok: false, reason: 'no-live-listings', retryInMs: 0 })
+    let controller!: MonitorController
+    const Capture = () => { controller = useMonitor(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<Capture />))
+      await act(async () => controller.refresh())
+      expect(controller.statusMessage).toContain('No verified NSE match')
+      expect(controller.statusMessage).toContain('Imported values are retained')
+      expect(controller.statusMessage).not.toContain('Enable external')
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('shares saved changes between controllers in one document without a tab-conflict warning', async () => {
+    const controllers: MonitorController[] = []
+    const Capture = ({ index }: { index: number }) => { controllers[index] = useMonitor(); return null }
+    const root = createRoot(document.createElement('div'))
+    const issue = { id: 'xflot:shared', name: 'Shared IPO', status: 'OPEN' as const, openDate: '2030-01-01', closeDate: '2030-01-03', sourceUrl: 'https://www.xflot.com/ipo/shared' }
+    try {
+      await act(async () => root.render(<><Capture index={0} /><Capture index={1} /></>))
+      await act(async () => { expect(controllers[0].addIpoWatch(issue)).toBe(true) })
+      expect(controllers[1].ipoWatches.map((watch) => watch.id)).toEqual([issue.id])
+      expect(controllers.every((controller) => !controller.statusMessage.includes('another tab'))).toBe(true)
+      await act(async () => controllers[1].deleteIpoWatch(issue.id))
+      expect(controllers[0].ipoWatches).toEqual([])
+      expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).ipoWatches).toEqual([])
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('restores same-document changes when an Activity controller becomes visible again', async () => {
+    const controllers: MonitorController[] = []
+    const Capture = ({ index }: { index: number }) => { controllers[index] = useMonitor(); return null }
+    const App = ({ monitor }: { monitor: boolean }) => <>
+      <Activity mode={monitor ? 'hidden' : 'visible'}><Capture index={0} /></Activity>
+      {monitor && <Capture index={1} />}
+    </>
+    const root = createRoot(document.createElement('div'))
+    const issue = { id: 'xflot:revisit', name: 'Revisited IPO', status: 'OPEN' as const, openDate: '2030-01-01', closeDate: '2030-01-03', sourceUrl: 'https://www.xflot.com/ipo/revisit' }
+    try {
+      await act(async () => root.render(<App monitor={false} />))
+      await act(async () => root.render(<App monitor />))
+      await act(async () => { expect(controllers[1].addIpoWatch(issue)).toBe(true) })
+      await act(async () => root.render(<App monitor={false} />))
+      expect(controllers[0].ipoWatches.map((watch) => watch.id)).toEqual([issue.id])
+      expect(controllers[0].statusMessage).not.toContain('another tab')
+      await act(async () => controllers[0].deleteIpoWatch(issue.id))
+      expect(JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!).ipoWatches).toEqual([])
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('shares evaluated rules and reading changes without replacing other saved fields', async () => {
+    const position: Position = { id: 'holding', ticker: 'EXAMPLE', name: 'Example', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110 }
+    state.positions = [position]
+    state.allowExternalData = true
+    state.liveQuotes = { [quoteKey(position)]: { price: 200, at: Date.now(), source: 'yahoo' } }
+    const controllers: MonitorController[] = []
+    const Capture = ({ index }: { index: number }) => { controllers[index] = useMonitor(); return null }
+    const root = createRoot(document.createElement('div'))
+    const reading = { articles: [], follows: [{ id: 'banks', query: 'Banks', region: 'IN' as const }] }
+    try {
+      await act(async () => root.render(<><Capture index={0} /><Capture index={1} /></>))
+      await act(async () => { expect(controllers[0].saveRule({ holdingId: position.id, condition: 'price_above', threshold: 120 })).toBe(true) })
+      expect(controllers[1].rules).toHaveLength(1)
+      expect(controllers[0].alerts).toHaveLength(1)
+      expect(controllers[1].alerts).toHaveLength(1)
+      await act(async () => { expect(controllers[1].updateReading(reading)).toBe(true) })
+      expect(controllers[0].reading).toEqual(reading)
+      const persisted = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!)
+      expect(persisted.rules).toHaveLength(1)
+      expect(persisted.alerts).toHaveLength(1)
+      expect(persisted.reading).toEqual(reading)
+      expect(controllers.every((controller) => !controller.statusMessage.includes('another tab'))).toBe(true)
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('saves IPO watches without holdings, prevents duplicates and past issues, and persists removal', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-08T08:00:00Z'))

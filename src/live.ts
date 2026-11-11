@@ -20,7 +20,7 @@ import {
 
 /** Dev/test override: ?live=1 forces the market to be treated as open. */
 const FORCE_LIVE =
-  typeof location !== 'undefined' && /[?&]live=1(\b|&|$)/.test(location.search)
+  import.meta.env.DEV && typeof location !== 'undefined' && /[?&]live=1(\b|&|$)/.test(location.search)
 
 /** True during regular NSE cash-market hours or an announced special session. */
 export function isMarketOpen(date: Date = new Date()): boolean {
@@ -126,7 +126,7 @@ async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Ma
   return quotes
 }
 
-export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal): Promise<Map<string, YahooResult>> {
+export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal, onBatch?: (quotes: Map<string, YahooResult>) => void): Promise<Map<string, YahooResult>> {
   const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
   const quotes = new Map<string, YahooResult>()
   let next = 0
@@ -138,6 +138,7 @@ export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal):
       const batch = unique.slice(start, start + MAX_MARKET_SYMBOLS)
       const results = await sharedQuoteBatch(batch.join(','), (requestSignal) => fetchQuoteBatch(batch, requestSignal), signal)
       for (const [symbol, quote] of results) quotes.set(symbol, quote)
+      if (results.size) onBatch?.(results)
     }
   }
   await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, Math.ceil(unique.length / MAX_MARKET_SYMBOLS)) }, worker))
@@ -221,21 +222,27 @@ export function quoteRefreshIssueText(result: LiveQuotesResult | null): string |
   return 'Latest quotes could not be reached. Showing previous or imported prices.'
 }
 
-export const NAV_REFRESH_MS = 15 * 60_000
+// A one-off catch-up on returning to an old offhours tab, never a polling timer.
+export const CLOSED_QUOTE_RECHECK_MS = 24 * 60 * 60_000
 const NAV_REQUEST_CONCURRENCY = 2
 const NAV_REQUEST_GAP_MS = 750
+
+function retainNewerQuote(existing: LiveQuote | undefined, incoming: { at: number }, now: number): boolean {
+  return Boolean(existing && Number.isFinite(existing.price) && existing.price > 0
+    && Number.isFinite(existing.at) && existing.at > incoming.at && existing.at <= now + 300_000)
+}
 
 export async function fetchLiveQuotes(
   positions: Position[],
   prev: Record<string, LiveQuote>,
   signal?: AbortSignal,
+  onProgress?: (result: LiveQuotesResult) => void,
 ): Promise<LiveQuotesResult> {
   const activeKeys = new Set(positions.filter((position) => position.type === 'mutual-fund'
     ? hasCompatibleFundScheme(position) : Boolean(resolveYahooSymbol(position))).map(quoteKey))
   const quotes: Record<string, LiveQuote> = Object.fromEntries(Object.entries(prev).filter(([key]) => activeKeys.has(key)))
   const now = new Date()
   const today = istDate(now)
-  const marketOpen = isMarketOpen(now)
 
   // combinePositions normally makes this unique already, but keeping the
   // network module defensive avoids duplicate provider calls for raw callers.
@@ -249,7 +256,18 @@ export async function fetchLiveQuotes(
     return candidates.length > 0 ? [{ position, candidates }] : []
   })
   const refreshEquities = async () => {
-    const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]), signal)
+    const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]), signal, (batch) => {
+      if (!onProgress) return
+      const delivered: Record<string, LiveQuote> = {}
+      for (const { position, candidates } of equities) {
+        const quote = batch.get(candidates[0])
+        const key = quoteKey(position)
+        if (!quote || retainNewerQuote(quotes[key], quote, now.getTime())) continue
+        delivered[key] = { price: quote.price, at: quote.at, fetchedAt: quote.fetchedAt,
+          source: quote.source, change: quote.change, changePct: quote.pct }
+      }
+      if (Object.keys(delivered).length) onProgress({ quotes: delivered, updated: Object.keys(delivered).length, failed: 0, skipped: 0 })
+    })
     const retrySymbols = equities.flatMap(({ candidates }) =>
       !primaryQuotes.has(candidates[0]) && candidates[1] ? [candidates[1]] : [],
     )
@@ -300,9 +318,8 @@ export async function fetchLiveQuotes(
         Number.isFinite(existing.at) &&
         typeof checkedAt === 'number' && Number.isFinite(checkedAt) && checkedAt <= now.getTime() &&
         istDate(new Date(checkedAt)) === today &&
-        // Completed daily NAVs are reusable; pending publications get checked at the NAV cadence.
-        ((Number.isFinite(existing.change) && istDate(new Date(existing.at)) === today)
-          || (marketOpen && now.getTime() - checkedAt < NAV_REFRESH_MS))
+        // Only a complete current-day publication is reusable across scheduled ingestion checks.
+        Number.isFinite(existing.change) && istDate(new Date(existing.at)) === today
       ) {
         outcomes.push({ key, status: 'skipped' })
       } else {
@@ -319,7 +336,13 @@ export async function fetchLiveQuotes(
   await Promise.all([refreshEquities(), ...Array.from({ length: Math.min(NAV_REQUEST_CONCURRENCY, funds.length) }, () => worker())])
 
   for (const outcome of outcomes) {
-    if (outcome.quote) quotes[outcome.key] = outcome.quote
+    if (!outcome.quote) continue
+    const existing = quotes[outcome.key]
+    if (retainNewerQuote(existing, outcome.quote, now.getTime())) {
+      outcome.status = 'failed'
+      continue
+    }
+    quotes[outcome.key] = outcome.quote
   }
   return {
     quotes,

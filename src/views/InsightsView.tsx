@@ -21,6 +21,7 @@ import { rgb, seedOfColor, type DitherColor } from '../components/dither-kit/pal
 import './insights.css'
 import './holdingInsights.css'
 import { HoldingMarketMoves } from './HoldingMarketMoves'
+import { ComparisonBuilding } from './ComparisonBuilding'
 import { MarketCapExposure, type MarketCapSelection } from './MarketCapExposure'
 import { holdingMovePeriod, holdingMoveToday } from '../holdingMarketMoves'
 
@@ -69,7 +70,23 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [focusedSector, setFocusedSector] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
   const [openKpi, setOpenKpi] = useState<'session' | 'drawdown' | 'top-five' | 'data-health' | null>(null)
-  const { backcast, history: backcastHistory, loading: backcastLoading, days: backcastDays, key: backcastKey, requestMore: requestMoreBackcast } = usePortfolioBackcast({
+  const kpisRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!openKpi) return
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target instanceof Node)) return
+      const trigger = kpisRef.current?.querySelector(`#${openKpi}-kpi`)
+      const detail = kpisRef.current?.querySelector(`#${openKpi}-detail`)
+      if (!trigger?.contains(event.target) && !detail?.contains(event.target)) {
+        setOpenKpi((current) => current === openKpi ? null : current)
+      }
+    }
+    document.addEventListener('click', dismiss)
+    return () => document.removeEventListener('click', dismiss)
+  }, [openKpi])
+
+  const { backcast, history: backcastHistory, loading: backcastLoading, error: backcastError, retry: retryBackcast, days: backcastDays, key: backcastKey, requestMore: requestMoreBackcast } = usePortfolioBackcast({
     positions: snapshot.positions, quotes: snapshot.quotes, allowExternalData: settings.allowExternalData,
   })
 
@@ -182,6 +199,19 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const value = (amount: number) => mask(formatCurrency(amount))
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const hasHistory = analyticsHistory.length >= 2
+  const comparisonLoading = settings.allowExternalData && (benchmarkLoading || backcastLoading)
+  const comparisonTitle = selectedBenchmark.unavailableReason ?? (!settings.allowExternalData
+    ? 'External market data is off'
+    : comparisonLoading ? 'Building your comparison' : 'Historical comparison unavailable')
+  const comparisonDescription = selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.'
+    : !settings.allowExternalData ? 'Enable it in Settings to compare your portfolio with market benchmarks.'
+      : comparisonLoading ? 'Loading historical closes for your holdings and the selected benchmark.'
+        : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.'
+          : 'Historical closes could not be loaded for this comparison.'
+  const retryComparison = () => {
+    if (backcastError) retryBackcast()
+    if (benchmarkError) setBenchmarkReload((count) => count + 1)
+  }
   const exposureSectors = snapshot.sectors.slice(0, 10)
   const activeSector = exposureSectors.find((sector) => sector.label === hoveredSector) ?? exposureSectors.find((sector) => sector.label === focusedSector)
   const activeSectorIndex = activeSector ? exposureSectors.indexOf(activeSector) : -1
@@ -207,13 +237,13 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
       {!snapshot.valuationComplete && <p className="panel hint" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Allocation, concentration, and current P&L cover the {snapshot.pricedCount} priced holdings only. Incomplete portfolio values are not saved to tracked history.</p>}
 
-      <div className="insight-kpis enter d1" data-health-color={dataHealthColor(dataLabels.healthLabel)}>
+      <div ref={kpisRef} className="insight-kpis enter d1" data-health-color={dataHealthColor(dataLabels.healthLabel)}>
         <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
           <span className="score-label insight-kpi-label"><span>{dataLabels.sessionLabel}</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: !hide && dataLabels.sessionValue != null && dataLabels.sessionValue < 0 ? 'red' : 'blue' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
           <strong className={hide || dataLabels.sessionValue == null || dataLabels.sessionValue === 0 ? '' : dataLabels.sessionValue > 0 ? 'up' : 'down'}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
           <span className="hint">{hide ? 'Session values hidden' : <>{snapshot.dailyChangePct != null && <>{formatPercent(snapshot.dailyChangePct)} · </>}{dataLabels.coverageLabel}</>}</span>
         </button>
-        {openKpi === 'session' && <div className="insight-kpi-detail insight-kpi-detail--movement enter" id="session-detail" role="region" aria-labelledby="session-kpi">
+        {openKpi === 'session' && <div className="insight-kpi-detail insight-kpi-detail--movement" id="session-detail" role="region" aria-labelledby="session-kpi">
           {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} compact />}
         </div>}
         <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">
@@ -221,7 +251,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <strong className={!hide && risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong>
           <span className="hint">See the peak-to-trough chart</span>
         </button>
-        {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
+        {openKpi === 'drawdown' && <div className="insight-kpi-detail" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
           <div><span className="score-label">How this was calculated</span><strong className={!hide && risk.worst < 0 ? 'down' : undefined}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of priced INR value covered. Uses shared observation dates.</>}</p></div>
           {hide ? <HiddenValuesState /> : hasHistory ? <WorstDrawdownChart points={analyticsHistory} risk={risk} formatValue={value} /> : <p>{backcastLoading ? 'Historical prices are loading for this calculation.' : settings.allowExternalData ? 'Historical prices are unavailable. Try again later.' : 'Enable external market data in Settings to calculate historical drawdown.'}</p>}
         </div>}
@@ -230,7 +260,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong>
           <span className="hint">See the five-position split</span>
         </button>
-        {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
+        {openKpi === 'top-five' && <div className="insight-kpi-detail" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
           <div><span className="score-label">Largest five holdings</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}% of priced portfolio`) : 'Unpriced'}</strong></div>
           {hide ? <HiddenValuesState /> : topFive.length === 0 ? <p>No priced holdings are available for this split.</p> : <div className="kpi-split-list">{topFive.map((item, index) => <div key={`${item.type}:${item.symbol}`}><span>{item.symbol}</span><DitherBar className="kpi-split-bar" segments={[{ value: item.weight, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} scale={topFiveMaxWeight} /><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div>}
         </div>}
@@ -239,7 +269,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <strong>{dataLabels.healthLabel}</strong>
           <span className="hint">{dataLabels.healthDetail}</span>
         </button>
-        {openKpi === 'data-health' && <div className="insight-kpi-detail insight-kpi-detail--health enter" id="data-health-detail" role="region" aria-labelledby="data-health-kpi">
+        {openKpi === 'data-health' && <div className="insight-kpi-detail insight-kpi-detail--health" id="data-health-detail" role="region" aria-labelledby="data-health-kpi">
           <DataHealthGuide healthLabel={dataLabels.healthLabel} allowExternalData={settings.allowExternalData} />
         </div>}
       </div>
@@ -310,9 +340,9 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
                 appearance="insight"
                 onReachStart={backcast ? requestMoreBackcast : undefined}
               />
-            ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (backcastLoading ? 'Building your comparison' : settings.allowExternalData ? 'Historical comparison unavailable' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
+            ) : <div className="chart-empty chart-empty--tracking"><ComparisonBuilding loading={comparisonLoading} /><strong>{comparisonTitle}</strong><span>{comparisonDescription}</span></div>}
           </div>
-          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
+          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (!settings.allowExternalData ? 'External market data is off' : comparisonLoading ? 'Building the historical comparison…' : benchmarkError || backcastError ? <>{benchmarkError ? `Could not load ${selectedBenchmark.label} history.` : 'Historical portfolio prices are unavailable.'} <button type="button" className="benchmark-retry" onClick={retryComparison}>Retry</button></> : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
           </>}
           </div>
         </section>

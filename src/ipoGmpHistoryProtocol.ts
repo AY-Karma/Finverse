@@ -1,4 +1,4 @@
-import { isIpoDate, isIpoGmp, type IpoGmp } from './ipoProtocol'
+import { isIpoDate, isIpoGmp, type IpoGmp } from './ipoProtocol.js'
 
 export interface IpoGmpHistoryResponse {
   slug: string

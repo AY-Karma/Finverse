@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { eligibleHoldings, loadMarketFeed, type LoadedMarketFeed, type NewsItem, type NewsRegion } from '../marketNews'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { dedupeItems, eligibleHoldings, loadMarketFeed, NEWS_REFRESH_MS, type LoadedMarketFeed, type NewsItem, type NewsRegion } from '../marketNews'
 import { groupNewsItems, MAX_NEWS_FOLLOWS, rememberArticles, updateArticleReading, type ArticleReading, type MonitorReadingState, type NewsGroup } from '../monitorReading'
 import { classifyHeadline, type HeadlineTone } from '../headlineTone'
 import { useStore } from '../useStore'
@@ -35,7 +35,6 @@ function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevis
   const selectedHolding = holdings.find((holding) => holding.identity === selectedIdentity)
   const startingQuery = settings.hideValues ? '' : selectedHolding ? selectedHolding.name || selectedHolding.ticker : initialQuery
   const [result, setResult] = useState<FeedResult | null>(null)
-  const [pending, setPending] = useState<FeedResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshCount, setRefreshCount] = useState(0)
   const [searchDraft, setSearchDraft] = useState(startingQuery)
@@ -45,10 +44,10 @@ function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevis
   const [queryRegion, setQueryRegion] = useState<NewsRegion | undefined>(selectedHolding?.region)
   const [saveError, setSaveError] = useState('')
   const requestKey = JSON.stringify([holdingsKey, settings.hideValues, settings.allowExternalData, activeQuery, queryRegion])
-  const loadedKey = useRef('')
   const handledRefresh = useRef(0)
   const feedRef = useRef<FeedResult | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const scrollAnchor = useRef<{ key: string; top: number } | null>(null)
   const searchRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchToggleRef = useRef<HTMLButtonElement>(null)
@@ -56,7 +55,6 @@ function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevis
   const initialSeen = useRef(new Set(reading.articles.map((article) => article.key)))
   const returning = useRef(reading.articles.length > 0)
   const current = result?.key === requestKey ? result.value : EMPTY_FEED
-  const queued = pending?.key === requestKey ? pending.value : null
   const eligibleTickers = useMemo(() => new Set(holdings.map((holding) => holding.ticker)), [holdings])
   const uniqueHoldings = useMemo(() => {
     const byTicker = new Map<string, typeof holdings[number] | undefined>()
@@ -69,11 +67,6 @@ function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevis
   const undo = useMemo(() => settings.hideValues ? undefined : reading.articles.reduce<ArticleReading | undefined>((latest, article) => (article.dismissedAt ?? 0) > (latest?.dismissedAt ?? 0) ? article : latest, undefined), [reading.articles, settings.hideValues])
   const currentGroups = useMemo(() => groupNewsItems(scopedItems(current.items)), [current.items, scopedItems])
   const groups = useMemo(() => currentGroups.filter((group) => !articles.get(group.key)?.dismissedAt), [currentGroups, articles])
-  const queuedCount = useMemo(() => {
-    if (!queued) return 0
-    const currentKeys = new Set(currentGroups.map((group) => group.key))
-    return groupNewsItems(scopedItems(queued.items)).filter((group) => !currentKeys.has(group.key)).length
-  }, [queued, currentGroups, scopedItems])
   const saved = useMemo(() => settings.hideValues ? [] : reading.articles.filter((article) => article.savedAt).sort((a, b) => b.savedAt! - a.savedAt!), [settings.hideValues, reading.articles])
   const savedGroups = useMemo(() => saved.map((article) => ({ key: article.key, item: { ...article.item, matches: article.item.matches.filter((ticker) => eligibleTickers.has(ticker)) }, sources: [article.item] })), [saved, eligibleTickers])
   const followed = reading.follows.find((follow) => follow.query.toLowerCase() === activeQuery.toLowerCase() && follow.region === (queryRegion ?? 'IN'))
@@ -102,7 +95,17 @@ function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevis
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0
+    scrollAnchor.current = null
   }, [requestKey])
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current
+    const anchor = scrollAnchor.current
+    scrollAnchor.current = null
+    if (!scroll || !anchor) return
+    const article = [...scroll.querySelectorAll<HTMLElement>('.mn-stories [data-news-key]')].find((item) => item.dataset.newsKey === anchor.key)
+    if (article) scroll.scrollTop += article.getBoundingClientRect().top - scroll.getBoundingClientRect().top - anchor.top
+  }, [result])
 
   useEffect(() => {
     if (!showTools) return
@@ -115,41 +118,66 @@ function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevis
   }, [showTools])
 
   useEffect(() => {
-    setPending(null)
     if (!settings.allowExternalData) {
       feedRef.current = null
       setResult(null)
       setLoading(false)
       return
     }
-    const controller = new AbortController()
+    let active = true
+    let controller: AbortController | null = null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let nextCheckAt = 0
     const forceRefresh = handledRefresh.current !== refreshCount
     handledRefresh.current = refreshCount
-    setLoading(true)
-    const acceptFeed = (next: LoadedMarketFeed) => {
-      if (controller.signal.aborted) return
+    const acceptFeed = (next: LoadedMarketFeed, signal: AbortSignal) => {
+      if (!active || signal.aborted) return
       const previous = feedRef.current
       let accepted: FeedResult = { key: requestKey, value: next }
       if (previous?.key === requestKey && previous.value.items.length > 0) {
         if (!next.items.length && next.issues.length) accepted = { ...previous, value: { ...previous.value, issues: next.issues } }
-        else if (loadedKey.current === requestKey) {
-          const keys = new Set(groupNewsItems(previous.value.items).map((group) => group.key))
-          if (groupNewsItems(next.items).some((group) => !keys.has(group.key))) setPending({ key: requestKey, value: next })
-          accepted = { ...previous, value: { ...previous.value, issues: next.issues } }
+        else accepted = { key: requestKey, value: { ...next, items: dedupeItems([...next.items, ...previous.value.items]).sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0)).slice(0, 500) } }
+        const scroll = scrollRef.current
+        if (scroll && scroll.scrollTop > 0) {
+          const top = scroll.getBoundingClientRect().top
+          const article = [...scroll.querySelectorAll<HTMLElement>('.mn-stories [data-news-key]')].find((item) => item.getBoundingClientRect().bottom > top)
+          if (article) scrollAnchor.current = { key: article.dataset.newsKey!, top: article.getBoundingClientRect().top - top }
         }
       }
       feedRef.current = accepted
       setResult(accepted)
     }
-    void loadMarketFeed(settings.hideValues ? [] : monitorPositions, {
-      signal: controller.signal, query: activeQuery, forceRefresh, ...(queryRegion ? { region: queryRegion } : {}), onPartial: acceptFeed,
-    }).then((next) => {
-      acceptFeed(next)
-      if (!controller.signal.aborted) loadedKey.current = requestKey
-    }).catch(() => {
-      if (!controller.signal.aborted) acceptFeed({ items: [], fetchedAt: 0, issues: [{ source: 'Market wire', message: 'News could not be loaded. Try again later.' }] })
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
+    const refresh = (force = false) => {
+      if (!active || document.hidden || controller) return
+      clearTimeout(timer)
+      const request = new AbortController()
+      controller = request
+      setLoading(true)
+      void loadMarketFeed(settings.hideValues ? [] : monitorPositions, {
+        signal: request.signal, query: activeQuery, forceRefresh: force, ...(queryRegion ? { region: queryRegion } : {}), onPartial: (feed) => acceptFeed(feed, request.signal),
+      }).then((next) => acceptFeed(next, request.signal)).catch(() => {
+        acceptFeed({ items: [], fetchedAt: 0, issues: [{ source: 'Market wire', message: 'News could not be loaded. Try again later.' }] }, request.signal)
+      }).finally(() => {
+        if (!active || controller !== request) return
+        request.abort()
+        controller = null
+        setLoading(false)
+        nextCheckAt = Date.now() + NEWS_REFRESH_MS
+        if (!document.hidden) timer = setTimeout(() => refresh(), NEWS_REFRESH_MS)
+      })
+    }
+    const visibility = () => {
+      clearTimeout(timer)
+      if (document.hidden) {
+        controller?.abort()
+        controller = null
+        setLoading(false)
+      } else if (Date.now() >= nextCheckAt) refresh()
+      else timer = setTimeout(() => refresh(), nextCheckAt - Date.now())
+    }
+    refresh(forceRefresh)
+    document.addEventListener('visibilitychange', visibility)
+    return () => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visibility); controller?.abort() }
   }, [monitorPositions, settings.allowExternalData, settings.hideValues, activeQuery, queryRegion, refreshCount, requestKey])
 
   useEffect(() => {
@@ -223,7 +251,6 @@ function MonitorNewsContent({ initialQuery = '', selectedIdentity, selectedRevis
       {activeQuery && <div className="mn-query"><strong>{activeQuery}</strong>{!settings.hideValues && <button className="mn-text-button" type="button" disabled={readOnly} aria-pressed={Boolean(followed)} onClick={toggleFollow}>{followed ? 'Following' : 'Follow'}</button>}<button className="workspace-action" type="button" onClick={() => selectQuery('')}>Back to wire</button></div>}
       {!settings.hideValues && reading.follows.length > 0 && <details className="mn-following"><summary>Following <span>{reading.follows.length}</span></summary><ul>{reading.follows.map((follow) => <li key={follow.id}><button className="mn-text-button" type="button" onClick={() => selectQuery(follow.query, follow.region)}>{follow.query}<span>{follow.region}</span></button><button className="mn-icon-button" type="button" disabled={readOnly} aria-label={`Unfollow ${follow.query}`} onClick={() => save({ ...reading, follows: reading.follows.filter((item) => item.id !== follow.id) })}><CloseIcon /></button></li>)}</ul></details>}
       <div className="mn-feed-status" role="status"><span>{loading ? current.items.length ? 'Refreshing…' : 'Loading headlines…' : activeQuery ? 'Company or topic search' : 'Latest headlines'}</span>{current.fetchedAt > 0 && <time dateTime={new Date(current.fetchedAt).toISOString()}>Updated {updatedTime.format(current.fetchedAt)}</time>}</div>
-      {queuedCount > 0 && <button className="mn-new-button" type="button" onClick={() => { feedRef.current = pending; setResult(pending); setPending(null) }}>Show {queuedCount} new {queuedCount === 1 ? 'headline' : 'headlines'}</button>}
       {undo && <div className="mn-undo" role="status"><span>Headline dismissed</span><button className="mn-text-button" type="button" disabled={readOnly} onClick={() => update(undo.item, { dismissedAt: undefined })}>Undo</button></div>}
       {current.issues.length > 0 && <div className="mn-issues" role="status">{current.items.length > 0 && <p>Showing available headlines.</p>}{current.issues.map((issue) => <p key={`${issue.source}:${issue.message}`}>{issue.source}: {issue.message}</p>)}</div>}
       {loading && groups.length === 0 ? <div className="mn-loading" aria-label="Loading market news">{[0, 1, 2].map((row) => <div key={row} aria-hidden="true"><i /><i /></div>)}</div> : groups.length > 0 ? <div className="mn-stories">{groups.map((group) => <NewsStory key={group.key} {...storyProps(group)} />)}</div> : <div className="mn-empty"><p>{current.issues.length ? 'Headlines unavailable. Try refreshing.' : activeQuery ? 'No fresh stories found. Try another search or return to the wire.' : 'No fresh stories right now.'}</p></div>}
@@ -243,7 +270,7 @@ const NewsStory = memo(function NewsStory({ group, state, isNew, readOnly, onUpd
   const onOpen = () => { if (!readOnly) onUpdate(item, { openedAt: Date.now() }) }
   const tone = classifyHeadline(item.title)
   const explanation = `Estimated headline tone: ${tone.status === 'unknown' ? 'unclear' : tone.status}. ${tone.reason}`
-  return <article className={`mn-story${state?.openedAt ? ' mn-story--opened' : ''}`}>
+  return <article data-news-key={group.key} className={`mn-story${state?.openedAt ? ' mn-story--opened' : ''}`}>
     <div className="mn-story-top"><div className="mn-story-meta"><span>{item.source}</span><time dateTime={item.publishedAt == null ? undefined : new Date(item.publishedAt).toISOString()}>{item.publishedAt == null ? 'Time unavailable' : storyDate.format(item.publishedAt)}</time>{isNew && !state?.openedAt && <span className="mn-new-label">New</span>}</div>
       <div className="mn-story-actions"><button className="mn-icon-button" type="button" disabled={readOnly} aria-label={`${state?.openedAt ? 'Mark unread' : 'Mark read'}: ${item.title}`} title={state?.openedAt ? 'Mark unread' : 'Mark read'} onClick={() => onUpdate(item, { openedAt: state?.openedAt ? undefined : Date.now() })}><ReadIcon read={Boolean(state?.openedAt)} /></button><button className="mn-icon-button" type="button" disabled={readOnly} aria-label={`${state?.savedAt ? 'Unsave' : 'Save'}: ${item.title}`} aria-pressed={Boolean(state?.savedAt)} title={state?.savedAt ? 'Unsave article' : 'Save article'} onClick={() => onUpdate(item, { savedAt: state?.savedAt ? undefined : Date.now() })}><SaveIcon saved={Boolean(state?.savedAt)} /></button><button className="mn-icon-button mn-dismiss" type="button" disabled={readOnly} aria-label={`Dismiss ${item.title}`} title="Dismiss headline" onClick={() => onDismiss(item)}><CloseIcon /></button></div>
     </div>

@@ -12,7 +12,7 @@ import { loadMarketEvents, type MarketEvent } from '../marketEvents'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true } })
 Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.open = false; this.dispatchEvent(new Event('close')) } })
-vi.mock('../marketEvents', () => ({ loadMarketEvents: vi.fn() }))
+vi.mock('../marketEvents', () => ({ loadMarketEvents: vi.fn(), EVENTS_REFRESH_MS: 15 * 60_000 }))
 beforeEach(() => { vi.mocked(loadMarketEvents).mockReset().mockResolvedValue({ events: [], issues: [], fetchedAt: Date.now() }) })
 const state = vi.hoisted(() => ({ store: {} as ReturnType<typeof useStore> }))
 vi.mock('../useStore', () => ({ useStore: () => state.store }))

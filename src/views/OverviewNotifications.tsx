@@ -26,7 +26,7 @@ export function OverviewNotifications({ onGoTo, pendingListings = 0, foliosNeedR
   }, [])
 
   return <details ref={panel} className="overview-notifications" onKeyDown={(event) => {
-    if (event.key === 'Escape') { panel.current?.removeAttribute('open'); panel.current?.querySelector('summary')?.focus() }
+    if (event.key === 'Escape') { panel.current?.removeAttribute('open'); panel.current?.querySelector('summary')?.focus({ preventScroll: true }) }
   }}>
     <summary className="icon-btn overview-bell" data-action-due={notices.length > 0} aria-label={controller.hideValues ? 'Notifications hidden' : `Notifications${notices.length ? `, ${notices.length} actions need attention` : ', no actions due'}`} title="Notifications"><ActionIcon name="bell" /></summary>
     <section className="overview-notification-panel" aria-label="Actions needing attention">

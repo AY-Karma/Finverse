@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import './monitorToast.css'
 
 type ToastProps = { message: string; revision?: number }
-type Toast = { message: string; closing: boolean; revision: number }
+type Toast = { message: string; closing: boolean }
 const DISPLAY_MS = 4_000
-const EXIT_MS = 240
+const EXIT_MS = 200
 
 export function MonitorToast({ message, revision = 0 }: ToastProps) {
   const [toast, setToast] = useState<Toast | null>(null)
@@ -25,7 +25,7 @@ export function MonitorToast({ message, revision = 0 }: ToastProps) {
   useEffect(() => {
     clearTimers()
     const text = message.trim()
-    setToast(text ? { message: text, closing: false, revision } : null)
+    setToast(text ? { message: text, closing: false } : null)
     if (text) {
       dismissTimer.current = setTimeout(() => {
         setToast((current) => current ? { ...current, closing: true } : null)
@@ -37,7 +37,7 @@ export function MonitorToast({ message, revision = 0 }: ToastProps) {
 
   if (!toast) return null
 
-  return <div key={`${toast.revision}:${toast.message}`} className={`mp-toast${toast.closing ? ' mp-toast--closing' : ''}`}>
+  return <div className={`mp-toast${toast.closing ? ' mp-toast--closing' : ''}`}>
     <span className="mp-toast-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
     </span>

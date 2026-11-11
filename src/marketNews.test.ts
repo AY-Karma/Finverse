@@ -4,6 +4,7 @@ import {
   dedupeItems,
   eligibleHoldings,
   loadMarketFeed,
+  NEWS_REFRESH_MS,
   matchedTickers,
   rssItems,
   significantNameWords,
@@ -216,6 +217,22 @@ describe('market news adapter · wire', () => {
     expect(first.issues).toEqual([])
     expect(second.items).toEqual(first.items)
     expect(calls).toBe(2)
+  })
+
+  it('rechecks both wire and selected-company caches at the five-minute background deadline', async () => {
+    const request = vi.fn(async () => ET_FEED)
+    const adapter = createMarketNewsAdapter(request)
+    await adapter.fetchWire({})
+    await adapter.fetchCompanyNews('TCS', {})
+    expect(request).toHaveBeenCalledTimes(3)
+    vi.advanceTimersByTime(NEWS_REFRESH_MS - 1)
+    await adapter.fetchWire({})
+    await adapter.fetchCompanyNews('TCS', {})
+    expect(request).toHaveBeenCalledTimes(3)
+    vi.advanceTimersByTime(1)
+    await adapter.fetchWire({})
+    await adapter.fetchCompanyNews('TCS', {})
+    expect(request).toHaveBeenCalledTimes(6)
   })
 
   it('refreshes wire and company results on an explicit refresh while keeping normal loads cached', async () => {

@@ -6,6 +6,10 @@ const STORY = '<rss><channel><item><title>Reliance rises</title><link>https://ex
 afterEach(() => vi.useRealTimers())
 
 describe('news API', () => {
+  it('requires revalidation after its five-minute edge cache instead of serving ten more stale minutes', async () => {
+    const response = await createNewsHandler({ fetcher: vi.fn(async () => new Response(STORY)) })(new Request('http://localhost/api/news?source=wire-et'))
+    expect(response.headers.get('Vercel-CDN-Cache-Control')).toBe('public, s-maxage=300, must-revalidate')
+  })
   it('hedges a slow company provider after 500ms and cancels the losing request', async () => {
     vi.useFakeTimers()
     const fetcher = vi.fn<typeof fetch>((url, options) => {

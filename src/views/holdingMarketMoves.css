@@ -10,11 +10,13 @@
 .holding-move-details { border-top: 1px solid var(--hairline); padding-top: 10px; min-width: 0; }
 .holding-move-details > summary, .holding-move-unavailable > summary { cursor: pointer; font-size: 12px; color: var(--ink-muted); padding-block: 6px; }
 .holding-move-details > summary > span, .holding-move-unavailable > summary > span { margin-left: 6px; color: var(--ink-subtle); font-variant-numeric: tabular-nums; }
-.holding-move-table-scroll { overflow: auto; max-height: 340px; margin-top: 8px; padding-right: 4px; }
-.holding-move-table-scroll table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.holding-move-table-scroll { width: min(100%, 600px); overflow: auto; max-height: 340px; margin-top: 8px; padding-right: 4px; }
+.holding-move-table-scroll table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
 .holding-move-table-scroll th, .holding-move-table-scroll td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
 .holding-move-table-scroll th:not(:first-child), .holding-move-table-scroll td:not(:first-child) { text-align: right; }
-.holding-move-table-scroll th { color: var(--ink-muted); font-size: 12px; font-weight: 500; }
+.holding-move-table-scroll th { color: var(--ink-muted); font-size: 14px; font-weight: 500; }
+.holding-move-table-scroll th:first-child { width: 56%; }
+.holding-move-table-scroll td:first-child { overflow-wrap: anywhere; }
 .holding-move-table-scroll th:first-child, .holding-move-table-scroll td:first-child { padding-left: 0; }
 .holding-move-table-scroll th:last-child, .holding-move-table-scroll td:last-child { padding-right: 0; }
 .holding-move-table-scroll td:not(:first-child) { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -30,3 +32,9 @@
 .holding-move-unavailable { padding-top: 8px; }
 .holding-move-unavailable .hint { margin: 6px 0 0; }
 @media (max-width: 600px) { .holding-move-column .contribution-row > div { gap: 8px; } }
+@media (max-width: 600px) {
+  .holding-move-table-scroll th:first-child { width: 46%; }
+  .holding-move-table-scroll th, .holding-move-table-scroll td { padding-inline: 8px; }
+  .holding-move-table-scroll th:first-child, .holding-move-table-scroll td:first-child { padding-left: 0; }
+  .holding-move-table-scroll th:last-child, .holding-move-table-scroll td:last-child { padding-right: 0; }
+}

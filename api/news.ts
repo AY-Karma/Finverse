@@ -5,7 +5,7 @@ const HEADERS = {
   'Content-Type': 'application/xml; charset=utf-8',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=300, must-revalidate',
 }
 
 interface NewsHandlerDependencies {

@@ -40,6 +40,18 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
   const [restoreActionsTarget, setRestoreActionsTarget] = useState<HTMLDivElement | null>(null)
 
   useEffect(() => {
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target instanceof Node)) return
+      sectionRef.current?.querySelectorAll<HTMLDetailsElement>('.import-source-files[open], .fund-review[open]').forEach((details) => {
+        const box = details.closest('.imported-portfolio') ?? details
+        if (!box.contains(event.target as Node)) details.open = false
+      })
+    }
+    document.addEventListener('click', dismiss)
+    return () => document.removeEventListener('click', dismiss)
+  }, [])
+
+  useEffect(() => {
     if (window.location.hash !== '#manage-holdings') return
     sectionRef.current?.scrollIntoView?.({ block: 'start' })
     sectionRef.current?.focus({ preventScroll: true })

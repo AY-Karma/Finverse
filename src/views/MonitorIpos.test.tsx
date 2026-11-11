@@ -34,6 +34,7 @@ function setFeed(issues: IpoIssue[], overrides: Partial<IpoFeed> = {}) {
     ], warnings: [], stale: false, ...overrides,
   }
   vi.mocked(useIpos).mockReturnValue({ feed, loading: false, error: null, refresh })
+  vi.mocked(Date.now).mockReturnValue(feed.fetchedAt)
 }
 
 async function render(allowed = true, props: Omit<Parameters<typeof MonitorIpos>[0], 'allowed'> = {}) {
@@ -58,8 +59,10 @@ function rowButtons() {
 }
 
 function rowText(button: HTMLButtonElement) { return button.closest('.mi-row')!.textContent }
+function upcomingRows() { return [...container.querySelectorAll<HTMLElement>('.mi-upcoming-row')] }
 
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-07T18:29:59Z'))
   vi.mocked(useIpos).mockReset()
   refresh.mockReset()
   vi.mocked(cachedIpoGmpHistory).mockReset().mockReturnValue(null)
@@ -73,6 +76,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount() })
   container.remove()
+  vi.restoreAllMocks()
 })
 
 describe('Monitor IPOs', () => {
@@ -89,7 +93,7 @@ describe('Monitor IPOs', () => {
     expect(container.querySelector('.mi-period-scope')?.textContent).toBe('Past 7 days')
     expect(rowButtons().map((row) => row.querySelector('.mi-name')?.textContent)).toEqual(['Company latest', 'Company boundary'])
     expect(loadIpoGmpHistory).not.toHaveBeenCalledWith('older')
-    setFeed(issues, { fetchedAt: Date.parse('2026-11-07T18:30:00Z') })
+    vi.mocked(Date.now).mockReturnValue(Date.parse('2026-11-07T18:30:00Z'))
     await render()
     expect(rowButtons().map((row) => row.querySelector('.mi-name')?.textContent)).toEqual(['Company latest'])
   })
@@ -104,15 +108,14 @@ describe('Monitor IPOs', () => {
     await render()
     expect(rowButtons().map((row) => row.querySelector('.mi-name')?.textContent)).toEqual(['Company old-open', 'Company unknown-open'])
     await click('Upcoming')
-    expect(rowButtons().map((row) => row.querySelector('.mi-name')?.textContent)).toEqual(['Company distant-upcoming', 'Company unknown-upcoming'])
+    expect(upcomingRows().map((row) => row.querySelector('.mi-name')?.textContent)).toEqual(['Company distant-upcoming', 'Company unknown-upcoming'])
   })
 
-  it.each(['OPEN', 'UPCOMING'] as const)('lets %s issues be watched and unwatched and disables editing when read-only', async (status) => {
-    const selected = issue('watchable', { status })
+  it('lets Open issues be watched and unwatched and disables editing when read-only', async () => {
+    const selected = issue('watchable')
     const onWatch = vi.fn(), onUnwatch = vi.fn()
     setFeed([selected])
     await render(true, { onWatch, onUnwatch })
-    if (status === 'UPCOMING') await click('Upcoming')
     await click('View Company watchable IPO details')
     expect(container.textContent).toContain('Overview reminder on 9 Nov')
     await click('Watch last day')
@@ -125,6 +128,31 @@ describe('Monitor IPOs', () => {
     expect(button.disabled).toBe(true)
     await act(async () => button.click())
     expect(onWatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows only names and boards for Upcoming without fetching history, including View all', async () => {
+    setFeed(['zeta', 'alpha', 'echo', 'delta', 'charlie', 'bravo'].map((id, index) => issue(id, {
+      id: `xflot:${id}`, status: 'UPCOMING', board: index % 2 ? 'SME' : 'MAINBOARD',
+    })))
+    const onWatch = vi.fn()
+    await render(true, { onWatch, watchedIds: ['xflot:alpha'] })
+    await click('Sort IPOs'); await click('GMP: highest')
+    await click('Upcoming')
+    expect(container.querySelector('[aria-label="Sort IPOs"]')).toBeNull()
+    expect(upcomingRows()).toHaveLength(4)
+    await click('View all 6 IPOs')
+    expect(upcomingRows().map((row) => row.querySelector('.mi-name')?.textContent)).toEqual([
+      'Company alpha', 'Company bravo', 'Company charlie', 'Company delta', 'Company echo', 'Company zeta',
+    ])
+    for (const row of upcomingRows()) {
+      expect(row.querySelector('.mi-meta')?.textContent).toMatch(/^(Mainboard|SME)$/)
+      expect(row.querySelector('button, a, .mi-price, .mi-gmp, .mi-trend-trigger, .mi-details')).toBeNull()
+      expect(row.textContent).not.toMatch(/GMP|announced|Closes|Opens|Upcoming|9 Nov/)
+    }
+    expect(loadIpoGmpHistory).not.toHaveBeenCalled()
+    expect(onWatch).not.toHaveBeenCalled()
+    await click('Open')
+    expect(container.querySelector('[aria-label="Sort IPOs"]')).not.toBeNull()
   })
 
   it('requires an announced closing date and does not offer last-day watches for past IPOs', async () => {
@@ -249,11 +277,11 @@ describe('Monitor IPOs', () => {
     expect(rowButtons()).toHaveLength(1)
     expect(rowButtons()[0].getAttribute('aria-label')).toContain('Company sme-open')
     await click('Upcoming')
-    expect(rowButtons()).toHaveLength(0)
+    expect(upcomingRows()).toHaveLength(0)
     await click('IPO board')
     await act(async () => { options().find((option) => option.textContent === 'All boards')!.click() })
-    expect(rowButtons()).toHaveLength(1)
-    expect(rowButtons()[0].getAttribute('aria-label')).toContain('Company future')
+    expect(upcomingRows()).toHaveLength(1)
+    expect(upcomingRows()[0].querySelector('.mi-name')?.textContent).toBe('Company future')
   })
 
   it('supports keyboard navigation and dismisses the board menu without changing the filter', async () => {
@@ -287,8 +315,8 @@ describe('Monitor IPOs', () => {
     expect(rowButtons()).toHaveLength(0)
     expect(container.textContent).toContain('No IPOs open for bidding right now.')
     await click('Upcoming')
-    expect(rowButtons()).toHaveLength(1)
-    expect(rowButtons()[0].getAttribute('aria-label')).toContain('Company next')
+    expect(upcomingRows()).toHaveLength(1)
+    expect(upcomingRows()[0].querySelector('.mi-name')?.textContent).toBe('Company next')
   })
 
   it('offers a board-specific recent count from the empty view and keeps attribution grouped', async () => {
@@ -306,16 +334,14 @@ describe('Monitor IPOs', () => {
     await click('Browse recent2 IPOs')
     expect(rowButtons()).toHaveLength(2)
     const sources = container.querySelector('.mi-source-line')!
-    expect(sources.textContent).toContain('Data from')
+    expect(sources.textContent).toContain('Xflot')
     expect(sources.querySelectorAll('a')).toHaveLength(2)
     expect(container.querySelector<HTMLTimeElement>('.mi-source-time time')?.dateTime).toBe('2026-11-07T12:00:00.000Z')
-    const notes = container.querySelector<HTMLElement>('.mi-data-notes')!
-    expect(notes.hidden).toBe(true)
-    await click('Data notes')
-    expect(notes.hidden).toBe(false)
-    expect(notes.textContent).toContain('Source-page updates are not dealer quote times.')
-    await click('Data notes')
-    expect(notes.hidden).toBe(true)
+    const disclaimer = container.querySelector<HTMLElement>('.mi-disclaimer')!
+    expect(disclaimer.tagName).toBe('DETAILS')
+    expect(disclaimer.hidden).toBe(false)
+    expect(disclaimer.textContent).toContain('Source-page updates are not dealer quote times.')
+    expect(container.querySelector('.mi-data-notes-toggle')).toBeNull()
   })
 
   it('keeps Open selected rather than switching to recent or unknown-only upcoming rows', async () => {
@@ -331,9 +357,40 @@ describe('Monitor IPOs', () => {
     expect(rowButtons()[0].getAttribute('aria-label')).toContain('Company recent')
     expect([...container.querySelectorAll('button[aria-pressed="true"]')].map((button) => button.textContent)).toContain('Recent')
     await click('Upcoming')
-    expect(rowButtons()).toHaveLength(1)
-    expect(rowButtons()[0].getAttribute('aria-label')).toContain('Company unannounced')
-    expect(rowText(rowButtons()[0])).toContain('Not announced')
+    expect(upcomingRows()).toHaveLength(1)
+    expect(upcomingRows()[0].querySelector('.mi-name')?.textContent).toBe('Company unannounced')
+    expect(upcomingRows()[0].textContent).toBe('Company unannouncedMainboard')
+  })
+
+  it('discloses the grouped publisher disclaimer with an alert triangle and closes on repeat click', async () => {
+    const disclaimerText = 'Aggregated public information. GMP is unofficial and not published by any exchange or regulator. Nothing here is investment advice.'
+    const warnings = ['Omitted 45 issues with conflicting source records.', 'Reported GMP could not be refreshed.']
+    setFeed([issue('one')], { disclaimer: disclaimerText, warnings, stale: true })
+    await render()
+    const disclaimer = container.querySelector<HTMLElement>('.mi-disclaimer')!
+    const heading = disclaimer.querySelector('h3')!
+    expect(heading.textContent).toBe('Disclaimer')
+    expect(disclaimer.getAttribute('aria-labelledby')).toBe(heading.id)
+    expect(disclaimer.hasAttribute('open')).toBe(false)
+    const summary = disclaimer.querySelector('summary')!
+    expect(summary.querySelector('.action-icon')).not.toBeNull()
+    await act(async () => summary.click())
+    expect(disclaimer.hasAttribute('open')).toBe(true)
+    await act(async () => summary.click())
+    expect(disclaimer.hasAttribute('open')).toBe(false)
+    expect([...disclaimer.querySelectorAll('p')].some((paragraph) => paragraph.textContent === disclaimerText)).toBe(true)
+    expect([...disclaimer.querySelectorAll('h4')].map((element) => element.textContent)).toEqual(['Data sources', 'Updates', 'Coverage'])
+    const links = [...disclaimer.querySelectorAll<HTMLAnchorElement>('a')]
+    expect(links.map((link) => link.href)).toEqual(['https://www.xflot.com/', 'https://gmptoday.in/'])
+    expect(links.every((link) => link.target === '_blank' && link.rel.includes('noopener'))).toBe(true)
+    expect(disclaimer.textContent).toContain('GMP page updated')
+    expect(disclaimer.textContent).toContain('IPO list checked')
+    expect(disclaimer.querySelectorAll('time')).toHaveLength(2)
+    expect(disclaimer.textContent).toContain('Source-page updates are not dealer quote times.')
+    for (const warning of warnings) expect(disclaimer.textContent).toContain(warning)
+    expect(disclaimer.textContent).toContain('Some sources are dated or could not be refreshed.')
+    expect(disclaimer.closest('[role="alert"]')).toBeNull()
+    expect(disclaimer.querySelector('[role="alert"]')).toBeNull()
   })
 
   it('opens details beside their issue and closes them on a repeated click', async () => {

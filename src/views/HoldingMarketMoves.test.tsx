@@ -5,9 +5,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { calculateHoldingMarketMoves, type HoldingPriceHistories } from '../holdingMarketMoves'
 import type { Position } from '../types'
 import { quoteKey } from '../valuation'
-import { HoldingMarketMoveResults } from './HoldingMarketMoves'
+import { HoldingMarketMoveResults, HoldingMarketMoves } from './HoldingMarketMoves'
+import { marketData } from '../marketData'
 
 vi.mock('./DitherBar', () => ({ DitherBar: () => <span data-contribution-bar /> }))
+vi.mock('../marketData', () => ({ marketData: { history: vi.fn() } }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 let root: Root | undefined
@@ -42,6 +44,24 @@ async function toggleDetails() {
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
   root = undefined
+  vi.restoreAllMocks()
+})
+
+it('retains successful period prices when retrying missing holdings fails for an already loaded holding', async () => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-04T12:00:00Z'))
+  const positions: Position[] = ['LOADED', 'MISSING'].map((ticker) => ({
+    id: ticker, ticker, name: ticker, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100,
+  }))
+  const prices = [{ date: '2026-10-30', close: 100 }, { date: '2026-11-04', close: 110 }]
+  vi.mocked(marketData.history).mockResolvedValueOnce(prices).mockRejectedValueOnce(new Error('offline'))
+    .mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(prices)
+  container = document.createElement('div')
+  root = createRoot(container)
+  await act(async () => root!.render(<HoldingMarketMoves positions={positions} quotes={{}} allowExternalData range="month" customFrom="" />))
+  expect(container.textContent).toContain('1 of 2 holdings covered')
+  await act(async () => container.querySelector<HTMLButtonElement>('.benchmark-retry')!.click())
+  expect(container.textContent).toContain('2 of 2 holdings covered')
+  expect(container.querySelector('.holding-move-summary strong')?.textContent).toBe('₹20.00')
 })
 
 it('ranks the five largest quantity-weighted impacts and reconciles the remainder', async () => {

@@ -41,7 +41,17 @@ export function HoldingMarketMoves({ positions, quotes, allowExternalData, range
           } catch { histories[quoteKey(position)] = [] }
         }
       }))
-      if (alive) { loadedRequest.current = requestKey; setState({ key, histories, loading: false }) }
+      if (alive) {
+        loadedRequest.current = requestKey
+        setState((current) => {
+          if (current.key === key) {
+            for (const [holdingKey, points] of Object.entries(current.histories)) {
+              if (!histories[holdingKey]?.length) histories[holdingKey] = points
+            }
+          }
+          return { key, histories, loading: false }
+        })
+      }
     }
     void run()
     return () => { alive = false; controller.abort() }

@@ -14,7 +14,7 @@ import {
 
 export interface MarketDataAdapter {
   reviewFundScheme(name: string, signal?: AbortSignal): Promise<FundSchemeReview>
-  refreshQuotes(positions: Position[], previous: Record<string, import('./types').LiveQuote>, signal?: AbortSignal): Promise<LiveQuotesResult>
+  refreshQuotes(positions: Position[], previous: Record<string, import('./types').LiveQuote>, signal?: AbortSignal, onProgress?: (result: LiveQuotesResult) => void): Promise<LiveQuotesResult>
   history(position: Position, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
   benchmarkHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
   quote(symbol: string, signal?: AbortSignal): Promise<{ price: number; change: number | null; pct: number | null; at: number } | null>

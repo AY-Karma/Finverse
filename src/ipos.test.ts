@@ -43,4 +43,17 @@ describe('IPO client cache', () => {
     await expect(loadIpos()).rejects.toThrow('IPOs could not be loaded')
     expect(cachedIpos()).toBeNull()
   })
+
+  it('rejects an expired network feed instead of presenting old subscription dates as current', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ...feed(), fetchedAt: NOW - 25 * 60 * 60_000 })))
+    const { loadIpos, cachedIpos } = await import('./ipos')
+    await expect(loadIpos()).rejects.toThrow('IPOs could not be loaded')
+    expect(cachedIpos()).toBeNull()
+  })
+
+  it('marks an aged network feed stale even when its provider flag says fresh', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ...feed(), fetchedAt: NOW - 2 * 60 * 60_000 })))
+    const { loadIpos } = await import('./ipos')
+    expect((await loadIpos()).stale).toBe(true)
+  })
 })

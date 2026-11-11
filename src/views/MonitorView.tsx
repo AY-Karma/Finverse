@@ -20,7 +20,7 @@ import './overviewNotifications.css'
 export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestImport: () => void; initialQuery?: string }) {
   const controller = useMonitor()
   const { liveQuotes, workspaceReadOnly } = useStore()
-  const { feed, loading, refresh: refreshEvents } = useMarketEvents(controller.positions, controller.allowExternalData, controller.hideValues)
+  const { feed, loading, refresh: refreshEvents } = useMarketEvents(controller.positions, controller.allowExternalData, controller.hideValues, true)
   const [contextId, setContextId] = useState('')
   const [ruleRequest, setRuleRequest] = useState<RuleRequest>()
   const [reminderRequest, setReminderRequest] = useState<ReminderRequest>()

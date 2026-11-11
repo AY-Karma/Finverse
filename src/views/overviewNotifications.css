@@ -1,7 +1,8 @@
 .overview-notifications { position: relative; flex: none; }
 .overview-tools { position: relative; }
 .overview-tools .overview-notifications { position: static; }
-.overview-head:has(.overview-notifications[open]), .portfolio-welcome:has(.overview-notifications[open]) { position: relative; z-index: 30; }
+/* Keep the open header below the sticky navigation, but above page cards. */
+.overview-head:has(.overview-notifications[open]), .portfolio-welcome:has(.overview-notifications[open]) { position: relative; z-index: 5; }
 .overview-bell { position: relative; list-style: none; }
 .overview-bell::-webkit-details-marker { display: none; }
 .overview-bell[data-action-due='true']::after { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border: 2px solid var(--surface-1); border-radius: 50%; background: var(--primary); content: ''; }
