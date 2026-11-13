@@ -1,3 +1,4 @@
+import './test/storage'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicMarketQuote } from './marketData'
 
@@ -7,10 +8,53 @@ vi.mock('./marketData', async (original) => ({ ...await original<typeof import('
 const now = new Date('2026-11-06T06:00:00Z').getTime()
 const quote = (price = 25_000, at = now): PublicMarketQuote => ({ price, change: 100, pct: 0.4, at })
 
-beforeEach(() => { vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(now); provider.quotes.mockReset() })
-afterEach(() => { vi.useRealTimers() })
+beforeEach(() => { localStorage.clear(); vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(now); provider.quotes.mockReset() })
+afterEach(() => { localStorage.clear(); vi.useRealTimers() })
 
 describe('fixed public index quotes', () => {
+  it('requests and restores a selected global pair independently of a fresh default pair', async () => {
+    const api = await import('./marketIndexQuotes')
+    provider.quotes.mockResolvedValueOnce(new Map([['^NSEI', quote()], ['^NSEBANK', quote(50_000)]]))
+    await api.loadMarketIndexQuotes()
+    const ids = ['sp-500', 'nasdaq-composite']
+    provider.quotes.mockResolvedValueOnce(new Map([['^GSPC', quote(6_000)], ['^IXIC', quote(20_000)]]))
+    const global = await api.loadMarketIndexQuotes(undefined, false, ids)
+    expect(provider.quotes.mock.calls[1][0]).toEqual(['^GSPC', '^IXIC'])
+    expect(Object.keys(global.quotes)).toEqual(['^GSPC', '^IXIC'])
+    api.persistMarketIndexQuotes()
+    vi.resetModules()
+    expect((await import('./marketIndexQuotes')).cachedMarketIndexQuotes(ids).quotes).toEqual(global.quotes)
+  })
+
+  it('keeps late default-pair results out of the selected global-pair snapshot', async () => {
+    const api = await import('./marketIndexQuotes')
+    let complete!: (quotes: Map<string, PublicMarketQuote>) => void
+    provider.quotes.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))
+    const old = api.loadMarketIndexQuotes()
+    await Promise.resolve()
+    const ids = ['sp-500', 'dax']
+    provider.quotes.mockResolvedValueOnce(new Map([['^GSPC', quote(6_000)], ['^GDAXI', quote(24_000)]]))
+    const current = await api.loadMarketIndexQuotes(undefined, false, ids)
+    complete(new Map([['^NSEI', quote()], ['^NSEBANK', quote(50_000)]]))
+    await old
+    expect(api.cachedMarketIndexQuotes(ids)).toBe(current)
+    expect(Object.keys(current.quotes)).toEqual(['^GSPC', '^GDAXI'])
+  })
+
+  it('restores both index observations on reload and still requests fresh quotes immediately', async () => {
+    const first = await import('./marketIndexQuotes')
+    provider.quotes.mockResolvedValue(new Map([['^NSEI', quote()], ['^NSEBANK', quote(50_000)]]))
+    const saved = await first.loadMarketIndexQuotes()
+    vi.resetModules()
+    const reloaded = await import('./marketIndexQuotes')
+    expect(reloaded.cachedMarketIndexQuotes()).toEqual(saved)
+    await reloaded.loadMarketIndexQuotes()
+    expect(provider.quotes).toHaveBeenCalledTimes(2)
+    vi.setSystemTime(now + 8 * 86_400_000)
+    vi.resetModules()
+    expect((await import('./marketIndexQuotes')).cachedMarketIndexQuotes().quotes).toEqual({})
+  })
+
   it('batches only Bank Nifty and NIFTY 50 and shares concurrent loads and fresh cache', async () => {
     const { MARKET_INDICES, loadMarketIndexQuotes } = await import('./marketIndexQuotes')
     provider.quotes.mockResolvedValue(new Map(MARKET_INDICES.map((index) => [index.symbol, quote()])))

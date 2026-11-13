@@ -14,8 +14,9 @@ export function MarketStoriesEntry({ navigate, children }: { navigate: (view: Vi
   const hasPortfolio = positions.length > 0
   const [open, setOpen] = useState(false)
   const [visited, setVisited] = useState(false)
+  const [preparing, setPreparing] = useState(false)
   const [today, setToday] = useState(holdingMoveToday)
-  const prepared = usePreparedHighlights(today)
+  const prepared = usePreparedHighlights(today, preparing)
   const [seenEditions, setSeenEditions] = useState<string[]>(() => {
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(SEEN_KEY) ?? 'null')
@@ -26,9 +27,8 @@ export function MarketStoriesEntry({ navigate, children }: { navigate: (view: Vi
   })
   const editions = storyEditions(today).filter((item) => settings.allowExternalData || item.id === 'portfolio')
   const seen = editions.every((item) => seenEditions.includes(item.key))
-  useEffect(() => { if (hasPortfolio) void loadMarketStories().catch(() => {}) }, [hasPortfolio])
   useEffect(() => {
-    if (!hasPortfolio) { setOpen(false); setVisited(false) }
+    if (!hasPortfolio) { setOpen(false); setVisited(false); setPreparing(false) }
   }, [hasPortfolio])
   useEffect(() => {
     const midnight = new Date(`${today}T00:00:00+05:30`).getTime() + 86_400_000
@@ -43,9 +43,11 @@ export function MarketStoriesEntry({ navigate, children }: { navigate: (view: Vi
     })
   }
 
+  const prepare = () => { setPreparing(true); void loadMarketStories().catch(() => {}) }
   const entry = hasPortfolio ? <button className={`stories-entry${seen ? ' stories-entry--seen' : ''}`} type="button"
       aria-label="Open your portfolio and market highlights" aria-haspopup="dialog" aria-expanded={open}
-      title="Your highlights" onClick={() => { setVisited(true); setOpen((current) => !current) }}>
+      title="Your highlights" onPointerEnter={prepare} onFocus={prepare} onTouchStart={prepare}
+      onClick={() => { prepare(); setVisited(true); setOpen((current) => !current) }}>
       <span className="stories-avatar" aria-hidden="true"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="4" width="14" height="16" rx="3" /><path d="m9 15 3-4 3 2M9 8h6M2 8v8m20-8v8" /></svg></span></span>
       <span className="stories-entry-copy"><strong>Your highlights</strong><small>Portfolio &amp; market</small></span>
       {!seen && <span className="stories-entry-dot" aria-label="Unread highlights" />}

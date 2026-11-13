@@ -14,7 +14,6 @@ let snapshot: MarketIndexSnapshot & { loading: boolean }
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-11-06T06:00:00Z'))
-  localStorage.clear()
   state.open = true
   snapshot = { quotes: { '^NSEI': { price: 25_001.5, change: 101.5, pct: 0.41, at: Date.now() } }, checkedAt: Date.now(), unavailable: [], loading: false }
   state.hook.mockReset().mockImplementation(() => snapshot)
@@ -26,17 +25,16 @@ const render = () => act(async () => root.render(<MarketIndexTicker allowed />))
 
 describe('fixed static index strip', () => {
   it('shows only Bank Nifty and NIFTY 50 as plain labels with signed quotes', async () => {
-    localStorage.setItem('finverse:market-index-selection:v1', '["nasdaq-composite","sensex"]')
     await render()
     expect([...container.querySelectorAll('.ticker-sym')].map((label) => label.textContent)).toEqual(['Bank Nifty', 'NIFTY 50'])
     expect(container.querySelectorAll('.ticker-item')).toHaveLength(2)
-    expect(container.querySelector('select, button, .ticker-track, .ticker-group')).toBeNull()
-    expect(container.querySelectorAll('.ticker-val')[0].textContent).toBe('Unavailable')
+    expect(container.querySelectorAll('.ticker-val')[0].textContent).toBe('—')
+    expect(container.querySelector('.ticker-status')?.textContent).toBe('Unavailable')
     expect(container.querySelectorAll('.ticker-val')[1].textContent).toBe('25,001.50')
     expect(container.querySelector('.ticker-delta')?.textContent).toBe('+101.50 (+0.41%)')
     expect(container.textContent).not.toContain('₹')
     expect(container.querySelectorAll('.ticker-item')[1].getAttribute('title')).toContain('As of 6 Nov, 11:30 am IST')
-    expect(state.hook).toHaveBeenCalledWith(true)
+    expect(state.hook).toHaveBeenCalledWith(true, undefined)
   })
 
   it('preserves signed losses and neutral saved or delayed quote qualifications', async () => {

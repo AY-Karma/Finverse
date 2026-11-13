@@ -7,7 +7,7 @@ import { newsReadingKey, type MonitorReadingState } from './monitorReading'
 import type { Folio, PortfolioSnapshot, Settings } from './types'
 import { captureWorkspaceRecords, createWorkspaceArchive, MAX_WORKSPACE_ARCHIVE_BYTES, parseWorkspaceArchive, restoreWorkspaceArchive } from './workspaceArchive'
 
-const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt', mode: 'light', hideValues: true }
+const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt', mode: 'light', hideValues: true, marketIndices: ['sp-500', 'dax'] }
 const position = normalizePosition({ id: 'holding-1', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 2, buyPrice: 100, lastPrice: 120, invested: 200, exchange: 'NSE', currency: 'INR', providerSymbol: 'TCS.NS', identityVersion: 2, exchangeSource: 'explicit' })
 const folios: Folio[] = [{ id: 'account-1', name: 'Broker account', importedAt: 100, positions: [position] }]
 const snapshots: PortfolioSnapshot[] = [{ at: 100, value: 240, invested: 200, pnl: 40, holdingCount: 1 }]

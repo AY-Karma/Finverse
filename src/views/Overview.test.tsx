@@ -15,12 +15,110 @@ vi.mock('../valuation', async (original) => {
   const actual = await original<typeof import('../valuation')>()
   return { ...actual, formatCurrency: (...args: Parameters<typeof actual.formatCurrency>) => { state.format(); return actual.formatCurrency(...args) } }
 })
-vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => <section data-history-panel>Holding Price History</section> }))
 vi.mock('./PortfolioPerformance', () => ({ PortfolioPerformance: ({ scope }: { scope: string }) => <section className="portfolio-performance" data-scope={scope}>Portfolio performance</section> }))
-vi.mock('./MarketIndexTicker', () => ({ MarketIndexTicker: ({ allowed }: { allowed: boolean }) => <div className="tiker-wrap" data-indices-allowed={allowed}>{['NIFTY 50', 'Sensex', 'NIFTY Bank', 'NIFTY Next 50', 'NIFTY Midcap 50'].map((name) => <span className="ticker-item" key={name}>{name}</span>)}</div> }))
+vi.mock('./MarketIndexTicker', () => ({ MarketIndexTicker: ({ allowed }: { allowed: boolean }) => <div className="tiker-wrap" data-indices-allowed={allowed}>{['Bank Nifty', 'NIFTY 50'].map((name) => <span className="ticker-item" key={name}>{name}</span>)}</div> }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
+  it.each(['stock', 'mutual-fund'] as const)('can leave an empty scope in a single-%s portfolio', async (type) => {
+    const holding: Position = { id: 'only', ticker: 'ONLY', name: 'Only holding', type, quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110 }
+    const folios = [{ id: 'single', name: 'Single', importedAt: Date.now(), positions: [holding] }]
+    state.store = { positions: [holding], rawPositions: [holding], folios, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: { ...loadSettings(), allowExternalData: false }, refreshNow: vi.fn() } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div'), root = createRoot(container)
+    const choose = (label: string) => act(async () => [...container.querySelectorAll<HTMLButtonElement>('.panel--ledger .scope-btn')].find((button) => button.textContent?.startsWith(label))!.click())
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      await choose(type === 'stock' ? 'Mutual Funds' : 'Equity')
+      expect(container.querySelector('.ledger-empty')?.textContent).toContain('No ')
+      expect(container.querySelector('.page-title')?.textContent).toBe('Overview')
+      await choose('All')
+      expect(container.querySelector('.ledger-empty')).toBeNull()
+      expect(container.querySelectorAll('.panel--ledger tbody > tr')).toHaveLength(1)
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it.each(['stock', 'mutual-fund'] as const)('keeps %s sorting and 25-row paging together with keyboard and outside dismissal', async (type) => {
+    const positions: Position[] = Array.from({ length: 26 }, (_, index) => ({ id: `toolbar-${index}`, ticker: `HOLD${index}`, name: `Holding ${index}`, type, quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110 + index, ...(type === 'mutual-fund' ? { xirr: index, mfScheme: { code: 100000 + index, name: `Holding ${index}`, source: 'confirmed' as const } } : {}) }))
+    const folios = [{ id: 'toolbar', name: 'Toolbar', importedAt: Date.now(), positions }]
+    state.store = { positions, rawPositions: positions, folios, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: { ...loadSettings(), allowExternalData: false }, refreshNow: vi.fn(), marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      if (type === 'mutual-fund') await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.scope-btn')].find((button) => button.textContent?.startsWith('Mutual Funds'))!.click())
+      const toolbar = container.querySelector<HTMLElement>('.ledger-toolbar')!
+      expect(toolbar.previousElementSibling).toBe(container.querySelector('.panel--ledger .scope-switch'))
+      expect(toolbar.closest('.ledger-controls')).not.toBeNull()
+      const menu = toolbar.querySelector<HTMLDetailsElement>('details')!
+      const trigger = menu.querySelector('summary')!
+      const pager = toolbar.querySelector('.ledger-pagination')!
+      expect(pager.textContent).toContain('1–25 / 26')
+      expect(menu.querySelectorAll('.benchmark-menu-group button')).toHaveLength(13)
+      expect(menu.querySelector('.is-selected')?.textContent).toBe('Import order')
+      expect(menu.querySelector('.is-selected')?.getAttribute('aria-current')).toBe('true')
+      await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+      expect(menu.open).toBe(true)
+      expect(document.activeElement).toBe(menu.querySelector('.is-selected'))
+      const bounds = vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue({ left: 20, right: 140, top: window.innerHeight - 190, bottom: window.innerHeight - 150 } as DOMRect)
+      await act(async () => menu.dispatchEvent(new Event('toggle')))
+      expect(menu.querySelector<HTMLElement>('.benchmark-menu-popover')?.style.bottom).toBe('calc(100% + 8px)')
+      expect(menu.querySelector<HTMLElement>('.benchmark-menu-popover')?.style.left).toBe('-4px')
+      bounds.mockRestore()
+      await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      expect(menu.open).toBe(false)
+      await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+      await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      expect(menu.open).toBe(false)
+      expect(document.activeElement).toBe(trigger)
+      await act(async () => trigger.click())
+      await act(async () => [...menu.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Value: high to low')!.click())
+      expect(menu.open).toBe(false)
+      expect(trigger.textContent).toBe('Value ↓')
+      expect(document.activeElement).toBe(trigger)
+      expect(container.querySelector('.panel--ledger tbody')?.textContent).toContain(type === 'mutual-fund' ? 'Holding 25' : 'HOLD25')
+      await act(async () => pager.querySelector<HTMLButtonElement>('[aria-label="Next page"]')!.click())
+      expect(pager.textContent).toContain('26–26 / 26')
+      expect(container.querySelectorAll('.panel--ledger tbody > tr')).toHaveLength(1)
+      expect(trigger.textContent).toBe('Value ↓')
+      if (type === 'mutual-fund') {
+        const quotes = { [quoteKey(positions[0])]: { price: 999, at: Date.now(), source: 'nav' as const } }
+        state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes }), settings: { ...state.store.settings, allowExternalData: true } }
+        await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+        expect(container.querySelector('.panel--ledger tbody')?.textContent).toContain('Holding 1')
+        await act(async () => pager.querySelector<HTMLButtonElement>('[aria-label="Previous page"]')!.click())
+        expect(container.querySelector('.panel--ledger tbody tr td:first-child')?.textContent).toContain('Holding 0')
+      }
+      await act(async () => trigger.click())
+      await act(async () => document.body.click())
+      expect(menu.open).toBe(false)
+    } finally { await act(async () => root.unmount()); container.remove() }
+  })
+
+  it('keeps the refresh hover text stable throughout the cooldown', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-30T06:00:00Z'))
+    const holding: Position = { id: 'a', ticker: 'AAA', name: 'AAA', type: 'stock', quantity: 1, buyPrice: 80, invested: 80, lastPrice: 100 }
+    const folios = [{ id: 'f', name: 'Portfolio', importedAt: Date.now(), positions: [holding] }]
+    const refreshNow = vi.fn().mockResolvedValue({ ok: true, retryInMs: 5000 })
+    state.store = { positions: [holding], rawPositions: [holding], snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: loadSettings(), refreshNow, marketDataRefreshing: false } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div'), root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      const button = container.querySelector<HTMLButtonElement>('[aria-label="Refresh prices now"]')!
+      const tooltip = button.closest('.overview-refresh-control')!
+      const title = tooltip.getAttribute('title')
+      await act(async () => button.click())
+      expect(button.disabled).toBe(true)
+      await act(async () => vi.advanceTimersByTime(1000))
+      expect(button.closest('.overview-refresh-control')).toBe(tooltip)
+      expect(tooltip.getAttribute('title')).toBe(title)
+      await act(async () => vi.advanceTimersByTime(4000))
+      expect(button.disabled).toBe(false)
+      expect(tooltip.getAttribute('title')).toBe(title)
+    } finally { await act(async () => root.unmount()); vi.useRealTimers() }
+  })
+
   it('identifies an unmatched BSE portfolio as imported values in the collapsed view', async () => {
     const holding: Position = { id: 'bse-only', ticker: 'UNMATCHED', name: 'Unmatched company', type: 'stock', exchange: 'BSE', currency: 'INR', providerSymbol: 'UNMATCHED.BO', identityVersion: 2, exchangeSource: 'explicit', quantity: 1, buyPrice: 80, invested: 80, lastPrice: 100 }
     const folios = [{ id: 'bse', name: 'Imported file', importedAt: Date.now(), positions: [holding] }]
@@ -28,7 +126,9 @@ describe('overview valuation and visible work', () => {
     const container = document.createElement('div'), root = createRoot(container)
     try {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(container.querySelector('.scoreboard')?.textContent).toContain('Imported value')
+      expect(container.querySelector('.scoreboard')?.textContent).not.toContain('Imported value')
+      expect(container.querySelector('.overview-market-strip .score--session')).not.toBeNull()
+      expect(container.querySelector('.overview-market-strip .tiker-wrap')).not.toBeNull()
       expect(container.querySelector('.overview-meta')?.textContent).toContain('1 BSE holding uses imported prices')
       expect(container.querySelector('.overview-meta')?.textContent).toContain('NSE match is needed')
       expect(container.querySelector('.last-trade-source')?.textContent).toBe('Imported')
@@ -47,6 +147,8 @@ describe('overview valuation and visible work', () => {
     const container = document.createElement('div'), root = createRoot(container)
     try {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      expect(container.querySelector<HTMLButtonElement>('[aria-label="Refresh prices now"]')?.disabled).toBe(true)
+      expect(container.querySelector('.overview-refresh-control')?.getAttribute('title')).toContain('NAVs update at scheduled publication checks')
       await act(async () => container.querySelectorAll<HTMLButtonElement>('.scope-switch button')[2].click())
       expect(container.querySelector('.ledger-mobile-list .up')).not.toBeNull()
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
@@ -100,7 +202,7 @@ describe('overview valuation and visible work', () => {
     try {
       await render()
       const cells = [...container.querySelectorAll('.ticker-item')]
-      expect(cells.map((cell) => cell.textContent)).toEqual(['NIFTY 50', 'Sensex', 'NIFTY Bank', 'NIFTY Next 50', 'NIFTY Midcap 50'])
+      expect(cells.map((cell) => cell.textContent)).toEqual(['Bank Nifty', 'NIFTY 50'])
       expect(container.querySelector('.tiker-wrap')?.textContent).not.toMatch(/DOWN|MISSING|REVIEW/)
       const rows = [...container.querySelectorAll('.table--ledger > tbody > tr')]
       expect(rows[0].querySelector('.ltp-arrow')?.textContent).toBe('▼')
@@ -108,16 +210,21 @@ describe('overview valuation and visible work', () => {
       expect(rows[1].querySelector('.last-trade-move')?.textContent).toBe('+₹2.00')
       expect(rows[2].querySelector('.ltp-arrow')).toBeNull()
       expect(rows[3].querySelector('.last-trade-move')?.textContent).toBe('—')
-      await act(async () => container.querySelector<HTMLButtonElement>('.ledger-mobile-row')!.click())
-      expect(container.querySelector('.ledger-mobile-detail .last-trade-move')?.textContent).toBe('−₹5.00')
+      const mobileLtp = container.querySelector('.ledger-mobile-last-trade')!
+      expect(mobileLtp.querySelector('.ltp-arrow')?.textContent).toBe('▼')
+      expect(mobileLtp.querySelector('.last-trade-move')?.textContent).toBe('−₹5.00')
+      expect(container.querySelector('.ledger-mobile-row')?.tagName).toBe('DIV')
+      expect(container.querySelector('.ledger-mobile-row[aria-expanded], .ledger-mobile-detail, .ledger-mobile-chevron')).toBeNull()
+      expect(container.querySelector('.table--ledger .ledger-caret')).toBeNull()
 
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: true } }
       await render()
-      expect(container.querySelector('.ticker-item')?.textContent).toBe('NIFTY 50')
+      expect(container.querySelector('.ticker-item')?.textContent).toBe('Bank Nifty')
       expect(container.querySelector('.last-trade')?.textContent).toBe('••••••••••••')
       expect(container.querySelector('.ltp-arrow')).toBeNull()
 
       expect(container.querySelector('.ledger-mobile-list .up, .ledger-mobile-list .down')).toBeNull()
+      expect(container.querySelector('.ledger-mobile-last-trade')?.textContent).not.toContain('₹')
 
       state.store = { ...state.store, settings: { ...state.store.settings, hideValues: false, allowExternalData: false } }
       await render()
@@ -126,8 +233,7 @@ describe('overview valuation and visible work', () => {
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('groups performance above allocation and keeps their scope in sync with the composition summary', async () => {
-    const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+  it('keeps performance in sync with Ledger scope without duplicating the moved allocation', async () => {
     const positions: Position[] = [
       { id: 'equity', ticker: 'EQUITY', name: 'Equity', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
       { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 80 },
@@ -141,19 +247,13 @@ describe('overview valuation and visible work', () => {
       expect(container.querySelector('[data-history-panel], .history-panel-placeholder')).toBeNull()
       const panel = container.querySelector('.panel--portfolio')!
       expect(panel.firstElementChild?.className).toBe('portfolio-performance')
-      expect(panel.lastElementChild?.getAttribute('aria-label')).toBe('Allocation mix')
+      expect(container.querySelector('[aria-label="Allocation mix"], .alloc-summary, .alloc-more')).toBeNull()
       expect(panel.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('all')
-      expect(panel.querySelector('.alloc-summary')?.textContent).toContain('50% in profit')
-      const equity = [...panel.querySelectorAll<HTMLButtonElement>('.scope-btn')].find((button) => button.textContent?.startsWith('Equity'))!
+      const equity = [...container.querySelectorAll<HTMLButtonElement>('.panel--ledger .scope-btn')].find((button) => button.textContent?.startsWith('Equity'))!
       await act(async () => equity.click())
       expect(panel.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('equity')
-      expect(panel.querySelector('.alloc-legend')?.textContent).toContain('EQUITY')
-      expect(panel.querySelector('.alloc-legend')?.textContent).not.toContain('FUND')
-      expect(panel.querySelector('.alloc-summary')?.textContent).toContain('100% in profit')
-      expect(panel.querySelector('.alloc-summary')?.textContent).toContain('100% equity')
     } finally {
       await act(async () => root.unmount())
-      canvas.mockRestore()
     }
   })
 
@@ -231,7 +331,23 @@ describe('overview valuation and visible work', () => {
     const root = createRoot(container)
     try {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      const allFund = container.querySelector<HTMLButtonElement>('.table--ledger [aria-label="Show details for Fund 0"]')!
+      expect(allFund).not.toBeNull()
+      await act(async () => allFund.click())
+      expect(allFund.getAttribute('aria-expanded')).toBe('true')
+      expect(container.querySelector('.table--ledger .ledger-fund-detail')?.textContent).toContain('Imported XIRR')
+      await act(async () => allFund.click())
+      const allMobileFund = container.querySelector<HTMLButtonElement>('.ledger-mobile-row--fund')!
+      await act(async () => allMobileFund.click())
+      expect(allMobileFund.getAttribute('aria-expanded')).toBe('true')
+      await act(async () => allMobileFund.click())
       await act(async () => container.querySelectorAll<HTMLButtonElement>('.scope-btn')[2].click())
+      const mobileFund = container.querySelector<HTMLButtonElement>('.ledger-mobile-row')!
+      await act(async () => mobileFund.click())
+      expect(mobileFund.getAttribute('aria-expanded')).toBe('true')
+      expect(container.querySelector('.ledger-mobile-detail')?.textContent).toContain('Imported XIRR')
+      await act(async () => mobileFund.click())
+      expect(container.querySelector('.ledger-mobile-detail')).toBeNull()
       const summary = container.querySelector('.mf-summary')
       expect(summary?.textContent).not.toContain('Portfolio XIRR')
       expect(summary?.textContent).not.toContain('Requires dated cash flows')
@@ -244,7 +360,7 @@ describe('overview valuation and visible work', () => {
       state.store = { ...state.store, positions: snapshot.positions, rawPositions: mergedPositions, folios: mergedFolios, snapshot }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       expect(container.querySelector('.panel--ledger .table tbody tr td:nth-child(6)')?.textContent).toBe('—')
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show the 2 merged entries for Combined Fund"]')?.click())
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show details for Combined Fund"]')?.click())
       expect([...container.querySelectorAll('.trow--nested .ledger-members [data-label="XIRR"]')].map((node) => node.textContent)).toEqual(['+12.00%', '+24.00%'])
       expect(container.textContent).toContain('A merged XIRR requires dated cash flows')
     } finally { await act(async () => root.unmount()) }
@@ -293,7 +409,7 @@ describe('overview valuation and visible work', () => {
     }
   })
 
-  it('labels incomplete values, calculates covered P&L and keeps index work independent of holding count', async () => {
+  it('excludes unpriced holdings from P&L and keeps index work independent of holding count', async () => {
     const positions: Position[] = Array.from({ length: 5000 }, (_, i) => ({ id: String(i), ticker: `HOLD${i}`, name: `Holding ${i}`, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: i === 4999 ? null : 120 }))
     const folios = [{ id: 'test', name: 'Test', importedAt: Date.now(), positions }]
     const snapshot = investmentWorkspace.readSnapshot({ folios, quotes: {} })
@@ -303,19 +419,22 @@ describe('overview valuation and visible work', () => {
     const root = createRoot(container)
     try {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(container.textContent).toContain('Priced holdings value')
-      expect(container.textContent).toContain('1 holding unpriced')
-      expect(container.textContent).toContain('Priced holdings P&L')
-      expect(container.querySelector('.scoreboard')?.textContent).toContain('+20.00% on priced cost')
-      expect(container.querySelector('.score--session .score-value')?.textContent).toBe('Unavailable')
+      expect(container.querySelector('.score--session .score-value')?.textContent).toBe('—')
       expect(container.querySelector('.score--session')?.textContent).toContain('Awaiting updates')
+      expect(snapshot.unpricedCount).toBe(1)
       expect(snapshot.pnl).toBe(99_980)
-      expect(container.querySelectorAll('.ticker-item')).toHaveLength(5)
+      expect(container.querySelectorAll('.ticker-item')).toHaveLength(2)
       expect(state.format.mock.calls.length).toBeLessThan(1500)
+      expect(container.querySelectorAll('.panel--ledger tbody > tr')).toHaveLength(25)
+      const pager = container.querySelector('[aria-label="Ledger pages"]')!
+      expect(pager.textContent).toContain('1–25 / 5000')
+      await act(async () => [...pager.querySelectorAll('button')].find((button) => button.textContent === 'Next')!.click())
+      expect(pager.textContent).toContain('26–50 / 5000')
+      expect(container.querySelector('.panel--ledger tbody')?.textContent).toContain('HOLD25')
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('moves the session summary into the scoreboard, keeps totals accurate and masks private values', async () => {
+  it('keeps only the session summary beside public indices and masks private movement data', async () => {
     const positions: Position[] = [
       { id: 'winner', ticker: 'WIN', name: 'Winner', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
       { id: 'loser', ticker: 'LOSS', name: 'Loser', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 90 },
@@ -332,10 +451,12 @@ describe('overview valuation and visible work', () => {
     const onGoTo = vi.fn()
     try {
       await act(async () => root.render(<Overview onGoTo={onGoTo} onRequestImport={vi.fn()} />))
-      const summary = container.querySelector('[aria-label="Portfolio summary"]')!
+      const summary = container.querySelector('.overview-market-strip .scoreboard')!
       const session = summary.querySelector('[aria-label="Session summary"]')!
-      expect([...summary.querySelectorAll('.score > .score-value')].map((node) => node.textContent)).toEqual(['₹210.00', '−₹7.00', '₹200.00', '+₹10.00'])
-      expect(summary.children[1]).toBe(session)
+      expect([...summary.querySelectorAll('.score > .score-value')].map((node) => node.textContent)).toEqual(['−₹7.00'])
+      expect(container.querySelector('.overview-market-strip .tiker-wrap')?.getAttribute('data-indices-allowed')).toBe('true')
+      expect(container.querySelector('.score--current')).toBeNull()
+      expect(container.querySelector('.score--secondary')).toBeNull()
       expect(session.querySelector('.score-value')?.getAttribute('aria-label')).toBe('Latest session · 01 Oct 2026 portfolio move: −₹7.00')
       expect(session.querySelector('.score-value')?.classList.contains('down')).toBe(true)
       expect(session.querySelector('time')?.dateTime).toBe('2026-10-01')
@@ -344,12 +465,13 @@ describe('overview valuation and visible work', () => {
       expect(session.querySelector('.score-label button')?.getAttribute('title')).toBe('Open Insights')
       expect(session.lastElementChild?.classList.contains('score-session-basis')).toBe(true)
       expect(container.querySelector('.daily-brief, .performer-half, .score-move')).toBeNull()
-      expect(summary.textContent).not.toMatch(/Best performer|Worst performer|Today/)
       await act(async () => session.querySelector<HTMLButtonElement>('button')!.click())
       expect(onGoTo).toHaveBeenCalledExactlyOnceWith('insights')
-      expect(summary.textContent).not.toContain('Total market exposure')
-      expect(summary.textContent).not.toContain('Cost basis deployed')
-      expect(summary.textContent).not.toContain('on cost')
+      const orderedPanels = [...container.querySelectorAll('.span-grid > *')].map((node) => node.classList.contains('panel--ledger') ? 'ledger' : 'portfolio')
+      expect(orderedPanels).toEqual(['ledger', 'portfolio'])
+      const portfolioPanel = container.querySelector('.panel--portfolio')!
+      expect(portfolioPanel.querySelector('.portfolio-performance')).not.toBeNull()
+      expect(portfolioPanel.querySelector('.portfolio-allocation')).toBeNull()
 
       const gainQuotes = { ...quotes, [quoteKey(positions[0])]: { ...quotes[quoteKey(positions[0])], change: 7 } }
       state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: gainQuotes }) }
@@ -401,10 +523,12 @@ describe('overview valuation and visible work', () => {
       expect(container.querySelector('.score--session .score-value')?.getAttribute('aria-label')).toContain('stocks + ETFs move')
       const symbolHeader = container.querySelector<HTMLTableCellElement>('.table--ledger th')!
       const sortButton = symbolHeader.querySelector('button')!
+      const scopeButton = container.querySelector('.overview-actions .scope-btn')
       expect(symbolHeader.getAttribute('aria-sort')).toBe('none')
       await act(async () => sortButton.click())
       expect(container.querySelector('.table--ledger th')?.getAttribute('aria-sort')).toBe('ascending')
       expect(container.querySelector('.table--ledger th button')).toBe(sortButton)
+      expect(container.querySelector('.overview-actions .scope-btn')).toBe(scopeButton)
       await act(async () => container.querySelector<HTMLButtonElement>('.table--ledger th button')!.click())
       expect(container.querySelector('.table--ledger th')?.getAttribute('aria-sort')).toBe('descending')
       const choose = async (label: string) => act(async () => [...container.querySelectorAll<HTMLButtonElement>('.overview-actions .scope-btn')].find((button) => button.textContent?.startsWith(label))!.click())
@@ -413,13 +537,11 @@ describe('overview valuation and visible work', () => {
       expect(container.querySelector('.score--session')?.textContent).toContain('NAV move')
       expect(container.querySelector('.score--session')?.textContent).toContain('1 of 1 published NAVs')
       expect(container.querySelector('.score--session .score-value')?.getAttribute('aria-label')).toContain('published NAV move')
-      expect(container.querySelectorAll('.scoreboard > .score')).toHaveLength(4)
-      expect(container.querySelector('.score--current .score-value')?.textContent).toBe('₹600.00')
+      expect(container.querySelectorAll('.scoreboard > .score')).toHaveLength(1)
       expect(container.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('mutual')
       expect(container.querySelector('.panel--ledger')?.textContent).not.toContain('XIRR')
       await choose('Equity')
       expect(movement()).toBe('+₹16.00')
-      expect(container.querySelector('.score--current .score-value')?.textContent).toBe('₹370.00')
       await choose('All')
       expect(movement()).toBe('+₹16.00')
     } finally { await act(async () => root.unmount()); canvas.mockRestore() }

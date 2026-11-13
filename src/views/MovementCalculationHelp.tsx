@@ -11,6 +11,7 @@ export function MovementCalculationHelp({ session = false }: { session?: boolean
     <span id={id} role="tooltip" className="risk-help-popover">
       <strong>Current quantity × price change</strong>
       <span>{session ? 'Includes stock and ETF moves, plus NAV changes published for this session. Holdings without a reported change are excluded.' : 'Reprices today’s holdings. Past trades, payments and quantity changes are excluded.'}</span>
+      {session && <span>Bar lengths compare absolute rupee impacts with the largest shown contributor. Percentages show each holding’s price move.</span>}
       {!session && <span>Opening prices use the last close before the period, within seven days. End prices use a provider quote or close from the past seven days.</span>}
     </span>
   </button>

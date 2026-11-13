@@ -1,16 +1,22 @@
 import { useEffect, useState } from 'react'
 import { CLOSED_QUOTE_RECHECK_MS, isMarketOpen } from './live'
-import { cachedMarketIndexQuotes, INDEX_REFRESH_MS, loadMarketIndexQuotes, nextMarketIndexRefreshAt } from './marketIndexQuotes'
+import { cachedMarketIndexQuotes, INDEX_REFRESH_MS, loadMarketIndexQuotes, nextMarketIndexRefreshAt, persistMarketIndexQuotes } from './marketIndexQuotes'
+import { normalizeMarketIndexIds, selectedMarketIndices } from './marketIndexSelection'
 
-export function useMarketIndexQuotes(allowed: boolean) {
-  const [snapshot, setSnapshot] = useState(cachedMarketIndexQuotes)
+export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly string[]) {
+  const selection = normalizeMarketIndexIds(indexIds)
+  const key = selection.join('|')
+  const [current, setCurrent] = useState(() => ({ key, snapshot: cachedMarketIndexQuotes(selection) }))
+  const snapshot = current.key === key ? current.snapshot : cachedMarketIndexQuotes(selection)
   const [loading, setLoading] = useState(allowed && !snapshot.checkedAt)
 
   useEffect(() => {
     if (!allowed) return
     let active = true
     let controller: AbortController | null = null
-    let marketOpen = isMarketOpen()
+    const includesGlobal = selectedMarketIndices(selection).some((index) => index.region === 'Global')
+    const quoteWindowOpen = () => includesGlobal || isMarketOpen()
+    let marketOpen = quoteWindowOpen()
     let closeRefreshPending = false
     let initialRefreshPending = true
     let lastRefreshAt = 0
@@ -23,8 +29,8 @@ export function useMarketIndexQuotes(allowed: boolean) {
       const request = new AbortController()
       controller = request
       setLoading(true)
-      void loadMarketIndexQuotes(request.signal, force)
-        .then((next) => { if (active && !request.signal.aborted) setSnapshot(next) })
+      void loadMarketIndexQuotes(request.signal, force, selection)
+        .then((next) => { if (active && !request.signal.aborted) setCurrent({ key, snapshot: next }) })
         .catch(() => {})
         .finally(() => {
           if (controller !== request) return
@@ -33,13 +39,13 @@ export function useMarketIndexQuotes(allowed: boolean) {
             setLoading(false)
             if (marketOpen && !document.hidden) refreshTimer = setTimeout(() => {
               if ((updateMarket() || closeRefreshPending) && refresh(closeRefreshPending)) closeRefreshPending = false
-            }, Math.max(INDEX_REFRESH_MS, nextMarketIndexRefreshAt() - Date.now()))
+            }, Math.max(INDEX_REFRESH_MS, nextMarketIndexRefreshAt(selection) - Date.now()))
           }
         })
       return true
     }
     const updateMarket = () => {
-      const open = isMarketOpen()
+      const open = quoteWindowOpen()
       if (marketOpen && !open) closeRefreshPending = true
       marketOpen = open
       if (open) closeRefreshPending = false
@@ -47,6 +53,7 @@ export function useMarketIndexQuotes(allowed: boolean) {
     }
     const visibility = () => {
       if (document.hidden) {
+        persistMarketIndexQuotes()
         clearTimeout(refreshTimer)
         if (controller) initialRefreshPending = true
         controller?.abort()
@@ -66,8 +73,9 @@ export function useMarketIndexQuotes(allowed: boolean) {
       if (((open && !wasOpen) || closeRefreshPending || initialRefreshPending) && refresh(closeRefreshPending)) closeRefreshPending = false
     }, INDEX_REFRESH_MS)
     document.addEventListener('visibilitychange', visibility)
-    return () => { active = false; window.clearInterval(timer); clearTimeout(refreshTimer); document.removeEventListener('visibilitychange', visibility); controller?.abort() }
-  }, [allowed])
+    window.addEventListener('pagehide', persistMarketIndexQuotes)
+    return () => { active = false; window.clearInterval(timer); clearTimeout(refreshTimer); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', persistMarketIndexQuotes); controller?.abort(); persistMarketIndexQuotes() }
+  }, [allowed, key])
 
-  return { ...snapshot, quotes: allowed ? snapshot.quotes : {}, loading: allowed && loading }
+  return { ...snapshot, quotes: allowed ? snapshot.quotes : {}, loading: allowed && (current.key !== key ? !snapshot.checkedAt : loading) }
 }

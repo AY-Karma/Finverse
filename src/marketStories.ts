@@ -120,6 +120,7 @@ export function buildMarketStories(snapshot: InvestmentSnapshot, histories: Hold
     const benchmarkHistories = Object.fromEntries(benchmarkPositions.map((position, index) => [quoteKey(position), benchmarks[index].points]))
     const benchmarkMoves = calculateHoldingMarketMoves(benchmarkPositions, {}, benchmarkHistories, period.from, period.to).rows
       .filter((row) => row.through >= period.from)
+      .sort((a, b) => b.changePct - a.changePct)
     if (benchmarkMoves.length) stories.push({
       id: `market:${periodKey}`, kind: 'market', eyebrow: `${editionLabel} · Indian markets`, title: recap ? weekly ? 'The market this week.' : `The market in ${month}.` : 'The market this month.',
       metric: formatPercent(benchmarkMoves[0].changePct), metricLabel: benchmarkMoves[0].label, tone: tone(benchmarkMoves[0].changePct),

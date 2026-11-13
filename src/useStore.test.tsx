@@ -402,7 +402,7 @@ describe('automatic equity refresh', () => {
     } finally { await view.close() }
   })
 
-  it('refreshes stocks and ETFs every second and retains the daily mutual-fund NAV', async () => {
+  it('refreshes stocks and ETFs every second while retaining imported fund prices until a NAV window', async () => {
     refreshQuotes.mockImplementation(async (requested: Position[]) => ({
       quotes: { [quoteKey(stock)]: stockQuote(), [quoteKey(etf)]: stockQuote(), ...(requested.some((position) => position.type === 'mutual-fund') ? { [quoteKey(fund)]: nav } : {}) },
       updated: requested.length, failed: 0, skipped: 0,
@@ -410,16 +410,16 @@ describe('automatic equity refresh', () => {
     const view = await mount([stock, etf, fund])
     try {
       expect(refreshQuotes.mock.calls[0][0]).toHaveLength(2)
-      expect(refreshQuotes.mock.calls[1][0]).toMatchObject([{ type: 'mutual-fund' }])
+      expect(refreshQuotes).toHaveBeenCalledOnce()
       expect(view.read().quoteLastCheckedAt).toBe(Date.now())
       expect(view.read().quoteNextRefreshAt).toBe(Date.now() + 1_000)
       await act(async () => { await vi.advanceTimersByTimeAsync(999) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes).toHaveBeenCalledOnce()
       await act(async () => { await vi.advanceTimersByTimeAsync(1) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(3)
-      expect(refreshQuotes.mock.calls[2][0]).toMatchObject([{ id: 'stock' }, { id: 'etf', type: 'etf' }])
-      expect(view.read().liveQuotes[quoteKey(fund)]).toEqual(nav)
-      expect(view.read().snapshot.currentValue).toBe(430)
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes.mock.calls[1][0]).toMatchObject([{ id: 'stock' }, { id: 'etf', type: 'etf' }])
+      expect(view.read().liveQuotes[quoteKey(fund)]).toBeUndefined()
+      expect(view.read().snapshot.currentValue).toBe(420)
     } finally { await view.close() }
   })
 
@@ -442,14 +442,15 @@ describe('automatic equity refresh', () => {
     const view = await mount([stock, fund])
     try {
       await act(async () => view.read().setSettings({ ...view.read().settings, density: 'compact' }))
-      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes).toHaveBeenCalledOnce()
       await act(async () => { await vi.advanceTimersByTimeAsync(999) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes).toHaveBeenCalledOnce()
       await act(async () => { await vi.advanceTimersByTimeAsync(1) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(3)
-      expect(refreshQuotes.mock.calls[2][0]).toMatchObject([{ id: 'stock' }])
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes.mock.calls[1][0]).toMatchObject([{ id: 'stock' }])
       await act(async () => { expect(await view.read().refreshNow()).toMatchObject({ ok: true }) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(5)
+      expect(refreshQuotes).toHaveBeenCalledTimes(3)
+      expect(refreshQuotes.mock.calls.every(([requested]) => requested.every((position: Position) => position.type !== 'mutual-fund'))).toBe(true)
       expect(view.read().quoteNextRefreshAt).toBe(Date.now() + 1_000)
     } finally { await view.close() }
   })
@@ -473,9 +474,9 @@ describe('automatic equity refresh', () => {
     const view = await mount([stock, fund], undefined, '2026-10-13T04:36:30Z')
     const navCalls = () => refreshQuotes.mock.calls.filter(([requested]) => requested.every((position: Position) => position.type === 'mutual-fund'))
     try {
-      expect(navCalls()).toHaveLength(1)
+      expect(navCalls()).toHaveLength(0)
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
-      expect(navCalls()).toHaveLength(2)
+      expect(navCalls()).toHaveLength(1)
       expect(view.read().marketDataRefreshing).toBe(false)
       expect(view.read().quoteNextRefreshAt).toBe(Date.now() + 1_000)
       await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
@@ -535,26 +536,6 @@ describe('automatic equity refresh', () => {
     } finally { await view.close() }
   })
 
-  it('checks NAV at published slots including after close, without a15-minute retry loop', async () => {
-    refreshQuotes.mockResolvedValueOnce({ quotes: {}, updated: 0, failed: 1, skipped: 0 })
-      .mockResolvedValue({ quotes: { [quoteKey(fund)]: nav }, updated: 1, failed: 0, skipped: 0 })
-    const view = await mount([fund], undefined, '2026-10-13T04:36:30Z')
-    try {
-      await act(async () => { await vi.advanceTimersByTimeAsync(29_999) })
-      expect(refreshQuotes).toHaveBeenCalledOnce()
-      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(2)
-      expect(view.read().liveQuotes[quoteKey(fund)]).toEqual(nav)
-      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(2)
-      vi.setSystemTime(new Date('2026-10-13T12:37:00Z'))
-      await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(3)
-      expect(view.read().quoteNextRefreshAt).toBeNull()
-      expect(refreshQuotes.mock.calls.every(([requested]) => requested.length === 1 && requested[0].type === 'mutual-fund')).toBe(true)
-    } finally { await view.close() }
-  })
-
   it('pauses when hidden, catches up when visible and captures one stock-only close refresh', async () => {
     let hidden = false
     vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
@@ -562,18 +543,18 @@ describe('automatic equity refresh', () => {
     const view = await mount([stock, fund])
     try {
       await act(async () => { hidden = true; document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(60_000) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes).toHaveBeenCalledOnce()
       expect(view.read().quoteNextRefreshAt).toBeNull()
       await act(async () => { hidden = false; document.dispatchEvent(new Event('visibilitychange')) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(3)
-      expect(refreshQuotes.mock.calls[2][0]).toHaveLength(1)
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+      expect(refreshQuotes.mock.calls[1][0]).toHaveLength(1)
       vi.mocked(live.isMarketOpen).mockReturnValue(false)
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(4)
-      expect(refreshQuotes.mock.calls[3][0]).toHaveLength(1)
+      expect(refreshQuotes).toHaveBeenCalledTimes(3)
+      expect(refreshQuotes.mock.calls[2][0]).toHaveLength(1)
       expect(view.read().quoteNextRefreshAt).toBeNull()
       await act(async () => { await vi.advanceTimersByTimeAsync(90_000) })
-      expect(refreshQuotes).toHaveBeenCalledTimes(4)
+      expect(refreshQuotes).toHaveBeenCalledTimes(3)
     } finally { await view.close() }
   })
 })

@@ -61,6 +61,60 @@ afterEach(async () => {
 })
 
 describe('independent live stock and NAV updates', () => {
+  it('restores the last stock observation on first render while startup quotes are pending', async () => {
+    refreshQuotes.mockResolvedValueOnce(result({ [quoteKey(stock)]: equityQuote(150) }))
+    await mount([stock])
+    expect(store.snapshot.currentValue).toBe(150)
+    const history = store.portfolioHistory
+    await act(async () => root!.unmount())
+    root = undefined
+    vi.setSystemTime(new Date('2026-11-10T06:00:00Z'))
+
+    const startup = deferred<LiveQuotesResult>()
+    refreshQuotes.mockImplementation(() => startup.promise)
+    await mount([stock])
+    expect(store.liveQuotes[quoteKey(stock)]).toMatchObject({ price: 150, change: 50 })
+    expect(store.snapshot.currentValue).toBe(150)
+    expect(store.portfolioHistory).toEqual(history)
+    expect(navRequests()).toHaveLength(0)
+    await act(async () => startup.resolve(result({ [quoteKey(stock)]: equityQuote(155) })))
+    expect(store.snapshot.currentValue).toBe(155)
+  })
+
+  it('restores scheduled NAV observations without adding an off-schedule startup request', async () => {
+    vi.setSystemTime(new Date('2026-11-09T04:36:59.999Z'))
+    refreshQuotes.mockResolvedValue(result({ [quoteKey(fund)]: navQuote(130) }))
+    await mount([fund])
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(navRequests()).toHaveLength(1)
+    await act(async () => root!.unmount())
+    root = undefined
+    refreshQuotes.mockClear()
+    await mount([fund])
+    expect(store.snapshot.currentValue).toBe(130)
+    expect(refreshQuotes).not.toHaveBeenCalled()
+  })
+
+  it('avoids revaluing 120 holdings for repeated progress and final quotes', async () => {
+    const positions = Array.from({ length: 120 }, (_, i) => normalizePosition({ ...stock, id: `p${i}`, ticker: `PERF${i}`, providerSymbol: `PERF${i}.NS` }))
+    const quotes = Object.fromEntries(positions.map((position) => [quoteKey(position), equityQuote(150)]))
+    const pending = deferred<LiveQuotesResult>()
+    let progress!: NonNullable<Parameters<MarketDataAdapter['refreshQuotes']>[3]>
+    refreshQuotes.mockImplementation(async (_positions, _previous, _signal, onProgress) => {
+      progress = onProgress!
+      return pending.promise
+    })
+    await mount(positions)
+    await act(async () => progress(result(quotes)))
+    const priced = store.snapshot.contributions
+    const live = store.liveQuotes
+    await act(async () => pending.resolve(result(Object.fromEntries(Object.entries(quotes).map(([key, quote]) => [key, { ...quote }])))))
+    expect(store.liveQuotes).toBe(live)
+    expect(store.snapshot.contributions).toBe(priced)
+    expect(store.snapshot.currentValue).toBe(18_000)
+    expect(store.portfolioHistory.at(-1)?.value).toBe(18_000)
+  })
+
   it('resumes polling when saving an unchanged listing cancels the current request', async () => {
     let requests = 0
     refreshQuotes.mockImplementation(async (_positions, _previous, signal) => {
@@ -104,11 +158,13 @@ describe('independent live stock and NAV updates', () => {
   })
 
   it('applies stocks and continues one-second polling while the first NAV request is pending', async () => {
+    vi.setSystemTime(new Date('2026-11-09T04:36:59.999Z'))
     const pendingNav = deferred<LiveQuotesResult>()
     let price = 149
     refreshQuotes.mockImplementation(async (positions) => positions[0].type === 'mutual-fund'
       ? pendingNav.promise : result({ [quoteKey(stock)]: equityQuote(++price) }))
     await mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(stockRequests()).toHaveLength(1)
     expect(navRequests()).toHaveLength(1)
     expect(store.liveQuotes[quoteKey(stock)].price).toBe(150)
@@ -125,12 +181,14 @@ describe('independent live stock and NAV updates', () => {
   })
 
   it('merges late NAV completion without rolling back a newer stock observation', async () => {
+    vi.setSystemTime(new Date('2026-11-09T04:36:59.999Z'))
     const pendingNav = deferred<LiveQuotesResult>()
     const oldStock = equityQuote(120)
     let price = 149
     refreshQuotes.mockImplementation(async (positions) => positions[0].type === 'mutual-fund'
       ? pendingNav.promise : result({ [quoteKey(stock)]: equityQuote(++price) }))
     await mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
     const latestStock = store.liveQuotes[quoteKey(stock)]
     await act(async () => pendingNav.resolve({ quotes: { [quoteKey(fund)]: navQuote(130), [quoteKey(stock)]: oldStock }, updated: 1, failed: 0, skipped: 0 }))
@@ -142,18 +200,17 @@ describe('independent live stock and NAV updates', () => {
   it('checks the evening NAV schedule without starting stock polling or blanking retained values', async () => {
     vi.setSystemTime(new Date('2026-11-09T12:36:00Z')) // 18:06 IST, before the 18:07 NAV check.
     const eveningNav = deferred<LiveQuotesResult>()
-    let navCalls = 0
     refreshQuotes.mockImplementation(async (positions) => {
       if (positions[0].type !== 'mutual-fund') return result({ [quoteKey(stock)]: equityQuote(150) })
-      return ++navCalls === 1 ? result({ [quoteKey(fund)]: navQuote(110) }) : eveningNav.promise
+      return eveningNav.promise
     })
     await mount()
-    expect(store.snapshot.currentValue).toBe(260)
+    expect(store.snapshot.currentValue).toBe(250)
     expect(store.quoteNextRefreshAt).toBeNull()
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
-    expect(navRequests()).toHaveLength(2)
+    expect(navRequests()).toHaveLength(1)
     expect(stockRequests()).toHaveLength(1)
-    expect(store.snapshot.currentValue).toBe(260)
+    expect(store.snapshot.currentValue).toBe(250)
     expect(store.marketDataRefreshing).toBe(false)
     await act(async () => eveningNav.resolve(result({ [quoteKey(fund)]: navQuote(130) })))
     expect(store.snapshot.currentValue).toBe(280)
@@ -161,23 +218,22 @@ describe('independent live stock and NAV updates', () => {
     expect(store.quoteNextRefreshAt).toBeNull()
   })
 
-  it('finishes a manual stock refresh without waiting for its accompanying NAV request', async () => {
-    const manualNav = deferred<LiveQuotesResult>()
-    let navCalls = 0
+  it('refreshes stocks manually without another NAV request between publication checks', async () => {
+    vi.setSystemTime(new Date('2026-11-09T04:36:59.999Z'))
     let price = 149
     refreshQuotes.mockImplementation(async (positions) => {
       if (positions[0].type !== 'mutual-fund') return result({ [quoteKey(stock)]: equityQuote(++price) })
-      return ++navCalls === 1 ? result({ [quoteKey(fund)]: navQuote(110) }) : manualNav.promise
+      return result({ [quoteKey(fund)]: navQuote(110) })
     })
     await mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     await act(async () => { expect(await store.refreshNow()).toMatchObject({ ok: true }) })
-    expect(navRequests()).toHaveLength(2)
+    expect(navRequests()).toHaveLength(1)
     expect(stockRequests()).toHaveLength(2)
     expect(store.liveQuotes[quoteKey(stock)].price).toBe(151)
     expect(store.liveQuotes[quoteKey(fund)].price).toBe(110)
     expect(store.marketDataRefreshing).toBe(false)
-    await act(async () => manualNav.resolve(result({ [quoteKey(fund)]: navQuote(130) })))
-    expect(store.snapshot.currentValue).toBe(281)
+    expect(store.snapshot.currentValue).toBe(261)
   })
 
   it('applies a partial stock batch before the remaining stock request finishes', async () => {
@@ -222,6 +278,92 @@ describe('independent live stock and NAV updates', () => {
     expect(store.snapshot.quotes).toEqual({})
     expect(store.marketDataRefreshing).toBe(false)
     expect(store.quoteNextRefreshAt).toBeNull()
+  })
+})
+
+describe('scheduled-only NAV refreshes', () => {
+  it('does not fetch NAVs on load or manual refresh between publication windows', async () => {
+    refreshQuotes.mockImplementation(async (positions) => result(Object.fromEntries(positions.map((position) =>
+      [quoteKey(position), position.type === 'mutual-fund' ? navQuote(130) : equityQuote(150)]))))
+    await mount()
+    expect(navRequests()).toHaveLength(0)
+    await act(async () => { expect(await store.refreshNow()).toMatchObject({ ok: true }) })
+    expect(stockRequests()).toHaveLength(2)
+    expect(navRequests()).toHaveLength(0)
+    expect(store.snapshot.currentValue).toBe(250)
+  })
+
+  it('keeps fund-only manual refresh on the scheduled policy', async () => {
+    await mount([fund])
+    expect(refreshQuotes).not.toHaveBeenCalled()
+    await act(async () => { expect(await store.refreshNow()).toMatchObject({ ok: false, reason: 'scheduled-nav' }) })
+    expect(refreshQuotes).not.toHaveBeenCalled()
+    expect(store.snapshot.currentValue).toBe(100)
+  })
+
+  it('makes exactly six NAV attempts over a visible IST day, including failed checks', async () => {
+    vi.setSystemTime(new Date('2026-11-08T18:30:00Z'))
+    refreshQuotes.mockRejectedValue(new Error('Provider unavailable'))
+    await mount([fund])
+    const slots = ['2026-11-08T21:41:00Z', '2026-11-08T23:37:00Z', '2026-11-09T04:37:00Z', '2026-11-09T08:37:00Z', '2026-11-09T12:37:00Z', '2026-11-09T15:37:00Z']
+    for (const [index, slot] of slots.entries()) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(Date.parse(slot) - Date.now() - 1) })
+      expect(navRequests()).toHaveLength(index)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(navRequests()).toHaveLength(index + 1)
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(Date.parse('2026-11-09T18:30:00Z') - Date.now()) })
+    expect(navRequests()).toHaveLength(6)
+    expect(store.snapshot.currentValue).toBe(100)
+  })
+
+  it('skips a hidden publication window instead of catching up on tab return', async () => {
+    vi.setSystemTime(new Date('2026-11-09T12:36:59Z'))
+    let hidden = true
+    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    refreshQuotes.mockResolvedValue(result({ [quoteKey(fund)]: navQuote(130) }))
+    await mount([fund])
+    await act(async () => { await vi.advanceTimersByTimeAsync(61_000) })
+    hidden = false
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(navRequests()).toHaveLength(0)
+    await act(async () => { await vi.advanceTimersByTimeAsync(Date.parse('2026-11-09T15:37:00Z') - Date.now()) })
+    expect(navRequests()).toHaveLength(1)
+  })
+
+  it('does not repeat a completed publication window after reload', async () => {
+    vi.setSystemTime(new Date('2026-11-09T12:36:59Z'))
+    refreshQuotes.mockResolvedValue(result({ [quoteKey(fund)]: navQuote(130) }))
+    await mount([fund])
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    expect(navRequests()).toHaveLength(1)
+    await act(async () => root!.unmount())
+    root = undefined
+    await mount([fund])
+    expect(navRequests()).toHaveLength(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(navRequests()).toHaveLength(1)
+  })
+
+  it('waits for the next publication window after a scheme change', async () => {
+    refreshQuotes.mockImplementation(async (positions) => result({ [quoteKey(positions[0])]: navQuote(130) }))
+    await mount([fund])
+    await act(async () => store.confirmFundScheme(fund.id, { schemeCode: 654321, schemeName: fund.name }))
+    expect(navRequests()).toHaveLength(0)
+    await act(async () => { await vi.advanceTimersByTimeAsync(Date.parse('2026-11-09T08:37:00Z') - Date.now()) })
+    expect(navRequests()).toHaveLength(1)
+    expect(navRequests()[0][0][0].mfScheme?.code).toBe(654321)
+  })
+
+  it('skips an overdue suspended timer instead of requesting NAV between windows', async () => {
+    vi.setSystemTime(new Date('2026-11-09T12:36:59Z'))
+    refreshQuotes.mockResolvedValue(result({ [quoteKey(fund)]: navQuote(130) }))
+    await mount([fund])
+    vi.setSystemTime(new Date('2026-11-09T12:40:00Z'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    expect(navRequests()).toHaveLength(0)
+    await act(async () => { await vi.advanceTimersByTimeAsync(Date.parse('2026-11-09T15:37:00Z') - Date.now()) })
+    expect(navRequests()).toHaveLength(1)
   })
 })
 

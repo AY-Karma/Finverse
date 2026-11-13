@@ -10,12 +10,14 @@ vi.mock('./marketIndexQuotes', () => ({
   INDEX_REFRESH_MS: 1_000,
   cachedMarketIndexQuotes: () => state.empty, loadMarketIndexQuotes: state.load,
   nextMarketIndexRefreshAt: () => Date.now() + 1_000,
+  persistMarketIndexQuotes: vi.fn(),
 }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let root: Root
 let allowed = true
+let indexIds: [string, string] | undefined
 let result: ReturnType<typeof useMarketIndexQuotes>
-function Capture() { result = useMarketIndexQuotes(allowed); return null }
+function Capture() { result = useMarketIndexQuotes(allowed, indexIds); return null }
 const render = () => act(async () => root.render(<Capture />))
 
 beforeEach(() => {
@@ -24,11 +26,39 @@ beforeEach(() => {
   state.load.mockReset().mockResolvedValue({ quotes: { '^NSEI': { price: 25_000, change: 100, pct: 0.4, at: Date.now() } }, checkedAt: Date.now(), unavailable: [] })
   Object.defineProperty(document, 'hidden', { configurable: true, value: false })
   allowed = true
+  indexIds = undefined
   root = createRoot(document.createElement('div'))
 })
 afterEach(async () => { await act(async () => root.unmount()); vi.useRealTimers() })
 
 describe('index quote refresh lifecycle', () => {
+  it('refreshes selected global markets outside NSE hours and pauses when hidden', async () => {
+    state.open = false
+    indexIds = ['sp-500', 'nasdaq-composite']
+    await render()
+    expect(state.load.mock.calls[0][2]).toEqual(indexIds)
+    await act(async () => vi.advanceTimersByTime(1_000))
+    expect(state.load).toHaveBeenCalledTimes(2)
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); vi.advanceTimersByTime(5_000) })
+    expect(state.load).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels the previous selection and ignores its late result', async () => {
+    let complete!: (value: typeof state.empty) => void
+    state.load.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))
+    await render()
+    const signal = state.load.mock.calls[0][0] as AbortSignal
+    indexIds = ['sp-500', 'dax']
+    const selected = { quotes: { '^GSPC': { price: 6_000, change: 10, pct: 0.2, at: Date.now() } }, checkedAt: Date.now(), unavailable: [] }
+    state.load.mockResolvedValueOnce(selected)
+    await render()
+    expect(signal.aborted).toBe(true)
+    expect(result.quotes).toEqual(selected.quotes)
+    await act(async () => complete({ quotes: {}, checkedAt: 123, unavailable: [] }))
+    expect(result.quotes).toEqual(selected.quotes)
+  })
+
   it('schedules from the cache deadline instead of rounding delayed results to another polling tick', async () => {
     state.load.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 250))

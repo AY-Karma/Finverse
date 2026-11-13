@@ -1,11 +1,16 @@
 import { useMemo, useState } from 'react'
 import { usePortfolioBackcast } from '../usePortfolioBackcast'
 import { useStore } from '../useStore'
-import { formatCurrency, formatPercent } from '../valuation'
+import { formatCurrency, formatPercent, effectivePrice } from '../valuation'
+import { PortfolioRiskChecks } from './PortfolioRiskChecks'
 import { HiddenValuesState } from './HiddenValuesState'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
+import { numberFormatter } from '../formatters'
 
 type Scope = 'all' | 'equity' | 'mutual'
+const PERFORMANCE_LINES = [{ key: 'value', label: 'Portfolio value', color: 'var(--chart-value)' }, { key: 'invested', label: 'Invested capital', color: 'var(--chart-invested)', dashed: true }]
+const AXIS_CURRENCY = numberFormatter({ style: 'currency', currency: 'INR', notation: 'compact', maximumFractionDigits: 1 })
+const axisValue = (amount: number) => AXIS_CURRENCY.format(amount)
 
 export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
   const { snapshot, settings } = useStore()
@@ -22,11 +27,11 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
   const latest = performanceHistory[performanceHistory.length - 1]
   const gap = latest ? latest.value - latest.invested : null
   const gapPct = latest?.invested > 0 && gap != null ? gap / latest.invested * 100 : null
-  const value = (amount: number) => formatCurrency(amount)
-  const axisCurrency = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', notation: 'compact', maximumFractionDigits: 1 })
-  const axisValue = (amount: number) => axisCurrency.format(amount)
+  const value = formatCurrency
+  const rows = useMemo(() => performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested })), [performanceHistory])
 
   return (
+    <>
     <section className="portfolio-performance chart-open" aria-label="Portfolio performance">
       <div className="panel-head portfolio-performance-head">
         <div className="panel-head-titles"><span className="panel-title">Portfolio performance</span></div>
@@ -59,8 +64,8 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
         <div className="insight-chart insight-chart--performance">
           {performanceHistory.length >= 2 ? <InteractiveTrendChart
             key={`${scope}:${mode}`}
-            rows={performanceHistory.map((item) => ({ at: item.at, value: item.value, invested: item.invested }))}
-            lines={[{ key: 'value', label: 'Portfolio value', color: 'var(--chart-value)' }, { key: 'invested', label: 'Invested capital', color: 'var(--chart-invested)', dashed: true }]}
+            rows={rows}
+            lines={PERFORMANCE_LINES}
             valueFormatter={value}
             axisFormatter={axisValue}
             differenceFormatter={value}
@@ -72,5 +77,8 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
         </div>
       </>}
     </section>
+    <PortfolioRiskChecks history={history} hideValues={settings.hideValues} pricedCount={positions.filter(position => effectivePrice(position, snapshot.quotes) != null).length} loading={loading}
+      coverage={backcast && backcast.holdingsIncluded < backcast.holdingsTotal ? `History covers ${backcast.holdingsIncluded} of ${backcast.holdingsTotal} holdings · ${backcast.coveragePct.toFixed(0)}% of priced INR value.` : null} />
+    </>
   )
 }

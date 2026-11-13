@@ -37,6 +37,19 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
+it.each([
+  { amounts: [-0.5, 0.25, -0.05], expected: [100, 50, 10], total: '−₹0.30' },
+  { amounts: [-2650, 403.2, -381.9, -318, 90], expected: [100, 15.215094, 14.411321, 12, 3.396226], total: '−₹2856.70' },
+])('keeps one linear rupee scale for positive, negative and sub-rupee contributions: $amounts', async ({ amounts, expected, total }) => {
+  await render(snapshotFor(amounts.map((change, index) => ({ symbol: `HOLDING${index}`, change }))))
+  const widths = [...container.querySelectorAll('.session-contributors-track')].map((track) =>
+    Number.parseFloat((track.firstElementChild as HTMLElement).style.width),
+  )
+  expect(widths).toHaveLength(expected.length)
+  widths.forEach((width, index) => expect(width).toBeCloseTo(expected[index], 5))
+  expect(container.querySelector('.session-contributors-total strong')?.textContent).toBe(total)
+})
+
 it('ranks quantity-weighted contributions by absolute impact and reconciles the remaining holdings', async () => {
   const snapshot = snapshotFor([
     { symbol: 'MANY', quantity: 100, change: 2 },

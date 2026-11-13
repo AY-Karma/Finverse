@@ -1,10 +1,7 @@
 .market-refresh-status { display: grid; gap: 5px; min-width: 0; }
 .market-refresh-status .market-status { grid-template-columns: 8px minmax(0, 1fr); font-size: 14px; line-height: 1.5; }
-.market-refresh-next { color: var(--ink-muted); font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .market-refresh-issue { display: block; font-size: 14px; line-height: 1.5; }
-.market-refresh-status[data-periodic='true'] .market-refresh-next { min-height: 21px; }
-.market-refresh-status[data-periodic='true'] .market-refresh-issue { min-height: 42px; }
-.market-refresh-status[data-periodic='false'] > :empty { display: none; }
+.market-refresh-status > :empty { display: none; }
 @media (max-width: 560px) {
   .market-refresh-status .market-status { gap: 8px; }
 }

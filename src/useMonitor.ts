@@ -311,6 +311,8 @@ export function useMonitor() {
         ? 'Latest available prices requested. Watch rules use provider observation times.'
         : result.reason === 'no-live-listings'
           ? 'No verified NSE match is available for live prices. Imported values are retained.'
+        : result.reason === 'scheduled-nav'
+          ? 'Mutual-fund NAVs update at scheduled publication checks.'
         : result.reason === 'disabled'
           ? 'Enable external market data in Settings to refresh prices.'
           : result.reason === 'cooldown'

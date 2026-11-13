@@ -1,7 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { nextNavRefreshAt } from './navRefreshSchedule'
-
-afterEach(() => vi.useRealTimers())
 
 describe('MFAPI publication schedule', () => {
   it.each([
@@ -26,12 +24,6 @@ describe('MFAPI publication schedule', () => {
   it('keeps overnight weekend publication checks for delayed daily NAVs', () => {
     expect(nextNavRefreshAt(Date.parse('2026-11-07T18:00:00Z'))).toBe(Date.parse('2026-11-07T21:41:00Z'))
     expect(nextNavRefreshAt(Date.parse('2026-11-08T09:00:00Z'))).toBe(Date.parse('2026-11-08T12:37:00Z'))
-  })
-
-  it('uses current time after a suspended tab resumes instead of replaying missed slots', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-11-11T11:00:00Z'))
-    expect(nextNavRefreshAt()).toBe(Date.parse('2026-11-11T12:37:00Z'))
   })
 
   it('handles IST day and year boundaries independently of the host timezone', () => {

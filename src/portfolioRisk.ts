@@ -64,6 +64,7 @@ export function calculatePortfolioRisk(points: readonly RiskPoint[]) {
     historyDays: latest ? Math.max(0, calendarDay(latest.at) - calendarDay(points[0].at)) : 0,
     downSessions,
     observedSessions: returns.length,
+    dailyReturns: returns,
     downSessionPct: returns.length ? downSessions / returns.length * 100 : null,
     volatility: variance == null ? null : Math.sqrt(variance) * Math.sqrt(252) * 100,
     worstAt,

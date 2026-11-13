@@ -88,6 +88,7 @@ export interface Folio {
 }
 
 export interface Settings {
+  marketIndices?: [string, string]
   currency: Currency
   allowExternalData: boolean
   density: Density

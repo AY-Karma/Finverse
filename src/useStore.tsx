@@ -21,6 +21,7 @@ import { createWorkspaceArchive } from './workspaceArchive'
 import { canConfirmFundScheme, type FundSchemeCandidate } from './fundSchemes'
 import { applyNsePricing, preferNsePricing, type NsePricingCandidate } from './nsePricing'
 import { nextNavRefreshAt as navRefreshDeadline } from './navRefreshSchedule'
+import { loadCachedQuotes, saveCachedQuotes } from './liveQuoteCache'
 import { BSE_PRICING_NOTICE, hasInrDenomination, normalizePosition } from './instruments'
 import { combinedPositionMembers, hasSupportedValuationCurrency, quoteKey } from './valuation'
 import { loadMonitorState } from './monitor'
@@ -40,12 +41,12 @@ export type View = 'overview' | 'holdings' | 'insights' | 'research' | 'settings
 
 type RefreshResult =
   | { ok: true; retryInMs: number }
-  | { ok: false; reason: 'disabled' | 'no-live-listings' | 'cooldown' | 'failed'; retryInMs: number }
+  | { ok: false; reason: 'disabled' | 'no-live-listings' | 'scheduled-nav' | 'cooldown' | 'failed'; retryInMs: number }
 
-const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
 const EQUITY_REFRESH_MS = 1_000
 const FAILED_QUOTE_REFRESH_MS = 30_000
 const MAX_REFRESH_BACKOFF_MS = 5 * 60_000
+const NAV_SLOT_WINDOW_MS = 60_000
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
 
 export interface ImportPreview {
@@ -103,7 +104,8 @@ function readPersistedSettings(): string | null | undefined {
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [folios, setFoliosState] = useState<Folio[]>(() => loadFolios())
   const [savedSettings, setSettingsState] = useState<Settings>(() => loadSettings())
-  const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>({})
+  const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>(() => savedSettings.allowExternalData
+    ? loadCachedQuotes(folios.flatMap((folio) => folio.positions)) : {})
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [marketDataRefreshing, setMarketDataRefreshing] = useState(savedSettings.allowExternalData && folios.some((folio) => folio.positions.length > 0))
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
@@ -122,14 +124,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const durableFoliosRef = useRef(initialDurableFolios)
   const [initialDurableSettings] = useState(readPersistedSettings)
   const durableSettingsRef = useRef(initialDurableSettings)
-  const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
+  const liveQuotesRef = useRef(liveQuotes)
+  const lastQuoteCacheWrite = useRef<number | null>(null)
   const activeRefreshControllers = useRef(new Set<AbortController>())
   const activeQuoteController = useRef<AbortController | null>(null)
   const activeNavController = useRef<AbortController | null>(null)
   const quoteResults = useRef<Partial<Record<'equity' | 'nav', LiveQuotesResult>>>({})
   const loadedQuoteKey = useRef<string | null>(null)
-  const loadedNavKey = useRef<string | null>(null)
-  const nextNavRefreshAt = useRef(0)
   const failedQuoteChecks = useRef(0)
   const lastQuoteCheck = useRef(0)
   const scheduleQuotes = useRef<((failed: boolean, checked?: boolean) => void) | null>(null)
@@ -186,10 +187,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [assertCurrentWorkspace])
 
   const holdings = useMemo(() => investmentWorkspace.prepareHoldings(folios), [folios])
-  const snapshot = useMemo(
-    () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, history: portfolioHistory }),
-    [folios, holdings, liveQuotes, settings.allowExternalData, portfolioHistory],
+  const valuation = useMemo(
+    () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES }),
+    [folios, holdings, liveQuotes, settings.allowExternalData],
   )
+  const snapshot = useMemo(() => ({ ...valuation, history: portfolioHistory }), [valuation, portfolioHistory])
   const rawPositions = snapshot.rawPositions
   const positions = snapshot.positions
   const positionsRef = useRef(positions)
@@ -207,8 +209,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [folioRefreshKey, settings.allowExternalData])
 
   const setLiveQuotes = useCallback((q: Record<string, LiveQuote>) => {
+    const current = liveQuotesRef.current
+    const keys = Object.keys(q)
+    if (keys.length === Object.keys(current).length && keys.every((key) => {
+      const before = current[key], after = q[key]
+      return before && before.price === after.price && before.at === after.at && before.source === after.source
+        && before.fetchedAt === after.fetchedAt && before.change === after.change && before.changePct === after.changePct
+    })) return current
     liveQuotesRef.current = q
     setLiveQuotesState(q)
+    const now = Date.now()
+    if (lastQuoteCacheWrite.current == null || now - lastQuoteCacheWrite.current >= 10_000) {
+      saveCachedQuotes(positionsRef.current, q, now)
+      lastQuoteCacheWrite.current = now
+    }
+    return q
+  }, [])
+
+  useEffect(() => {
+    const flush = () => {
+      if (!workspaceChangedRef.current) saveCachedQuotes(positionsRef.current, liveQuotesRef.current)
+    }
+    const visibility = () => { if (document.hidden) flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', visibility)
+    return () => { window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', visibility); flush() }
   }, [])
 
   const persistPortfolioChange = useCallback(async (next: Folio[], history?: PortfolioSnapshot[]) => {
@@ -413,7 +438,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [folios, positions, settings, portfolioHistory])
 
-  // Manual refresh includes NAVs; rapid automatic cycles request equities only.
+  // Equities and scheduled NAV batches have independent request lifecycles.
   const refreshQuoteGroup = useCallback(async (group: 'equity' | 'nav'): Promise<LiveQuotesResult | null> => {
     if (!settings.allowExternalData || workspaceChangedRef.current) return null
     assertCurrentWorkspace()
@@ -435,10 +460,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!activeKeys.has(key) || !requestedKeys.has(key)) continue
         if (!merged[key] || merged[key].at <= quote.at) merged[key] = quote
       }
-      setLiveQuotes(merged)
+      const applied = setLiveQuotes(merged)
       quoteResults.current[group] = result
       const results = Object.values(quoteResults.current)
-      setMarketDataResult({ quotes: merged, updated: results.reduce((sum, item) => sum + item.updated, 0),
+      setMarketDataResult({ quotes: applied, updated: results.reduce((sum, item) => sum + item.updated, 0),
         failed: results.reduce((sum, item) => sum + item.failed, 0), skipped: results.reduce((sum, item) => sum + item.skipped, 0) })
     }
     try {
@@ -460,7 +485,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         slot.current = null
         if (ownsIndicator) setMarketDataRefreshing(false)
       }
-      if (group === 'nav' && !controller.signal.aborted) nextNavRefreshAt.current = navRefreshDeadline()
     }
   }, [assertCurrentWorkspace, settings.allowExternalData, setLiveQuotes])
 
@@ -472,22 +496,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     if (!settings.allowExternalData || positionsRef.current.length === 0) return { ok: false, reason: 'disabled', retryInMs: 0 }
     const hasEquities = positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
-    if (!hasEquities && !positionsRef.current.some((position) => position.type === 'mutual-fund')) return { ok: false, reason: 'no-live-listings', retryInMs: 0 }
-    const slot = hasEquities ? activeQuoteController : activeNavController
+    if (!hasEquities) return { ok: false, reason: positionsRef.current.every((position) => position.type === 'mutual-fund') ? 'scheduled-nav' : 'no-live-listings', retryInMs: 0 }
+    const slot = activeQuoteController
     if (slot.current && !slot.current.signal.aborted) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
     const check = manualRefreshCheck()
     if (!check.allowed) return { ok: false, reason: 'cooldown', retryInMs: check.retryInMs ?? 0 }
-    if (hasEquities) void refreshQuoteGroup('nav').catch(() => {})
     try {
-      const result = await refreshQuoteGroup(hasEquities ? 'equity' : 'nav')
+      const result = await refreshQuoteGroup('equity')
       if (!result) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
       const failed = result.failed > 0 && result.updated === 0 && result.skipped === 0
-      if (hasEquities) scheduleQuotes.current?.(failed)
+      scheduleQuotes.current?.(failed)
       if (failed) return { ok: false, reason: 'failed', retryInMs: 0 }
       recordManualRefresh()
       return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
     } catch {
-      if (!workspaceChangedRef.current && hasEquities) scheduleQuotes.current?.(false, false)
+      if (!workspaceChangedRef.current) scheduleQuotes.current?.(false, false)
       return { ok: false, reason: 'failed', retryInMs: 0 }
     }
   }, [assertCurrentWorkspace, settings.allowExternalData, refreshQuoteGroup])
@@ -500,8 +523,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setQuoteNextRefreshAt(null)
       setQuoteLastCheckedAt(null)
       loadedQuoteKey.current = null
-      loadedNavKey.current = null
-      nextNavRefreshAt.current = 0
     }
     if (!positionsRef.current.some((position) => position.type === 'mutual-fund' || resolveYahooSymbol(position))) {
       setMarketDataRefreshing(false)
@@ -582,24 +603,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!settings.allowExternalData || !positionsRef.current.some((position) => position.type === 'mutual-fund')) return
     let active = true
-    const refresh = async () => {
-      if (!active || document.hidden || (activeNavController.current && !activeNavController.current.signal.aborted)) return
-      loadedNavKey.current = folioRefreshKey
-      try { await refreshQuoteGroup('nav') }
-      catch { /* Permission, workspace or identity changes cancel the old request. */ }
+    let timer: ReturnType<typeof setTimeout>
+    const schedule = () => {
+      const scheduledAt = navRefreshDeadline()
+      timer = setTimeout(() => {
+        if (!active) return
+        schedule()
+        const lateness = Date.now() - scheduledAt
+        // A suspended tab skips missed windows rather than fetching on return.
+        if (document.hidden || lateness < 0 || lateness >= NAV_SLOT_WINDOW_MS) return
+        void refreshQuoteGroup('nav').catch(() => {
+          // Permission, workspace or identity changes cancel the old request.
+        })
+      }, Math.max(0, scheduledAt - Date.now()))
     }
-    if (loadedNavKey.current !== folioRefreshKey) void refresh()
-    else if (!nextNavRefreshAt.current) nextNavRefreshAt.current = navRefreshDeadline()
-    const check = () => {
-      if (loadedNavKey.current !== folioRefreshKey || Date.now() >= nextNavRefreshAt.current) void refresh()
-    }
-    const timer = window.setInterval(check, MARKET_CHECK_MS)
-    document.addEventListener('visibilitychange', check)
+    schedule()
     return () => {
       active = false
       activeNavController.current?.abort()
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', check)
+      clearTimeout(timer)
     }
   }, [folioRefreshKey, settings.allowExternalData, positions.length, refreshQuoteGroup])
 
@@ -611,7 +633,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (snapshot.positions.length === 0 || !snapshot.valuationComplete || snapshot.currentValue <= 0) return
     // When external prices are enabled, wait for the first quote response.
     // Recording the imported fallback first created artificial intraday cliffs.
-    if (settings.allowExternalData && snapshot.lastUpdatedAt == null) return
+    if (settings.allowExternalData && (snapshot.lastUpdatedAt == null || !marketDataResult?.updated)) return
     setPortfolioHistory((current) => {
       const next = appendPortfolioSnapshot({
         at: Date.now(),
@@ -622,7 +644,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }, current)
       return next.length === current.length && next[next.length - 1]?.at === current[current.length - 1]?.at ? current : next
     })
-  }, [settings.allowExternalData, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length, snapshot.valuationComplete])
+  }, [settings.allowExternalData, marketDataResult?.updated, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length, snapshot.valuationComplete])
 
   const value = useMemo<Store>(() => ({
     folios,

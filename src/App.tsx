@@ -24,8 +24,9 @@ const PortfolioImportDialog = lazy(() => import('./views/PortfolioImportDialog')
 
 const VIEW_LOADERS = { overview: loadOverview, holdings: loadMonitorView, research: loadResearchView, settings: loadSettingsView, insights: loadInsightsView }
 
-function preloadView(view: View) {
+function preloadView(view: View, externalEnabled: boolean) {
   void VIEW_LOADERS[view]().catch(() => { /* Navigation can retry a failed preload. */ })
+  if (view === 'holdings' && externalEnabled) void loadIpos().catch(() => {})
 }
 
 const NAV: { id: View; label: string }[] = [
@@ -48,10 +49,6 @@ export default function App({ initialView }: { initialView: View }) {
   const researchUrl = useRef(initialView === 'research' ? window.location.pathname + window.location.search : '/app/research')
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
   const { settings } = useStore()
-
-  useEffect(() => {
-    if (settings.allowExternalData) void loadIpos().catch(() => { /* Monitor offers a retry if preloading fails. */ })
-  }, [settings.allowExternalData])
 
   const navigate = useCallback((nextView: View, anchor?: string) => {
     if (window.location.pathname === '/app/research') researchUrl.current = window.location.pathname + window.location.search
@@ -175,9 +172,9 @@ function AppShell({ view, navigate, highlightsEntry, children }: { view: View; n
               aria-current={view === item.id ? 'page' : undefined}
               aria-label={item.label}
               title={sidebarCollapsed ? item.label : undefined}
-              onPointerEnter={() => preloadView(item.id)}
-              onFocus={() => preloadView(item.id)}
-              onTouchStart={() => preloadView(item.id)}
+              onPointerEnter={() => preloadView(item.id, settings.allowExternalData)}
+              onFocus={() => preloadView(item.id, settings.allowExternalData)}
+              onTouchStart={() => preloadView(item.id, settings.allowExternalData)}
               onClick={() => navigate(item.id)}
             >
               <span className="nav-item-icon"><ActionIcon name={item.id} /></span>

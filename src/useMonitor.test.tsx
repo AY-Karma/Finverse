@@ -14,17 +14,20 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(() => { localStorage.clear(); state.positions = []; state.liveQuotes = {}; state.allowExternalData = false; state.workspaceReadOnly = false; state.refreshNow.mockReset(); vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('monitor workspace reload', () => {
-  it('explains unavailable NSE pricing without telling an enabled user to enable external data', async () => {
+  it.each([
+    ['no-live-listings', 'No verified NSE match', 'Imported values are retained'],
+    ['scheduled-nav', 'Mutual-fund NAVs', 'scheduled publication checks'],
+  ])('explains %s without telling an enabled user to enable external data', async (reason, summary, detail) => {
     state.allowExternalData = true
-    state.refreshNow.mockResolvedValue({ ok: false, reason: 'no-live-listings', retryInMs: 0 })
+    state.refreshNow.mockResolvedValue({ ok: false, reason, retryInMs: 0 })
     let controller!: MonitorController
     const Capture = () => { controller = useMonitor(); return null }
     const root = createRoot(document.createElement('div'))
     try {
       await act(async () => root.render(<Capture />))
       await act(async () => controller.refresh())
-      expect(controller.statusMessage).toContain('No verified NSE match')
-      expect(controller.statusMessage).toContain('Imported values are retained')
+      expect(controller.statusMessage).toContain(summary)
+      expect(controller.statusMessage).toContain(detail)
       expect(controller.statusMessage).not.toContain('Enable external')
     } finally { await act(async () => root.unmount()) }
   })

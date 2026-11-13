@@ -32,7 +32,7 @@ describe('settings persistence', () => {
   it('removes retired connection settings and browser data while preserving preferences and portfolios', () => {
     const preferences = {
       currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt',
-      mode: 'light', hideValues: true,
+      mode: 'light', hideValues: true, marketIndices: ['nifty-bank', 'nifty-50'],
     }
     localStorage.setItem('finverse:settings', JSON.stringify({
       ...preferences, accent: 'custom', customAccent: '#7c6cff', provider: 'openai', apiKey: 'retired-key', model: 'retired-model',
@@ -70,7 +70,7 @@ describe('settings persistence', () => {
         const preferences = loadSettings()
         expect(preferences).toEqual({
           currency: 'INR', allowExternalData: true, density: 'comfortable',
-          accent: 'cobalt', mode: 'dark', hideValues: false,
+          accent: 'cobalt', mode: 'dark', hideValues: false, marketIndices: ['nifty-bank', 'nifty-50'],
         })
         expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
       }, raw).not.toThrow()
@@ -83,9 +83,19 @@ describe('settings persistence', () => {
     vi.stubGlobal('sessionStorage', { removeItem: blocked })
     expect(loadSettings()).toEqual({
       currency: 'INR', allowExternalData: true, density: 'comfortable',
-      accent: 'cobalt', mode: 'dark', hideValues: false,
+      accent: 'cobalt', mode: 'dark', hideValues: false, marketIndices: ['nifty-bank', 'nifty-50'],
     })
     expect(saveSettings(loadSettings())).toBe(false)
+  })
+
+  it('persists valid index choices and repairs missing, invalid or duplicate selections', () => {
+    const settings = { ...loadSettings(), marketIndices: ['sp-500', 'nikkei-225'] as [string, string] }
+    expect(saveSettings(settings)).toBe(true)
+    expect(loadSettings().marketIndices).toEqual(settings.marketIndices)
+    localStorage.setItem('finverse:settings', JSON.stringify({ marketIndices: ['nifty-50', 'nifty-50'] }))
+    expect(loadSettings().marketIndices).toEqual(['nifty-50', 'nifty-bank'])
+    localStorage.setItem('finverse:settings', JSON.stringify({ marketIndices: ['invalid', 'invalid'] }))
+    expect(loadSettings().marketIndices).toEqual(['nifty-bank', 'nifty-50'])
   })
 })
 

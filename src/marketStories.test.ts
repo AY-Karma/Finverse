@@ -139,12 +139,17 @@ describe('portfolio stories', () => {
     expect(market.marketChart).toEqual([points[0], points[1], points[2], points[4], points[5]])
   })
 
-  it('keeps five market indices available without repeating the featured one', () => {
+  it.each([
+    { market: 'rising', closes: [109.19, 109.66, 111.6, 108.24, 108.36], order: [1, 0, 4, 3] },
+    { market: 'falling', closes: [90, 96, 98, 85, 95], order: [1, 4, 0, 3] },
+  ])('ranks all five indices by return and charts the best performer in a $market market', ({ closes, order }) => {
     const labels = ['NIFTY 50', 'S&P BSE Sensex', 'NIFTY Bank', 'NIFTY Next 50', 'NIFTY Midcap 50']
-    const market = buildMarketStories(snapshot([holding('AAA')]), {}, today, labels.map((label) => ({ label, points: prices(100, 102) }))).find((story) => story.kind === 'market')!
-    expect(market.metricLabel).toBe(labels[0])
-    expect(market.rows.map((row) => row.label)).toEqual(labels.slice(1))
-    expect(market.marketChart).toEqual(prices(100, 102))
+    const market = buildMarketStories(snapshot([holding('AAA')]), {}, today, labels.map((label, index) => ({ label, points: prices(100, closes[index]) }))).find((story) => story.kind === 'market')!
+    expect(market.metricLabel).toBe('NIFTY Bank')
+    expect(market.metric).toBe(formatPercent(closes[2] - 100))
+    expect(market.rows.map((row) => row.label)).toEqual(order.map((index) => labels[index]))
+    expect(market.marketChart).toEqual(prices(100, closes[2]))
+    expect(market.tone).toBe(closes[2] > 100 ? 'positive' : 'negative')
   })
 
   it('matches the chart to a weekly edition and excludes observations outside its measured window', () => {

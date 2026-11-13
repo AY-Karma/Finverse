@@ -8,6 +8,7 @@ import { hasCompatibleFundScheme } from './fundSchemes'
 import { isNsePricingListing } from './nsePricingProtocol'
 import { hasVerifiedNsePricing } from './instruments'
 import { remapMonitorReferences } from './workspaceReferences'
+import { normalizeMarketIndexIds } from './marketIndexSelection'
 import { writeWorkspaceRecords, type WorkspaceRecords } from './workspaceStorage'
 import { validateLedgerRecords, type LedgerRecord } from './investmentLedger'
 import { MARKET_CAP_STORAGE_KEY, parseMarketCapRecords, type MarketCapRecord } from './marketCapExposure'
@@ -156,6 +157,7 @@ function parseSettings(value: unknown): Settings {
     currency: 'INR', allowExternalData: boolean(row.allowExternalData, 'external-data preference'),
     density: choice(row.density, ['comfortable', 'compact'], 'density'), accent: 'cobalt',
     mode: choice(row.mode, ['dark', 'light'], 'theme'), hideValues: boolean(row.hideValues, 'hidden-values preference'),
+    ...(row.marketIndices !== undefined ? { marketIndices: normalizeMarketIndexIds(row.marketIndices) } : {}),
   }
   return settings
 }

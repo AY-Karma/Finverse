@@ -1,6 +1,5 @@
 import type { InvestmentSnapshot } from '../investmentWorkspace'
 import { assetTypeLabel, instrumentLabel } from '../instruments'
-import { DitherBar } from './DitherBar'
 import { MovementCalculationHelp } from './MovementCalculationHelp'
 import { formatPercent } from '../valuation'
 import './SessionContributors.css'
@@ -28,7 +27,7 @@ export function SessionContributors({ snapshot, formatValue, compact = false }: 
   const total = complete ? snapshot.dailyChange ?? reportedTotal : reportedTotal
   const otherCount = (compact ? ranked.length : reported.length) - topFive.length
   const remainder = ranked.slice(5).reduce((sum, item) => sum + item.dailyContribution, 0)
-  const largest = Math.max(...topFive.map((item) => Math.abs(item.dailyContribution)), 1)
+  const largest = Math.abs(topFive[0]?.dailyContribution ?? 0)
   const signed = (amount: number) => `${amount > 0 ? '+' : amount < 0 ? '\u2212' : ''}${formatValue(Math.abs(amount))}`
 
   if (!reported.length) {
@@ -53,7 +52,7 @@ export function SessionContributors({ snapshot, formatValue, compact = false }: 
             <span className={compact ? 'holding-move-name' : undefined} title={compact ? `${name} · ${assetTypeLabel(item.type)}` : name}>{name}</span>
             {compact ? item.dailyPriceChangePct != null && <span className="holding-move-pct">{formatPercent(item.dailyPriceChangePct)}</span> : <small>{name !== item.symbol ? `${item.symbol} · ` : ''}{assetTypeLabel(item.type)}</small>}
           </span>
-          <DitherBar className="session-contributors-track" segments={[{ value: Math.abs(item.dailyContribution), color: direction === 'up' ? 'green' : 'red' }]} scale={largest} />
+          <span className="session-contributors-track" aria-hidden="true"><span className={direction} style={{ width: `${Math.abs(item.dailyContribution) / largest * 100}%` }} /></span>
           <strong className={direction}>{signed(item.dailyContribution)}</strong>
         </li>
       })}

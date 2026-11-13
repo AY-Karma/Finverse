@@ -1,0 +1,14 @@
+.portfolio-allocation .alloc-split { grid-template-rows: auto auto; align-content: start; }
+.portfolio-allocation .alloc-bottom,
+.portfolio-allocation .alloc-more { display: block; }
+.portfolio-allocation .alloc-more > summary { padding: 12px 0; border-top: 1px solid var(--hairline); color: var(--ink-muted); font-size: 14px; font-weight: 600; cursor: pointer; }
+.portfolio-allocation .alloc-more > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.insights-page .portfolio-allocation { container-type: inline-size; padding-top: var(--sp-md); }
+.portfolio-allocation .alloc-top { grid-template-columns: minmax(150px, 280px) minmax(0, 1fr); }
+.portfolio-allocation .alloc-legend li,
+.portfolio-allocation .alloc-legend li strong,
+.portfolio-allocation .alloc-summary-head > span,
+.portfolio-allocation .alloc-figure { font-size: 14px; }
+@container (max-width: 440px) {
+  .portfolio-allocation .alloc-top { grid-template-columns: minmax(0, 1fr); }
+}

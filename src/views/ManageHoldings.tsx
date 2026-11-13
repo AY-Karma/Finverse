@@ -13,11 +13,26 @@ import { useFolioReviewTime } from '../useFolioReviewTime'
 import { InstrumentReview } from './InstrumentReview'
 import { dateFormatter } from '../formatters'
 import { StatementChanges } from './StatementChanges'
+import { DataHealthGuide } from './DataHealthGuide'
 
 const statementDate = dateFormatter({ day: 'numeric', month: 'short', year: 'numeric' })
 function displayDate(value: number | string): string {
   const date = new Date(typeof value === 'string' ? `${value}T00:00:00` : value)
   return Number.isFinite(date.getTime()) ? statementDate.format(date) : 'Not available'
+}
+
+function positionMarkerHelp(help: HTMLDetailsElement) {
+  const popover = help.querySelector<HTMLElement>('.data-marker-help-popover')
+  if (!popover || !help.open) return
+  const anchor = help.getBoundingClientRect()
+  const topEdge = window.innerWidth <= 768 ? Math.max(12, document.querySelector('.sidebar')?.getBoundingClientRect().bottom ?? 12) : 12
+  popover.style.maxHeight = `${Math.max(120, window.innerHeight - topEdge - 12)}px`
+  const height = popover.getBoundingClientRect().height
+  const below = anchor.bottom + 4
+  const above = anchor.top - height - 4
+  const top = below + height <= window.innerHeight - 12 ? below : above >= topEdge ? above
+    : Math.max(topEdge, window.innerHeight - height - 12)
+  popover.style.top = `${top - anchor.top}px`
 }
 
 export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }: { onRequestImport: (accountId?: string) => void; reviewOpen: boolean; onReviewListings: () => void }) {
@@ -30,6 +45,7 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
   const listingCount = positions.filter((position) => position.type !== 'mutual-fund').length
   const pendingListings = positions.filter(needsInstrumentReview).length
   const sectionRef = useRef<HTMLElement>(null)
+  const markerCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const busyRef = useRef(false)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   const [reviewedId, setReviewedId] = useState<string | null>(null)
@@ -42,13 +58,24 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
   useEffect(() => {
     const dismiss = (event: MouseEvent) => {
       if (!(event.target instanceof Node)) return
-      sectionRef.current?.querySelectorAll<HTMLDetailsElement>('.import-source-files[open], .fund-review[open]').forEach((details) => {
-        const box = details.closest('.imported-portfolio') ?? details
+      sectionRef.current?.querySelectorAll<HTMLDetailsElement>('.import-source-files[open], .fund-review[open], .data-marker-help[open]').forEach((details) => {
+        const box = details.matches('.data-marker-help') ? details : details.closest('.imported-portfolio') ?? details
         if (!box.contains(event.target as Node)) details.open = false
       })
     }
     document.addEventListener('click', dismiss)
-    return () => document.removeEventListener('click', dismiss)
+    const reposition = () => {
+      const help = sectionRef.current?.querySelector<HTMLDetailsElement>('.data-marker-help[open]')
+      if (help) positionMarkerHelp(help)
+    }
+    window.addEventListener('resize', reposition)
+    window.addEventListener('scroll', reposition, true)
+    return () => {
+      clearTimeout(markerCloseTimer.current)
+      document.removeEventListener('click', dismiss)
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('scroll', reposition, true)
+    }
   }, [])
 
   useEffect(() => {
@@ -99,6 +126,28 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
         {!hideValues && <p className="imported-portfolio-date">Last imported <span>{displayDate(latestImport)}</span></p>}
         {!hideValues && oldestFolio && <ImportHealthIndicator importedAt={oldestFolio.importedAt} reviewedAt={oldestFolio.reviewedAt} showLabel />}
       </div>
+      <details className="data-marker-help import-data-help" onToggle={(event) => positionMarkerHelp(event.currentTarget)} onPointerEnter={(event) => {
+        if (event.pointerType !== 'mouse') return
+        clearTimeout(markerCloseTimer.current)
+        event.currentTarget.open = true
+      }} onPointerLeave={(event) => {
+        if (event.pointerType !== 'mouse') return
+        const help = event.currentTarget
+        markerCloseTimer.current = setTimeout(() => {
+          if (!help.contains(document.activeElement)) help.open = false
+        }, 120)
+      }} onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false
+      }} onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        event.currentTarget.open = false
+        event.currentTarget.querySelector('summary')?.focus()
+      }}>
+        <summary aria-label="Explain price data markers">i</summary>
+        <div className="data-marker-help-popover" role="note">
+          <DataHealthGuide />
+        </div>
+      </details>
       <details className="import-source-files">
         <summary><span>Source files</span><span className="import-source-action">Manage imports</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary>
       <div className="folio-list">{folios.map((folio) => <div className="folio-row" key={folio.id}>

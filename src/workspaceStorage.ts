@@ -19,6 +19,7 @@ interface WriteJournal { version: 1; id: string; phase: 'writing' | 'committed';
 
 function isCacheKey(key: string): boolean {
   return key.startsWith('finverse:history:') || key.startsWith('finverse:screenerPath:') || key === 'finverse:manualRefresh'
+    || key === 'finverse:live-quotes:v1' || key === 'finverse:index-quotes:v1'
 }
 
 function readRecords(value: unknown): StoredRecords {

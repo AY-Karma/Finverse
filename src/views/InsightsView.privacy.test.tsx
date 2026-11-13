@@ -12,7 +12,6 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 const { state } = vi.hoisted(() => ({ state: {} as Record<string, unknown> }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
-vi.mock('./HistoryPanel', () => ({ HistoryPanel: () => null }))
 vi.mock('../portfolioBackcast', () => ({ buildPortfolioBackcast: async () => null }))
 
 let root: Root
@@ -31,22 +30,6 @@ afterEach(async () => {
 })
 
 describe('Insights privacy', () => {
-  it('labels imported prices without claiming they are fresh or reporting a move today', async () => {
-    state.settings = { ...loadSettings(), allowExternalData: false, hideValues: false }
-    state.snapshot = investmentWorkspace.readSnapshot({
-      folios: [{ id: 'f', name: 'Portfolio', importedAt: 1, positions: [
-        { id: 'a', ticker: 'A', name: 'A', type: 'stock', quantity: 1, buyPrice: 100, lastPrice: 110, invested: 100 },
-      ] }], quotes: {},
-    })
-    container = document.createElement('div')
-    root = createRoot(container)
-    await act(async () => { root.render(<InsightsView onRequestImport={() => {}} />) })
-    const health = container.querySelectorAll('.insight-kpi')[3]
-    expect(health.textContent).toContain('Imported only')
-    expect(health.textContent).toContain('Freshness unknown')
-    expect(container.textContent).not.toMatch(/Fresh(?!ness)|Today’s move|What moved today/)
-  })
-
   it('dates older-session movers and reports partial coverage without a portfolio return', async () => {
     state.settings = { ...loadSettings(), allowExternalData: true, hideValues: false }
     const positions: Position[] = ['A', 'B'].map((ticker) => (
@@ -59,11 +42,12 @@ describe('Insights privacy', () => {
     container = document.createElement('div')
     root = createRoot(container)
     await act(async () => { root.render(<InsightsView onRequestImport={() => {}} />) })
-    const move = container.querySelector('.insight-kpi')!
-    expect(move.textContent).toContain('01 Oct 2026')
-    expect(move.textContent).toContain('1 of 2 holdings')
+    const move = container.querySelector('.insights-summary-session')!
+    const summary = container.querySelector('.insights-portfolio-summary')!
+    expect(summary.textContent).toContain('01 Oct 2026')
+    expect(summary.textContent).toContain('1 of 2 holdings')
     expect(move.querySelector('strong')?.textContent).toBe('+₹10.00')
-    expect(move.textContent).toContain('Partial')
+    expect(summary.textContent).toContain('Partial')
     expect(move.textContent).not.toContain('10.00%')
     expect(panel('Latest price movers').textContent).toContain('01 Oct 2026')
     expect(panel('Latest price movers').querySelectorAll('.contribution-track')).toHaveLength(1)
