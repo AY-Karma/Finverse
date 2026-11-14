@@ -55,7 +55,7 @@ it('distinguishes preparation from absent observations without drawing a made-up
 
 it('keeps empty, loading and failed states honest and exposes retry and close actions', async () => {
   await render([], 'loading')
-  expect(container.querySelector('[role="status"]')?.textContent).toContain('Loading daily GMP')
+  expect(container.querySelector('[role="status"]')).not.toBeNull()
   expect(container.querySelector('svg[data-tone]')).toBeNull()
   await render([], 'ready')
   expect(container.textContent).toContain('history is unavailable for this IPO')

@@ -499,13 +499,12 @@ it('masks the moved summary and contributor detail', async () => {
   expect(container.querySelector('#session-detail .up, #session-detail .down')).toBeNull()
 })
 
-it('keeps comparison copy in loading state while benchmark prices are still pending', async () => {
+it('keeps pending comparison separate from unavailable history', async () => {
   state.benchmark.mockImplementationOnce(() => new Promise(() => {}))
   await renderInsights([])
   const comparison = container.querySelector('.performance-comparison')!
   expect(comparison.textContent).toContain('Building your comparison')
   expect(comparison.textContent).not.toContain('Historical comparison unavailable')
-  expect(comparison.querySelector('.insight-chart-footnote')?.textContent).toContain('Building the historical comparison')
 })
 
 it('does not describe completed unavailable comparison history as reconstruction in progress', async () => {

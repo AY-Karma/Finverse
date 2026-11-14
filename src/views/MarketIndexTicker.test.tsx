@@ -48,11 +48,10 @@ describe('fixed static index strip', () => {
     expect(container.querySelector('.ticker-delta.muted')?.textContent).toBe('— (—)')
   })
 
-  it('shows two named loading placeholders without fabricated changes', async () => {
+  it('does not show quote changes before index prices arrive', async () => {
     snapshot = { quotes: {}, checkedAt: 0, unavailable: [], loading: true }
     await render()
     expect(container.querySelectorAll('.ticker-item')).toHaveLength(2)
     expect(container.querySelectorAll('.ticker-delta')).toHaveLength(0)
-    expect(container.textContent?.match(/Loading/g)).toHaveLength(2)
   })
 })

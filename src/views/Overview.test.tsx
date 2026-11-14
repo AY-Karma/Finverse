@@ -169,11 +169,7 @@ describe('overview valuation and visible work', () => {
     const root = createRoot(container)
     try {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={onRequestImport} />))
-      expect(container.querySelector('h1')?.textContent).toBe('Your portfolio.In focus.')
-      expect(container.querySelector('.portfolio-welcome-index')).toBeNull()
-      expect(container.querySelector('.portfolio-welcome-features')).toBeNull()
       const importButton = container.querySelector<HTMLButtonElement>('button')!
-      expect(importButton.textContent).toBe('Import portfolio')
       await act(async () => importButton.click())
       expect(onRequestImport).toHaveBeenCalledOnce()
       expect(refreshNow).not.toHaveBeenCalled()

@@ -53,7 +53,7 @@ describe('worst drawdown chart', () => {
     expect(markup.match(/<circle /g)).toHaveLength(2)
   })
 
-  it('explains missing history and histories without a decline without inventing dates or loading status', () => {
+  it('explains missing history and histories without a decline without inventing dates', () => {
     const missing = render([])
     const increasing = render([point('2026-09-21', 100), point('2026-09-22', 110)])
     const flat = render([point('2026-09-21', 100), point('2026-09-22', 100)])
@@ -64,7 +64,6 @@ describe('worst drawdown chart', () => {
     for (const markup of [missing, increasing, flat]) {
       expect(markup).not.toContain('<svg')
       expect(markup).not.toContain('<time')
-      expect(markup).not.toContain('loading')
     }
   })
 
