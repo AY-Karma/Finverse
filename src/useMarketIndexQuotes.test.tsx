@@ -33,6 +33,7 @@ afterEach(async () => { await act(async () => root.unmount()); vi.useRealTimers(
 
 describe('index quote refresh lifecycle', () => {
   it('refreshes selected global markets outside NSE hours and pauses when hidden', async () => {
+    vi.setSystemTime(new Date('2026-11-09T15:00:00Z'))
     state.open = false
     indexIds = ['sp-500', 'nasdaq-composite']
     await render()
@@ -42,6 +43,15 @@ describe('index quote refresh lifecycle', () => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true })
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); vi.advanceTimersByTime(5_000) })
     expect(state.load).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['2026-11-14T15:00:00Z', '2026-11-09T02:00:00Z'])('does not continuously poll closed global markets at %s', async (date) => {
+    vi.setSystemTime(new Date(date))
+    state.open = false
+    indexIds = ['sp-500', 'nasdaq-composite']
+    await render()
+    await act(async () => vi.advanceTimersByTime(5_000))
+    expect(state.load).toHaveBeenCalledOnce()
   })
 
   it('cancels the previous selection and ignores its late result', async () => {

@@ -6,6 +6,7 @@ import { StoreProvider, useStore } from './useStore'
 import * as storePersistence from './store'
 import { normalizePosition } from './instruments'
 import { quoteKey } from './valuation'
+import { loadCachedQuotes } from './liveQuoteCache'
 import { resolveYahooSymbol, type LiveQuotesResult } from './live'
 import type { LiveQuote } from './types'
 import type { MarketDataAdapter } from './marketData'
@@ -61,6 +62,15 @@ afterEach(async () => {
 })
 
 describe('independent live stock and NAV updates', () => {
+  it('keeps validated quotes durable after an unchanged listing save without waiting for pagehide', async () => {
+    refreshQuotes.mockResolvedValue(result({ [quoteKey(stock)]: equityQuote(150) }))
+    await mount([stock])
+    await act(async () => store.confirmInstrument(stock.id, {
+      ticker: stock.ticker, type: stock.type, exchange: stock.exchange!, currency: 'INR', providerSymbol: stock.providerSymbol,
+    }))
+    expect(store.snapshot.currentValue).toBe(150)
+    expect(loadCachedQuotes(store.positions)[quoteKey(stock)]?.price).toBe(150)
+  })
   it('restores the last stock observation on first render while startup quotes are pending', async () => {
     refreshQuotes.mockResolvedValueOnce(result({ [quoteKey(stock)]: equityQuote(150) }))
     await mount([stock])

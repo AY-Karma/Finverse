@@ -249,7 +249,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     foliosRef.current = next
     for (const controller of activeRefreshControllers.current) controller.abort()
     const activeKeys = new Set(next.flatMap((folio) => folio.positions).map(quoteKey))
-    setLiveQuotes(Object.fromEntries(Object.entries(liveQuotesRef.current).filter(([key]) => activeKeys.has(key))))
+    const retained = setLiveQuotes(Object.fromEntries(Object.entries(liveQuotesRef.current).filter(([key]) => activeKeys.has(key))))
+    saveCachedQuotes(next.flatMap((folio) => folio.positions), retained)
+    lastQuoteCacheWrite.current = Date.now()
     setFoliosState(next)
     if (history) setPortfolioHistory(history)
     window.dispatchEvent(new Event('finverse:monitor-restored'))

@@ -506,7 +506,7 @@ describe('market data client', () => {
 
     const result = await fetchLiveQuotes(positions, previous)
 
-    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(fetcher).toHaveBeenCalledTimes(2)
     expect(String(fetcher.mock.calls[0]?.[0])).toContain('RELIANCE.NS%2CTCS.NS')
     expect(result).toMatchObject({ updated: 1, failed: 1, skipped: 0 })
     expect(result.quotes[quoteKey(positions[1])]).toEqual(previous[quoteKey(positions[1])])
@@ -514,6 +514,31 @@ describe('market data client', () => {
       price: 1309.8,
       at: Date.parse('2026-08-24T09:45:02.000Z'),
     })
+  })
+
+  it('publishes healthy quotes before targeted missing-symbol recovery completes', async () => {
+    const stocks = [position('HEALTHY'), position('RENAMED')]
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const symbols = new URL(String(input), 'http://localhost').searchParams.get('symbols')!.split(',')
+      const recovery = symbols.length === 1
+      if (recovery) await gate
+      return Response.json({ fetchedAt: new Date().toISOString(), quotes: (recovery ? symbols : ['HEALTHY.NS']).map((symbol) => ({
+        symbol, price: recovery ? 350 : 120, change: 2, changePct: 1, marketTime: new Date().toISOString(), source: 'yahoo',
+      })) })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const progress = vi.fn()
+    const pending = fetchLiveQuotes(stocks, {}, undefined, progress)
+    try {
+      await vi.waitFor(() => expect(progress).toHaveBeenCalledOnce())
+      expect(progress.mock.calls[0][0].quotes[quoteKey(stocks[0])]?.price).toBe(120)
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
+      expect(new URL(String(fetcher.mock.calls[1][0]), 'http://localhost').searchParams.get('symbols')).toBe('RENAMED.NS')
+    } finally { release() }
+    expect(await pending).toMatchObject({ updated: 2, failed: 0 })
+    expect(progress.mock.calls[1][0].quotes[quoteKey(stocks[1])]?.price).toBe(350)
   })
 
   it.each([false, true])('honors a caller-requested pending NAV check without an inner 15-minute throttle (previous NAV: %s)', async (hasPrevious) => {

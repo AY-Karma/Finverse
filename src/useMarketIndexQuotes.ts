@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CLOSED_QUOTE_RECHECK_MS, isMarketOpen } from './live'
 import { cachedMarketIndexQuotes, INDEX_REFRESH_MS, loadMarketIndexQuotes, nextMarketIndexRefreshAt, persistMarketIndexQuotes } from './marketIndexQuotes'
 import { normalizeMarketIndexIds, selectedMarketIndices } from './marketIndexSelection'
+import { isGlobalIndexSessionOpen } from './marketIndexSessions'
 
 export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly string[]) {
   const selection = normalizeMarketIndexIds(indexIds)
@@ -14,8 +15,8 @@ export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly strin
     if (!allowed) return
     let active = true
     let controller: AbortController | null = null
-    const includesGlobal = selectedMarketIndices(selection).some((index) => index.region === 'Global')
-    const quoteWindowOpen = () => includesGlobal || isMarketOpen()
+    const indices = selectedMarketIndices(selection)
+    const quoteWindowOpen = () => indices.some((index) => index.region === 'India' ? isMarketOpen() : isGlobalIndexSessionOpen(index.id))
     let marketOpen = quoteWindowOpen()
     let closeRefreshPending = false
     let initialRefreshPending = true

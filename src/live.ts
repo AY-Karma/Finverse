@@ -115,6 +115,7 @@ async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Ma
 export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal, onBatch?: (quotes: Map<string, YahooResult>) => void): Promise<Map<string, YahooResult>> {
   const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
   const quotes = new Map<string, YahooResult>()
+  const missing = new Set<string>()
   let next = 0
   const worker = async () => {
     while (next < unique.length) {
@@ -125,9 +126,23 @@ export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal, 
       const results = await sharedQuoteBatch(batch.join(','), (requestSignal) => fetchQuoteBatch(batch, requestSignal), signal)
       for (const [symbol, quote] of results) quotes.set(symbol, quote)
       if (results.size) onBatch?.(results)
+      if (results.size) for (const symbol of batch) if (symbol.endsWith('.NS') && !results.has(symbol)) missing.add(symbol)
     }
   }
   await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, Math.ceil(unique.length / MAX_MARKET_SYMBOLS)) }, worker))
+  // Healthy batches reach callers before single-symbol requests enable server recovery.
+  const recovery = [...missing]
+  let nextRecovery = 0
+  const recover = async () => {
+    while (nextRecovery < recovery.length) {
+      signal?.throwIfAborted()
+      const symbol = recovery[nextRecovery++]
+      const results = await sharedQuoteBatch(symbol, (requestSignal) => fetchQuoteBatch([symbol], requestSignal), signal)
+      for (const [key, quote] of results) quotes.set(key, quote)
+      if (results.size) onBatch?.(results)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, recovery.length) }, recover))
   return quotes
 }
 
