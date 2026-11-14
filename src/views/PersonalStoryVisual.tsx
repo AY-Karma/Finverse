@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react'
+import { useId } from 'react'
 import { dateFormatter, numberFormatter } from '../formatters'
+import { getMarketCalendarInfo } from '../marketCalendar'
 import type { StoryInsight } from '../marketStories'
 import { formatCurrency, formatPercent } from '../valuation'
 import './personalStoryVisual.css'
@@ -12,7 +13,8 @@ function Coverage({ covered, total }: { covered: number; total: number }) {
   return <p className="personal-story-method">Price moves · current quantities{covered < total && <span>{covered} of {total} holdings covered</span>}</p>
 }
 
-export function PersonalStoryVisual({ insight }: { insight: StoryInsight }) {
+export function PersonalStoryVisual({ insight, from, through }: { insight: StoryInsight; from?: string; through?: string }) {
+  const holidayPattern = useId().replace(/:/g, '')
   if (insight.kind === 'bridge') {
     const low = Math.min(0, insight.net)
     const high = insight.gains > 0 ? insight.gains : 1
@@ -66,23 +68,62 @@ export function PersonalStoryVisual({ insight }: { insight: StoryInsight }) {
 
   const selected = date(insight.date)
   const days = [...insight.days].sort((a, b) => a.date.localeCompare(b.date))
-  const maximum = Math.max(...days.map((day) => Math.abs(day.changePct)), 0.01)
+  const high = Math.max(0, ...days.map((day) => day.changePct))
+  const low = Math.min(0, ...days.map((day) => day.changePct))
+  const y = (value: number) => 24 + (high - value) / (high - low || 1) * 100
+  const baseline = y(0)
+  const chartHeight = Math.max(154, baseline + 54)
+  const first = Date.parse(`${from ?? days[0]?.date ?? insight.date}T00:00:00Z`)
+  const last = Date.parse(`${through ?? days[days.length - 1]?.date ?? insight.date}T00:00:00Z`)
+  const calendarDays = Array.from({ length: Math.max(1, Math.round((last - first) / 86_400_000) + 1) }, (_, index) => new Date(first + index * 86_400_000).toISOString().slice(0, 10))
+  const observations = new Map(days.map((day) => [day.date, day]))
+  const slot = 400 / calendarDays.length
   return <div className={`personal-story personal-story--session personal-story--${direction(insight.change)}`}>
-    <div className="personal-session-date">
-      <strong>{dateFormatter({ day: 'numeric', timeZone: 'UTC' }).format(selected)}</strong>
-      <span><b>{dateFormatter({ month: 'long', timeZone: 'UTC' }).format(selected)}</b><span>{dateFormatter({ weekday: 'long', timeZone: 'UTC' }).format(selected)} · {dateFormatter({ year: 'numeric', timeZone: 'UTC' }).format(selected)}</span></span>
+    <div className="personal-session-summary">
+      <div className="personal-session-date">
+        <strong>{dateFormatter({ day: 'numeric', timeZone: 'UTC' }).format(selected)}</strong>
+        <span><b>{dateFormatter({ month: 'long', timeZone: 'UTC' }).format(selected)}</b><span>{dateFormatter({ weekday: 'long', timeZone: 'UTC' }).format(selected)} · {dateFormatter({ year: 'numeric', timeZone: 'UTC' }).format(selected)}</span></span>
+      </div>
+      <div className="personal-session-result"><strong>{signedAmount(insight.change)}</strong><span>{formatPercent(insight.changePct)}</span></div>
     </div>
-    <div className="personal-session-grid" role="list" aria-label="Observed session price movements">
-      {days.map((day) => <span key={day.date} role="listitem" className={`personal-session-day personal-session-day--${direction(day.changePct)}${day.date === insight.date ? ' personal-session-day--selected' : ''}`}
-        style={{ '--session-strength': Math.max(.12, Math.abs(day.changePct) / maximum) } as CSSProperties}
-        aria-current={day.date === insight.date ? 'date' : undefined}
-        aria-label={`${dateFormatter({ day: 'numeric', month: 'long', timeZone: 'UTC' }).format(date(day.date))}: ${formatPercent(day.changePct)}`}
-        title={`${dateFormatter({ day: 'numeric', month: 'short', timeZone: 'UTC' }).format(date(day.date))} · ${formatPercent(day.changePct)}`}>
-        {dateFormatter({ day: 'numeric', timeZone: 'UTC' }).format(date(day.date))}
-      </span>)}
-    </div>
-    <div className="personal-session-result"><strong>{signedAmount(insight.change)}</strong><span>{formatPercent(insight.changePct)}</span></div>
+    <figure className="personal-session-chart">
+      <figcaption>Observed daily moves</figcaption>
+      <svg viewBox={`0 0 400 ${chartHeight}`} role="img" aria-label="Daily percentage price moves. Highlighted date is the largest portfolio move.">
+        <defs><pattern id={holidayPattern} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><line x1="0" y1="0" x2="0" y2="7" stroke="var(--ink-muted)" strokeWidth="2" /></pattern></defs>
+        <line x1="0" x2="400" y1={baseline} y2={baseline} className="personal-session-zero" />
+        {calendarDays.map((calendarDate, index) => {
+          const day = observations.get(calendarDate)
+          const center = slot * (index + .5)
+          const width = Math.min(40, slot * .65)
+          if (!day) {
+            const holiday = getMarketCalendarInfo(new Date(`${calendarDate}T12:00:00+05:30`)).holidays.find((item) => item.date === calendarDate)
+            return <g key={calendarDate}>
+              <title>{`${calendarDate}: ${holiday ? `Holiday · ${holiday.name}` : 'No price observation'}`}</title>
+              {holiday && <>
+                <rect className="personal-session-holiday" x={center - width / 2} y={baseline - 18} width={width} height="36" rx="3" fill={`url(#${holidayPattern})`} />
+                {calendarDays.length <= 7 && <text x={center} y={baseline + 42} textAnchor="middle" className="personal-session-axis">Ø</text>}
+              </>}
+            </g>
+          }
+          const selectedDay = day.date === insight.date
+          const color = day.changePct > 0 ? 'var(--semantic-success)' : day.changePct < 0 ? 'var(--semantic-danger)' : 'var(--ink)'
+          return <g key={day.date}>
+            <title>{`${dateFormatter({ day: 'numeric', month: 'long', timeZone: 'UTC' }).format(date(day.date))}: ${formatPercent(day.changePct)}`}</title>
+            {day.changePct === 0
+              ? <rect className="personal-session-neutral" x={center - width / 2} y={baseline - 6} width={width} height="12" rx="2" fill={color} />
+              : <rect className={`personal-session-bar personal-session-bar--${day.changePct < 0 ? 'down' : 'up'}`} style={{ animationDelay: `${Math.min(index * 25, 100)}ms` }} x={center - width / 2} y={Math.min(baseline, y(day.changePct))} width={width} height={Math.abs(y(day.changePct) - baseline)} rx="3" fill={color} />}
+            {(calendarDays.length <= 7 || selectedDay) && (day.changePct === 0 ? <>
+              <text x={center} y={baseline - 15} textAnchor="middle" fill={color} className="personal-session-reading">Ø</text>
+              <text x={center} y={baseline + 30} textAnchor="middle" fill={color} className="personal-session-reading">Ø</text>
+            </> : <text x={index === 0 ? 12 : index === calendarDays.length - 1 ? 388 : center} y={y(day.changePct) + (day.changePct < 0 ? 20 : -9)} textAnchor={index === 0 ? 'start' : index === calendarDays.length - 1 ? 'end' : 'middle'} fill={color} className={`personal-session-reading${selectedDay ? ' personal-session-day--selected' : ''}`} aria-current={selectedDay ? 'date' : undefined} aria-label={`${day.date}: ${formatPercent(day.changePct)}`}>{formatPercent(day.changePct)}</text>)}
+          </g>
+        })}
+      </svg>
+    </figure>
     <div className="personal-session-driver"><span><small>Largest price impact</small><strong>{insight.leader}</strong></span><b className={`story-tone--${direction(insight.leaderChange)}`}>{signedAmount(insight.leaderChange)}</b></div>
-    <Coverage covered={insight.covered} total={insight.total} />
+    {insight.weeklyDrag !== undefined && (insight.weeklyDrag ? <div className="personal-session-driver personal-session-week-drag">
+      <span><small>Largest drag · week</small><strong>{insight.weeklyDrag.label}</strong></span>
+      <b className="story-tone--negative">{signedAmount(insight.weeklyDrag.change)} <small>{formatPercent(insight.weeklyDrag.changePct)}</small></b>
+    </div> : <p className="personal-session-no-drag">No holding finished lower this week.</p>)}
   </div>
 }

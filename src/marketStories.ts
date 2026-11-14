@@ -35,6 +35,7 @@ export type StoryInsight = {
   change: number
   changePct: number
   days: { date: string; changePct: number }[]
+  weeklyDrag?: { label: string; change: number; changePct: number } | null
   leader: string
   leaderChange: number
   covered: number

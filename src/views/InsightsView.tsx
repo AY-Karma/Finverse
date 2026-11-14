@@ -246,6 +246,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     ? dateFormatter({ day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`))
     : null
   const summaryPnlUp = snapshot.pnl >= 0
+  const sessionDirection = hide || dataLabels.sessionValue == null || dataLabels.sessionValue === 0 ? '' : dataLabels.sessionValue > 0 ? 'up' : 'down'
 
   return (
     <div className="insights-page">
@@ -267,8 +268,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           </div>
           <button type="button" id="session-kpi" className={`insights-summary-session${sessionExpanded ? ' is-open' : ''}`} onClick={() => setSessionExpanded((open) => !open)} aria-expanded={sessionExpanded} aria-controls="session-detail">
             <span className="insights-summary-session-label"><span>Session move</span><i className="insights-summary-chevron" aria-hidden="true" /></span>
-            <strong className={hide || dataLabels.sessionValue == null || dataLabels.sessionValue === 0 ? '' : dataLabels.sessionValue > 0 ? 'up' : 'down'}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
-            <span className="hint">{hide ? 'Values hidden' : snapshot.dailyChangePct != null ? formatPercent(snapshot.dailyChangePct) : dataLabels.sessionValue == null ? 'Awaiting updates' : 'Reported change'}</span>
+            <strong className={sessionDirection}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
+            <span className={`hint${snapshot.dailyChangePct != null && sessionDirection ? ` ${sessionDirection}` : ''}`}>{hide ? 'Values hidden' : snapshot.dailyChangePct != null ? formatPercent(snapshot.dailyChangePct) : dataLabels.sessionValue == null ? 'Awaiting updates' : 'Reported change'}</span>
           </button>
           <div className="insights-summary-invested">
             <span className="score-label">Invested</span>

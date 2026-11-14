@@ -57,6 +57,20 @@ describe('research-backed personal stories', () => {
     expect(stories).toHaveLength(1)
     expect(stories[0]).toMatchObject({ kind: 'session', title: 'Wednesday made the biggest move.', insight: { kind: 'session', date: '2026-11-04', change: 40, changePct: 10, covered: 4, total: 4 } })
     expect(stories[0].insight?.kind === 'session' && stories[0].insight.days).toHaveLength(5)
+    expect(stories[0].insight?.kind === 'session' && stories[0].insight.weeklyDrag).toBeNull()
+  })
+
+  it('ranks the weekly drag by quantity-weighted rupee impact rather than price percentage or the standout day', () => {
+    const holdings = [position('AAA'), { ...position('BBB'), quantity: 20 }]
+    const dates = ['2026-10-30', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06']
+    const prices = [[100, 101, 100, 105, 90, 80], [100, 101, 102, 100, 97, 95]]
+    const histories = Object.fromEntries(holdings.map((holding, index) => [quoteKey(holding), dates.map((date, day) => ({ date, close: prices[index][day] }))]))
+    const insight = buildPeriodInsights(snapshot(holdings), histories, weekly)[0].insight
+    expect(insight?.kind).toBe('session')
+    if (insight?.kind !== 'session') return
+    expect(insight.weeklyDrag).toMatchObject({ label: 'BBB', change: -100 })
+    expect(insight.weeklyDrag?.changePct).toBeCloseTo(-5)
+    expect(insight.leaderChange).toBe(-60)
   })
 
   it('does not mislabel a multi-session gap as a one-day move', () => {

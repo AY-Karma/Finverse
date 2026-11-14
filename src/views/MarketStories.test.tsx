@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { investmentWorkspace } from '../investmentWorkspace'
 import { loadSettings } from '../store'
 import { MarketStories } from './MarketStories'
 import { MarketStoriesEntry } from './MarketStoriesEntry'
+import { PersonalStoryVisual } from './PersonalStoryVisual'
 import type { Position } from '../types'
 import type { MarketBriefingStory } from '../marketBriefing'
 import type { MarketEvent, MarketEventsFeed } from '../marketEvents'
@@ -83,6 +85,16 @@ async function next() {
 }
 
 describe('market highlights viewer', () => {
+  it('marks actual holidays without turning missing trading observations into holidays or zero returns', () => {
+    const markup = renderToStaticMarkup(<PersonalStoryVisual insight={{ kind: 'session', date: '2026-11-09', change: 109, changePct: 1.09, days: [{ date: '2026-11-09', changePct: 1.09 }, { date: '2026-11-11', changePct: .64 }, { date: '2026-11-13', changePct: -.52 }], leader: 'TCS', leaderChange: 109, covered: 1, total: 1 }} from="2026-11-09" through="2026-11-13" />)
+    const chart = document.createElement('div')
+    chart.innerHTML = markup
+    expect(chart.querySelectorAll('.personal-session-holiday')).toHaveLength(1)
+    expect(chart.textContent).toContain('2026-11-10: Holiday · Diwali-Balipratipada')
+    expect(chart.textContent).toContain('2026-11-12: No price observation')
+    expect(chart.querySelectorAll('.personal-session-bar')).toHaveLength(3)
+  })
+
   it('hides both entry placements and skips preparation until holdings are imported', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-01T10:00:00Z'))
@@ -144,7 +156,7 @@ describe('market highlights viewer', () => {
     expect(container.querySelectorAll('.story-progress button')).toHaveLength(4)
     await next()
     expect(container.textContent).toContain(sessionTitle)
-    expect(container.querySelector('.personal-session-day--selected')?.textContent).toBe('28')
+    expect(container.querySelector('.personal-session-day--selected')?.getAttribute('aria-label')).toContain('2026-10-28')
     expect(container.querySelector('.personal-session-result')?.textContent).toContain('+₹20')
   })
 

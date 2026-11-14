@@ -456,7 +456,7 @@ describe('overview valuation and visible work', () => {
       expect(session.querySelector('.score-value')?.getAttribute('aria-label')).toBe('Latest session · 01 Oct 2026 portfolio move: −₹7.00')
       expect(session.querySelector('.score-value')?.classList.contains('down')).toBe(true)
       expect(session.querySelector('time')?.dateTime).toBe('2026-10-01')
-      expect(session.textContent).toBe('Session move−₹7.0001 Oct 2026')
+      expect(session.querySelector('time')?.textContent).toBe('Thursday 01 Oct 2026')
       expect(session.querySelector('.score-label button')?.getAttribute('aria-label')).toBeNull()
       expect(session.querySelector('.score-label button')?.getAttribute('title')).toBe('Open Insights')
       expect(session.lastElementChild?.classList.contains('score-session-basis')).toBe(true)

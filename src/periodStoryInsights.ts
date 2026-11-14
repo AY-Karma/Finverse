@@ -57,7 +57,8 @@ function sessionStory(snapshot: InvestmentSnapshot, period: MarketStoryRecap, mo
   const totalSwing = days.reduce((sum, day) => sum + Math.abs(day.change), 0)
   if (!totalSwing || !weekly && (Math.abs(selected.change) / totalSwing < .20 || Math.abs(selected.changePct) < .5)) return
   const weekday = dateFormatter({ weekday: 'long', timeZone: 'UTC' }).format(new Date(`${selected.date}T00:00:00Z`))
-  return story({ kind: 'session', ...selected, days: days.map(({ date, changePct }) => ({ date, changePct })), covered: moves.length, total }, `${weekday} made the biggest move.`, period)
+  const drag = weekly ? moves.reduce<HoldingMarketMove | null>((lowest, row) => row.change < 0 && (!lowest || row.change < lowest.change) ? row : lowest, null) : null
+  return story({ kind: 'session', ...selected, days: days.map(({ date, changePct }) => ({ date, changePct })), ...(weekly ? { weeklyDrag: drag ? { label: drag.label, change: drag.change, changePct: drag.changePct } : null } : {}), covered: moves.length, total }, `${weekday} made the biggest move.`, period)
 }
 
 /** Select notable relationships and moments using a fixed cohort and matching dates. */

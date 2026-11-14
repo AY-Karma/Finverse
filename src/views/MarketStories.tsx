@@ -23,7 +23,7 @@ const STORY_DURATION = 12_000
 const MAX_RECAP_STORIES = 7
 const NO_POSITIONS: ReturnType<typeof useStore>['positions'] = []
 const TOPIC_LABELS = { policy: 'Policy', china: 'Stocks', global: 'Markets', india: 'Markets', commodities: 'Commodities', earnings: 'Earnings', economy: 'Economy' }
-type ViewerStory = Omit<Pick<MarketStory, 'id' | 'kind' | 'eyebrow' | 'title' | 'metric' | 'metricLabel' | 'metricAmount' | 'tone' | 'rows' | 'chart' | 'marketChart' | 'insight' | 'weekly'>, 'kind'> & { kind: MarketStory['kind'] | 'news'; article?: MarketBriefingStory }
+type ViewerStory = Omit<Pick<MarketStory, 'id' | 'kind' | 'eyebrow' | 'title' | 'metric' | 'metricLabel' | 'metricAmount' | 'tone' | 'rows' | 'chart' | 'marketChart' | 'insight' | 'weekly' | 'from' | 'through'>, 'kind'> & { kind: MarketStory['kind'] | 'news'; article?: MarketBriefingStory }
 
 function newsStory(article: MarketBriefingStory, edition: StoryEdition): ViewerStory {
   const day = Number(dateFormatter({ day: 'numeric', timeZone: 'Asia/Kolkata' }).format(article.publishedAt))
@@ -199,7 +199,7 @@ export function MarketStories({ today = holdingMoveToday(), editions: availableE
               select(index + (event.clientX < bounds.left + bounds.width * .35 ? -1 : 1))
             }
           }} onPointerCancel={() => { gesture.current = null; setHeld(false) }}>
-            {story.kind === 'market' ? <MarketStoryChart points={story.marketChart} label={story.metricLabel} /> : story.kind === 'sectors' ? <SectorStoryVisual story={story} /> : story.weekly ? <WeeklyStoryVisual content={story.weekly} /> : story.insight ? <PersonalStoryVisual insight={story.insight} /> : story.article ? <NewsArtwork topic={story.article.topic} /> : story.kind === 'winners' || story.kind === 'laggards' || story.kind === 'updates' || story.kind === 'covered'
+            {story.kind === 'market' ? <MarketStoryChart points={story.marketChart} label={story.metricLabel} /> : story.kind === 'sectors' ? <SectorStoryVisual story={story} /> : story.weekly ? <WeeklyStoryVisual content={story.weekly} /> : story.insight ? <PersonalStoryVisual insight={story.insight} from={story.from} through={story.through} /> : story.article ? <NewsArtwork topic={story.article.topic} /> : story.kind === 'winners' || story.kind === 'laggards' || story.kind === 'updates' || story.kind === 'covered'
               ? <RecapArtwork kind={story.kind} points={story.chart} /> : <StoryArtwork />}
           </div>
           {!featuredMetric && metric}

@@ -20,7 +20,7 @@ const PortfolioPerformance = lazy(() => import('./PortfolioPerformance').then((m
 
 const LEDGER_PAGE_SIZE = 25
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
-const SESSION_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+const SESSION_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
 function formatCost(value: number, supported: boolean): string {
   return supported ? formatCurrency(value) : 'Unavailable'
 }
@@ -314,7 +314,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
     : `${dailyMove >= 0 ? '+' : ''}${formatCurrency(dailyMove)}`
   const dailyMoveDirection = dailyMove == null || dailyMove === 0 ? '' : dailyMove > 0 ? 'up' : 'down'
   const sessionDate = sessionSnapshot.dailyChangeDate
-    ? SESSION_DATE_FORMAT.format(new Date(`${sessionSnapshot.dailyChangeDate}T00:00:00+05:30`)) : null
+    ? SESSION_DATE_FORMAT.format(new Date(`${sessionSnapshot.dailyChangeDate}T00:00:00+05:30`)).replace(',', '') : null
 
   const toggleSort = (field: SortField) => {
     setSort((prev) => {
