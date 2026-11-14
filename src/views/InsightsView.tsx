@@ -264,21 +264,25 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <div className={`insights-summary-metrics${snapshot.valuationComplete ? '' : ' insights-summary-metrics--partial'}`} tabIndex={0} role="group" aria-label="Portfolio values">
           <div className="insights-summary-current">
             <span className="score-label">Current value</span>
-            <strong>{snapshot.pricedCount ? value(snapshot.currentValue) : 'Unpriced'}</strong>
+            <div className="insights-summary-reading"><strong>{snapshot.pricedCount ? value(snapshot.currentValue) : 'Unpriced'}</strong></div>
           </div>
           <button type="button" id="session-kpi" className={`insights-summary-session${sessionExpanded ? ' is-open' : ''}`} onClick={() => setSessionExpanded((open) => !open)} aria-expanded={sessionExpanded} aria-controls="session-detail">
             <span className="insights-summary-session-label"><span>Session move</span><i className="insights-summary-chevron" aria-hidden="true" /></span>
-            <strong className={sessionDirection}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
-            <span className={`hint${snapshot.dailyChangePct != null && sessionDirection ? ` ${sessionDirection}` : ''}`}>{hide ? 'Values hidden' : snapshot.dailyChangePct != null ? formatPercent(snapshot.dailyChangePct) : dataLabels.sessionValue == null ? 'Awaiting updates' : 'Reported change'}</span>
+            <span className="insights-summary-reading">
+              <strong className={sessionDirection}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
+              <span className={`hint${snapshot.dailyChangePct != null && sessionDirection ? ` ${sessionDirection}` : ''}`}>{hide ? 'Values hidden' : snapshot.dailyChangePct != null ? formatPercent(snapshot.dailyChangePct) : dataLabels.sessionValue == null ? 'Awaiting updates' : 'Reported change'}</span>
+            </span>
           </button>
           <div className="insights-summary-invested">
             <span className="score-label">Invested</span>
-            <strong>{value(snapshot.invested)}</strong>
+            <div className="insights-summary-reading"><strong>{value(snapshot.invested)}</strong></div>
           </div>
           <div className="insights-summary-pnl">
             <span className="score-label">{snapshot.valuationComplete ? 'Unrealized P&L' : 'Priced holdings P&L'}</span>
-            <strong className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(`${summaryPnlUp ? '+' : ''}${formatCurrency(snapshot.pnl)}`) : 'Unpriced'}</strong>
-            <small className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(formatPercent(snapshot.pnlPct)) : 'Unavailable'}{!snapshot.valuationComplete && <span> on priced cost</span>}</small>
+            <div className="insights-summary-reading">
+              <strong className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(`${summaryPnlUp ? '+' : ''}${formatCurrency(snapshot.pnl)}`) : 'Unpriced'}</strong>
+              <small className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(formatPercent(snapshot.pnlPct)) : 'Unavailable'}{!snapshot.valuationComplete && <span> on priced cost</span>}</small>
+            </div>
           </div>
           </div>
           <div className="insights-summary-context">
