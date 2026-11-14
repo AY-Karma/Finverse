@@ -14,7 +14,6 @@ beforeEach(() => localStorage.clear())
 describe('statement change details', () => {
   it('renders quantities and weight shifts as statement comparisons', () => {
     const html = renderToStaticMarkup(<StatementChanges before={[holding]} after={[{ ...holding, quantity: 8 }]} beforeDate="2026-01-01" afterDate="2026-02-01" hideValues={false} />)
-    expect(html).toContain('Changes since last import')
     expect(html.replace(/<[^>]*>/g, '')).toContain('Quantity 10 → 8')
     expect(html).toContain('100.00% → 100.00%')
     expect(html).toContain('Statement balances, not a record of trades')

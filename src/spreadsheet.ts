@@ -296,12 +296,18 @@ function headerCellText(v: unknown): string {
   return v == null ? '' : String(v).trim()
 }
 
+const normalizedHeaderAliases = new WeakMap<string[], string[]>()
+
 function matchScore(head: string, aliases: string[]): number {
   const normalized = normalizeHeader(head)
   if (!normalized) return 0
+  let candidates = normalizedHeaderAliases.get(aliases)
+  if (!candidates) {
+    candidates = aliases.map(normalizeHeader)
+    normalizedHeaderAliases.set(aliases, candidates)
+  }
   let best = 0
-  for (const alias of aliases) {
-    const candidate = normalizeHeader(alias)
+  for (const candidate of candidates) {
     if (normalized === candidate) {
       best = Math.max(best, 200 + candidate.length)
     } else if (normalized.startsWith(candidate) && (

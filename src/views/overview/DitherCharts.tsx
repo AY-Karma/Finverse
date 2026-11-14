@@ -30,7 +30,7 @@ export function DitherDonut({ slices, active, onActiveChange, hidden }: {
   ])), [slices, hidden])
   return (
     <div className="overview-dither-donut" role="img" aria-label={hidden ? 'Portfolio allocation hidden' : 'Portfolio allocation. Focus a legend item for details.'}>
-      <PieChart data={data} config={config} dataKey="value" nameKey="name" innerRadius={0.64}
+      <PieChart data={data} config={config} dataKey="value" nameKey="name" innerRadius={0.64} animate={false}
         margins={{ top: 10, bottom: 10, left: 10, right: 10 }} bloom="off" onHoverChange={onActiveChange}>
         <Pie variant="gradient" />
         <DonutFocus active={active} />

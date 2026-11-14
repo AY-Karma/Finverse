@@ -3,6 +3,16 @@ import { describe, expect, it } from 'vitest'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 
 describe('interactive trend chart', () => {
+  it('describes the period, endpoints and extrema without treating missing observations as zero', () => {
+    const markup = renderToStaticMarkup(<InteractiveTrendChart
+      rows={[{ at: Date.UTC(2026, 0, 1), value: 100 }, { at: Date.UTC(2026, 0, 2) }, { at: Date.UTC(2026, 0, 3), value: 90 }, { at: Date.UTC(2026, 0, 4), value: 120 }]}
+      lines={[{ key: 'value', label: 'Portfolio', color: 'blue' }]}
+      valueFormatter={(value) => `${value}%`} yAxisLabel="Return" />)
+    const description = markup.match(/<desc id="([^"]+)">([^<]+)<\/desc>/)!
+    expect(markup).toContain(`aria-describedby="${description[1]}"`)
+    expect(description[2]).toContain('01 Jan 2026 to 04 Jan 2026')
+    expect(description[2]).toContain('Portfolio: 100% at start, 120% at end. Lowest 90%, highest 120%.')
+  })
   it('closes each area segment under its own line instead of drawing diagonal fills across gaps', () => {
     const markup = renderToStaticMarkup(<InteractiveTrendChart
       rows={[{ at: 1, close: 30 }, { at: 2, close: 35 }, { at: 3 }, { at: 4, close: 32 }, { at: 5, close: 36 }]}

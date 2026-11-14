@@ -1,11 +1,12 @@
 export const MAX_MARKET_SYMBOLS = 25
 
-const MARKET_SYMBOL_PATTERN = /^(?:\^[A-Z0-9][A-Z0-9._-]{0,30}|[A-Z0-9][A-Z0-9._=-]{0,31})$/
+const MARKET_SYMBOL_PATTERN = /^(?:\^[A-Z0-9][A-Z0-9._-]{0,30}|[A-Z0-9][A-Z0-9._=&-]{0,31})$/
 
 export type EquityQuoteSource = 'yahoo' | 'nse-close'
 
 export interface MarketQuotePayload {
   symbol: string
+  resolvedSymbol?: string
   price: number
   previousClose: number | null
   change: number | null
@@ -28,6 +29,8 @@ export interface QuotesPayload {
 
 export interface HistoryPayload {
   symbol: string
+  resolvedSymbol?: string
+  supplementalClose?: { date: string; source: 'nse-close' }
   points: { date: string; close: number }[]
 }
 

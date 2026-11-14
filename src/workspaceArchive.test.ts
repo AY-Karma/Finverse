@@ -7,7 +7,7 @@ import { newsReadingKey, type MonitorReadingState } from './monitorReading'
 import type { Folio, PortfolioSnapshot, Settings } from './types'
 import { captureWorkspaceRecords, createWorkspaceArchive, MAX_WORKSPACE_ARCHIVE_BYTES, parseWorkspaceArchive, restoreWorkspaceArchive } from './workspaceArchive'
 
-const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt', mode: 'light', hideValues: true }
+const settings: Settings = { currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt', mode: 'light', hideValues: true, marketIndices: ['sp-500', 'dax'] }
 const position = normalizePosition({ id: 'holding-1', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 2, buyPrice: 100, lastPrice: 120, invested: 200, exchange: 'NSE', currency: 'INR', providerSymbol: 'TCS.NS', identityVersion: 2, exchangeSource: 'explicit' })
 const folios: Folio[] = [{ id: 'account-1', name: 'Broker account', importedAt: 100, positions: [position] }]
 const snapshots: PortfolioSnapshot[] = [{ at: 100, value: 240, invested: 200, pnl: 40, holdingCount: 1 }]
@@ -22,6 +22,16 @@ const reading: MonitorReadingState = { articles: [{ key: newsReadingKey(savedArt
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear() })
 
 describe('workspace archives', () => {
+  it('retains IPO deadline watches through backup and restore and rejects unsafe sources', async () => {
+    const watch = { id: 'xflot:example', name: 'Example', openDate: '2026-11-01', closeDate: '2026-11-05', sourceUrl: 'https://www.xflot.com/ipo/example' }
+    const saved = createWorkspaceArchive(folios, settings, snapshots, { ...monitor, ipoWatches: [watch] })
+    const parsed = parseWorkspaceArchive(JSON.stringify(saved))
+    expect(parsed.archive.monitor.ipoWatches).toEqual([watch])
+    await restoreWorkspaceArchive(parsed.archive, captureWorkspaceRecords())
+    expect(JSON.parse(localStorage.getItem('finverse:monitor:v1')!).ipoWatches).toEqual([watch])
+    expect(() => parseWorkspaceArchive(JSON.stringify({ ...saved, monitor: { ...monitor, ipoWatches: [{ ...watch, sourceUrl: 'javascript:alert(1)' }] } }))).toThrow('IPO watch')
+  })
+
   it('round-trips saved news, reading preferences and timed snoozes in the existing Monitor record', async () => {
     const state: MonitorState = { ...monitor, reading, alerts: [{ ...monitor.alerts[0], state: 'snoozed', snoozedUntil: Date.now() + 3_600_000 }] }
     const original = createWorkspaceArchive(folios, settings, snapshots, state)

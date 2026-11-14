@@ -5,7 +5,9 @@ import { useStore } from './useStore'
 import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
 import { ActionIcon } from './views/ActionIcon'
+import { MarketStoriesEntry } from './views/MarketStoriesEntry'
 import { NotFound } from './NotFound'
+import { loadIpos } from './ipos'
 
 const loadOverview = () => import('./views/Overview')
 const loadMonitorView = () => import('./views/MonitorView')
@@ -22,8 +24,9 @@ const PortfolioImportDialog = lazy(() => import('./views/PortfolioImportDialog')
 
 const VIEW_LOADERS = { overview: loadOverview, holdings: loadMonitorView, research: loadResearchView, settings: loadSettingsView, insights: loadInsightsView }
 
-function preloadView(view: View) {
+function preloadView(view: View, externalEnabled: boolean) {
   void VIEW_LOADERS[view]().catch(() => { /* Navigation can retry a failed preload. */ })
+  if (view === 'holdings' && externalEnabled) void loadIpos().catch(() => {})
 }
 
 const NAV: { id: View; label: string }[] = [
@@ -102,14 +105,14 @@ export default function App({ initialView }: { initialView: View }) {
   if (notFound) return <NotFound />
 
   return (
-    <AppShell view={view} navigate={navigate}>
-      <main className="main">
+    <MarketStoriesEntry navigate={navigate}>{(highlightsEntry) => <AppShell view={view} navigate={navigate} highlightsEntry={highlightsEntry}>
+      <main className="main" id="main-content" tabIndex={-1}>
         {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}><ActionIcon name="research" />Back to Research</button>}
         {NAV.filter((item) => item.id !== 'settings' && visitedViews.has(item.id)).map((item) => (
           <Activity key={item.id} mode={view === item.id ? 'visible' : 'hidden'}>
             <div className={item.id === 'overview' ? 'overview-sections' : undefined} hidden={view !== item.id}>
               <Suspense fallback={<div className="view-loading" role="status">Loading {item.label.toLowerCase()}…</div>}>
-                {item.id === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} />}
+                {item.id === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} highlightsEntry={highlightsEntry} />}
                 {item.id === 'research' && <ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} />}
                 {item.id === 'holdings' && <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
                 {item.id === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
@@ -120,18 +123,19 @@ export default function App({ initialView }: { initialView: View }) {
         {view === 'settings' && <Suspense fallback={<div className="view-loading" role="status">Loading settings…</div>}><SettingsView onRequestImport={openPortfolioImport} /></Suspense>}
       </main>
       {importVisited && <Suspense fallback={<div className="view-loading" role="status">Opening import…</div>}><PortfolioImportDialog open={importOpen} accountId={importAccountId} onClose={() => setImportOpen(false)} /></Suspense>}
-    </AppShell>
+    </AppShell>}</MarketStoriesEntry>
   )
 }
 
-function AppShell({ view, navigate, children }: { view: View; navigate: (view: View, anchor?: string) => void; children: ReactNode }) {
+function AppShell({ view, navigate, highlightsEntry, children }: { view: View; navigate: (view: View, anchor?: string) => void; highlightsEntry: ReactNode; children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { settings, setSettings } = useStore()
   return (
     <div className={`app-shell${sidebarCollapsed ? ' app-shell--collapsed' : ''}`}>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <aside className="sidebar">
         <div className="sidebar-head">
-          <button className="brand brand--home" type="button" onClick={() => navigate('overview')} aria-label="Go to Overview">
+          <button className="brand brand--home" type="button" onClick={() => navigate('overview')} title="Go to Overview">
             <img className="brand-mark" src="/favicon.svg?v=2" alt="" width={30} height={30} />
             <div>
               <div className="brand-name">Finverse</div>
@@ -168,9 +172,9 @@ function AppShell({ view, navigate, children }: { view: View; navigate: (view: V
               aria-current={view === item.id ? 'page' : undefined}
               aria-label={item.label}
               title={sidebarCollapsed ? item.label : undefined}
-              onPointerEnter={() => preloadView(item.id)}
-              onFocus={() => preloadView(item.id)}
-              onTouchStart={() => preloadView(item.id)}
+              onPointerEnter={() => preloadView(item.id, settings.allowExternalData)}
+              onFocus={() => preloadView(item.id, settings.allowExternalData)}
+              onTouchStart={() => preloadView(item.id, settings.allowExternalData)}
               onClick={() => navigate(item.id)}
             >
               <span className="nav-item-icon"><ActionIcon name={item.id} /></span>
@@ -180,7 +184,7 @@ function AppShell({ view, navigate, children }: { view: View; navigate: (view: V
             </button>
           ))}
         </nav>
-
+        {highlightsEntry}
       </aside>
       {children}
     </div>

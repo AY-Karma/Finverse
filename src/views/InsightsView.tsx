@@ -1,29 +1,26 @@
-import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { formatCurrency, formatPercent } from '../valuation'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
-import { calculatePortfolioRisk } from '../portfolioRisk'
 import { useStore } from '../useStore'
 import { usePortfolioBackcast } from '../usePortfolioBackcast'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { assetTypeLabel } from '../instruments'
-import { dateFormatter, numberFormatter } from '../formatters'
+import { dateFormatter } from '../formatters'
 import { buildContributionColumns, type ContributionDisplay } from '../contributionBars'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import { PortfolioWelcome } from './PortfolioWelcome'
 import { HiddenValuesState } from './HiddenValuesState'
+import { PortfolioAllocationMix } from './PortfolioAllocationMix'
 import { SessionContributors } from './SessionContributors'
-import { WorstDrawdownChart } from './WorstDrawdownChart'
-import { DataHealthGuide, dataHealthColor } from './DataHealthGuide'
 import { DitherBar } from './DitherBar'
 import { rgb, seedOfColor, type DitherColor } from '../components/dither-kit/palette'
 import './insights.css'
 import './holdingInsights.css'
 import { HoldingMarketMoves } from './HoldingMarketMoves'
+import { ComparisonBuilding } from './ComparisonBuilding'
 import { MarketCapExposure, type MarketCapSelection } from './MarketCapExposure'
 import { holdingMovePeriod, holdingMoveToday } from '../holdingMarketMoves'
-
-const HistoryPanel = lazy(() => import('./HistoryPanel').then((module) => ({ default: module.HistoryPanel })))
 
 const EXPO_PALETTE: DitherColor[] = ['purple', 'green', 'blue', 'orange', 'pink', 'red', 'grey']
 const BENCHMARK_REUSE_MS = 5 * 60_000
@@ -67,8 +64,50 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const [hoveredSector, setHoveredSector] = useState<string | null>(null)
   const [focusedSector, setFocusedSector] = useState<string | null>(null)
   const [contributionDisplay, setContributionDisplay] = useState<ContributionDisplay>('price')
-  const [openKpi, setOpenKpi] = useState<'session' | 'drawdown' | 'top-five' | 'data-health' | null>(null)
-  const { backcast, history: backcastHistory, loading: backcastLoading, days: backcastDays, key: backcastKey, requestMore: requestMoreBackcast } = usePortfolioBackcast({
+  const [sessionExpanded, setSessionExpanded] = useState(false)
+  const summaryRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!sessionExpanded) return
+    const position = () => {
+      const summary = summaryRef.current
+      const detail = summary?.querySelector<HTMLElement>('#session-detail')
+      if (!summary || !detail) return
+      const box = summary.getBoundingClientRect()
+      const below = window.innerHeight - box.bottom - 16
+      const above = box.top - 16
+      const showBelow = below >= Math.min(detail.scrollHeight, 440) || below >= above
+      detail.style.top = showBelow ? 'calc(100% + 8px)' : 'auto'
+      detail.style.bottom = showBelow ? 'auto' : 'calc(100% + 8px)'
+      detail.style.maxHeight = `${Math.max(120, Math.min(440, showBelow ? below : above))}px`
+    }
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target instanceof Node)) return
+      const trigger = summaryRef.current?.querySelector('#session-kpi')
+      const detail = summaryRef.current?.querySelector('#session-detail')
+      if (!trigger?.contains(event.target) && !detail?.contains(event.target)) {
+        setSessionExpanded(false)
+      }
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setSessionExpanded(false)
+      summaryRef.current?.querySelector<HTMLButtonElement>('#session-kpi')?.focus()
+    }
+    position()
+    window.addEventListener('resize', position)
+    window.addEventListener('scroll', position, true)
+    document.addEventListener('click', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('resize', position)
+      window.removeEventListener('scroll', position, true)
+      document.removeEventListener('click', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [sessionExpanded])
+
+  const { backcast, history: backcastHistory, loading: backcastLoading, error: backcastError, retry: retryBackcast, days: backcastDays, key: backcastKey, requestMore: requestMoreBackcast } = usePortfolioBackcast({
     positions: snapshot.positions, quotes: snapshot.quotes, allowExternalData: settings.allowExternalData,
   })
 
@@ -79,7 +118,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   })), contributionDisplay), [contributionDisplay, snapshot.contributions])
   const exposure = useMemo(() => snapshot.contributions.filter((item) => item.priced && item.value > 0).sort((a, b) => b.value - a.value), [snapshot.contributions])
   const unmappedExposure = useMemo(() => snapshot.contributions.filter((item) => !item.priced || item.value <= 0), [snapshot.contributions])
-  const topFive = useMemo(() => snapshot.contributions.filter((item) => item.priced).sort((a, b) => b.value - a.value).slice(0, 5), [snapshot.contributions])
   const analyticsHistory = backcastHistory
   const trackedAvailable = snapshot.history.length >= 2
 
@@ -168,7 +206,6 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     ? dateFormatter({ day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(benchmarkLatest.ts)
     : null
 
-  const risk = useMemo(() => calculatePortfolioRisk(analyticsHistory), [analyticsHistory])
 
   if (snapshot.positions.length === 0) {
     return (
@@ -180,7 +217,19 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const mask = (value: string) => hide ? '••••••' : value
   const value = (amount: number) => mask(formatCurrency(amount))
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
-  const hasHistory = analyticsHistory.length >= 2
+  const comparisonLoading = settings.allowExternalData && (benchmarkLoading || backcastLoading)
+  const comparisonTitle = selectedBenchmark.unavailableReason ?? (!settings.allowExternalData
+    ? 'External market data is off'
+    : comparisonLoading ? 'Building your comparison' : 'Historical comparison unavailable')
+  const comparisonDescription = selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.'
+    : !settings.allowExternalData ? 'Enable it in Settings to compare your portfolio with market benchmarks.'
+      : comparisonLoading ? 'Loading historical closes for your holdings and the selected benchmark.'
+        : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.'
+          : 'Historical closes could not be loaded for this comparison.'
+  const retryComparison = () => {
+    if (backcastError) retryBackcast()
+    if (benchmarkError) setBenchmarkReload((count) => count + 1)
+  }
   const exposureSectors = snapshot.sectors.slice(0, 10)
   const activeSector = exposureSectors.find((sector) => sector.label === hoveredSector) ?? exposureSectors.find((sector) => sector.label === focusedSector)
   const activeSectorIndex = activeSector ? exposureSectors.indexOf(activeSector) : -1
@@ -192,55 +241,52 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
     label: exposureSectors[activeSectorIndex].label,
     color: rgb(seedOfColor(EXPO_PALETTE[activeSectorIndex % EXPO_PALETTE.length]).fill),
   } : null
-  const topFiveMaxWeight = Math.max(...topFive.map((holding) => holding.weight), 1)
   const dataLabels = portfolioDataLabels(snapshot)
+  const sessionDate = snapshot.dailyChangeDate
+    ? dateFormatter({ day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`))
+    : null
+  const summaryPnlUp = snapshot.pnl >= 0
+  const sessionDirection = hide || dataLabels.sessionValue == null || dataLabels.sessionValue === 0 ? '' : dataLabels.sessionValue > 0 ? 'up' : 'down'
 
   return (
     <div className="insights-page">
-      <div className="page-head enter d0">
+      <div className="page-head insights-heading enter d0">
         <div>
           <h1 className="page-title">Insights</h1>
         </div>
-        <p className="page-sub">A visual explanation of what moved your portfolio, where your exposure sits, and how your record compares with the market.</p>
+        <p className="page-sub">Movement, exposure and composition across your holdings.</p>
       </div>
 
-      {!snapshot.valuationComplete && <p className="panel hint" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Allocation, concentration, and current P&L cover the {snapshot.pricedCount} priced holdings only. Incomplete portfolio values are not saved to tracked history.</p>}
+      {!snapshot.valuationComplete && <p className="insights-valuation-notice" role="status">{snapshot.unpricedCount} holding{snapshot.unpricedCount === 1 ? '' : 's'} unpriced. Values and P&L cover {snapshot.pricedCount} priced holdings; incomplete values are excluded from tracked history.</p>}
 
-      <div className="insight-kpis enter d1" data-health-color={dataHealthColor(dataLabels.healthLabel)}>
-        <button type="button" id="session-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'session' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'session' ? null : 'session')} aria-expanded={openKpi === 'session'} aria-controls="session-detail">
-          <span className="score-label insight-kpi-label"><span>{dataLabels.sessionLabel}</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: !hide && dataLabels.sessionValue != null && dataLabels.sessionValue < 0 ? 'red' : 'blue' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
-          <strong className={hide || dataLabels.sessionValue == null ? '' : dataLabels.sessionValue >= 0 ? 'up' : 'down'}>{dataLabels.sessionValue == null ? 'Unavailable' : mask(`${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
-          <span className="hint">{hide ? 'Session values hidden' : <>{snapshot.dailyChangePct != null && <>{formatPercent(snapshot.dailyChangePct)} · </>}{dataLabels.coverageLabel}</>}</span>
-        </button>
-        {openKpi === 'session' && <div className="insight-kpi-detail enter" id="session-detail" role="region" aria-labelledby="session-kpi">
-          <div><span className="score-label">What contributed to the session move</span><strong>{dataLabels.sessionLabel}</strong><p className="hint">{dataLabels.sessionScope} · {dataLabels.coverageLabel}. Each amount is the price change multiplied by the quantity you hold.</p></div>
-          {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} />}
-        </div>}
-        <button type="button" id="drawdown-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'drawdown' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'drawdown' ? null : 'drawdown')} aria-expanded={openKpi === 'drawdown'} aria-controls="drawdown-detail">
-          <span className="score-label insight-kpi-label"><span>Worst drawdown</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: 'red' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
-          <strong className={!hide && risk.worst < 0 ? 'down' : ''}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong>
-          <span className="hint">See the peak-to-trough chart</span>
-        </button>
-        {openKpi === 'drawdown' && <div className="insight-kpi-detail enter" id="drawdown-detail" role="region" aria-labelledby="drawdown-kpi">
-          <div><span className="score-label">How this was calculated</span><strong className={!hide && risk.worst < 0 ? 'down' : undefined}>{hasHistory ? mask(`${risk.worst.toFixed(1)}%`) : '—'}</strong><p className="hint">Today's holdings at historical prices. Past trades are not included.{backcast && hasHistory && <> {backcast.holdingsIncluded} of {backcast.holdingsTotal} holdings included · {mask(`${backcast.coveragePct.toFixed(0)}%`)} of priced INR value covered. Uses shared observation dates.</>}</p></div>
-          {hide ? <HiddenValuesState /> : hasHistory ? <WorstDrawdownChart points={analyticsHistory} risk={risk} formatValue={value} /> : <p>{backcastLoading ? 'Historical prices are loading for this calculation.' : settings.allowExternalData ? 'Historical prices are unavailable. Try again later.' : 'Enable external market data in Settings to calculate historical drawdown.'}</p>}
-        </div>}
-        <button type="button" id="top-five-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'top-five' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'top-five' ? null : 'top-five')} aria-expanded={openKpi === 'top-five'} aria-controls="top-five-detail">
-          <span className="score-label insight-kpi-label"><span>Top five weight</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: 'purple' }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
-          <strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}%`) : 'Unpriced'}</strong>
-          <span className="hint">See the five-position split</span>
-        </button>
-        {openKpi === 'top-five' && <div className="insight-kpi-detail enter" id="top-five-detail" role="region" aria-labelledby="top-five-kpi">
-          <div><span className="score-label">Largest five holdings</span><strong>{snapshot.pricedCount ? mask(`${snapshot.topFiveWeight.toFixed(1)}% of priced portfolio`) : 'Unpriced'}</strong></div>
-          {hide ? <HiddenValuesState /> : topFive.length === 0 ? <p>No priced holdings are available for this split.</p> : <div className="kpi-split-list">{topFive.map((item, index) => <div key={`${item.type}:${item.symbol}`}><span>{item.symbol}</span><DitherBar className="kpi-split-bar" segments={[{ value: item.weight, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} scale={topFiveMaxWeight} /><strong>{mask(`${item.weight.toFixed(1)}%`)}</strong></div>)}</div>}
-        </div>}
-        <button type="button" id="data-health-kpi" className={`insight-kpi insight-kpi--interactive${openKpi === 'data-health' ? ' insight-kpi--open' : ''}`} onClick={() => setOpenKpi(openKpi === 'data-health' ? null : 'data-health')} aria-expanded={openKpi === 'data-health'} aria-controls="data-health-detail">
-          <span className="score-label insight-kpi-label"><span>Data health</span><DitherBar className="insight-kpi-texture" segments={[{ value: 1, color: dataHealthColor(dataLabels.healthLabel) }]} /><i className="insight-kpi-chevron" aria-hidden="true" /></span>
-          <strong>{dataLabels.healthLabel}</strong>
-          <span className="hint">{dataLabels.healthDetail}</span>
-        </button>
-        {openKpi === 'data-health' && <div className="insight-kpi-detail insight-kpi-detail--health enter" id="data-health-detail" role="region" aria-labelledby="data-health-kpi">
-          <DataHealthGuide healthLabel={dataLabels.healthLabel} allowExternalData={settings.allowExternalData} />
+      <div ref={summaryRef} className="insights-overview-summary enter d1">
+        <section className="insights-portfolio-summary" aria-label="Portfolio summary">
+          <div className={`insights-summary-metrics${snapshot.valuationComplete ? '' : ' insights-summary-metrics--partial'}`} tabIndex={0} role="group" aria-label="Portfolio values">
+          <div className="insights-summary-current">
+            <span className="score-label">Current value</span>
+            <strong>{snapshot.pricedCount ? value(snapshot.currentValue) : 'Unpriced'}</strong>
+          </div>
+          <button type="button" id="session-kpi" className={`insights-summary-session${sessionExpanded ? ' is-open' : ''}`} onClick={() => setSessionExpanded((open) => !open)} aria-expanded={sessionExpanded} aria-controls="session-detail">
+            <span className="insights-summary-session-label"><span>Session move</span><i className="insights-summary-chevron" aria-hidden="true" /></span>
+            <strong className={sessionDirection}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
+            <span className={`hint${snapshot.dailyChangePct != null && sessionDirection ? ` ${sessionDirection}` : ''}`}>{hide ? 'Values hidden' : snapshot.dailyChangePct != null ? formatPercent(snapshot.dailyChangePct) : dataLabels.sessionValue == null ? 'Awaiting updates' : 'Reported change'}</span>
+          </button>
+          <div className="insights-summary-invested">
+            <span className="score-label">Invested</span>
+            <strong>{value(snapshot.invested)}</strong>
+          </div>
+          <div className="insights-summary-pnl">
+            <span className="score-label">{snapshot.valuationComplete ? 'Unrealized P&L' : 'Priced holdings P&L'}</span>
+            <strong className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(`${summaryPnlUp ? '+' : ''}${formatCurrency(snapshot.pnl)}`) : 'Unpriced'}</strong>
+            <small className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(formatPercent(snapshot.pnlPct)) : 'Unavailable'}{!snapshot.valuationComplete && <span> on priced cost</span>}</small>
+          </div>
+          </div>
+          <div className="insights-summary-context">
+            {hide ? 'Session details hidden' : <><span>{dataLabels.isPartialSession ? 'Partial session' : 'Session'}{sessionDate && <> · {sessionDate}</>}</span><span>{dataLabels.coverageLabel}</span></>}
+          </div>
+        </section>
+        {sessionExpanded && <div className="insights-summary-detail" id="session-detail" role="region" aria-labelledby="session-kpi">
+          {hide ? <HiddenValuesState /> : <SessionContributors snapshot={snapshot} formatValue={value} compact />}
         </div>}
       </div>
 
@@ -248,8 +294,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <section className="panel insight-panel insight-panel--wide insight-panel--benchmark chart-open">
           <div className="performance-panel-header"><span className="panel-title">Market comparison</span>
               <details className="benchmark-menu">
-                <summary aria-label={`Portfolio compared with ${selectedBenchmark.label}. Choose a benchmark`}>
-                  <span>Compare with</span>
+                <summary aria-label={`Compare with ${selectedBenchmark.label}. Choose a benchmark`}>
+                  <span>Compare with</span>{' '}
                   <strong>{selectedBenchmark.label}</strong>
                   <i aria-hidden="true" />
                 </summary>
@@ -278,6 +324,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
               </details>
           </div>
           <div className="performance-comparison">
+          {hide ? <HiddenValuesState /> : <>
           {benchmarkSeries.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--portfolio">
               <span><i aria-hidden="true" />Portfolio</span>
@@ -309,14 +356,15 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
                 appearance="insight"
                 onReachStart={backcast ? requestMoreBackcast : undefined}
               />
-            ) : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{selectedBenchmark.unavailableReason ?? (backcastLoading ? 'Building your comparison' : settings.allowExternalData ? 'Historical comparison unavailable' : 'External market data is off')}</strong><span>{selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.' : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.' : settings.allowExternalData ? 'The app is reconstructing today’s holdings against real historical closes.' : 'Enable it in Settings to compare your portfolio with market benchmarks.'}</span></div>}
+            ) : <div className="chart-empty chart-empty--tracking"><ComparisonBuilding loading={comparisonLoading} /><strong>{comparisonTitle}</strong><span>{comparisonDescription}</span></div>}
           </div>
-          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (benchmarkError ? <>Could not load {selectedBenchmark.label} history. <button type="button" className="benchmark-retry" onClick={() => setBenchmarkReload((count) => count + 1)}>Retry</button></> : benchmarkLoading || backcastLoading ? 'Building the historical comparison…' : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
+          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (!settings.allowExternalData ? 'External market data is off' : comparisonLoading ? 'Building the historical comparison…' : benchmarkError || backcastError ? <>{benchmarkError ? `Could not load ${selectedBenchmark.label} history.` : 'Historical portfolio prices are unavailable.'} <button type="button" className="benchmark-retry" onClick={retryComparison}>Retry</button></> : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
+          </>}
           </div>
         </section>
 
         <section className="panel insight-panel insight-panel--allocation">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index">Exposure</span></div></div>
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index"></span></div></div>
           <AllocationMap items={exposure} unmapped={unmappedExposure} formatValue={value} highlight={exposureHighlight} hideValues={hide} />
         </section>
 
@@ -337,16 +385,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           {hide ? <HiddenValuesState /> : appliedRange !== 'today' ? <HoldingMarketMoves positions={snapshot.positions} quotes={snapshot.quotes} range={appliedRange} customFrom={appliedContribution.from} allowExternalData={settings.allowExternalData} /> : hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty contributor-empty">{settings.allowExternalData ? 'No price changes reported for this measure. Refresh quotes to try again.' : 'Enable external market data in Settings to see holding-level price changes.'}</div>}
         </section>
 
-        <section className="panel insight-panel insight-panel--wide insight-panel--risk">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Portfolio risk checks</span><span className="section-index">At a glance</span></div></div>
-          {hasHistory && snapshot.pricedCount > 0 ? <RiskProfile risk={risk} hideValues={hide}
-            historyStart={analyticsHistory[0].at} historyEnd={analyticsHistory[analyticsHistory.length - 1].at}
-            coverage={backcast && backcast.holdingsIncluded < backcast.holdingsTotal ? `History covers ${backcast.holdingsIncluded} of ${backcast.holdingsTotal} holdings · ${backcast.coveragePct.toFixed(0)}% of priced INR value.` : null} /> : <div className="chart-empty">{snapshot.pricedCount === 0 ? 'Current prices are unavailable. Risk checks need priced holdings.' : backcastLoading ? 'Historical prices are loading to build your risk profile.' : 'Historical risk is unavailable. Tracked balance changes include account changes and cash flows.'}</div>}
-        </section>
+        <PortfolioAllocationMix />
       </div>
-      <Suspense fallback={<div className="panel history-panel-placeholder" role="status">Preparing price history…</div>}>
-        <HistoryPanel scope="all" />
-      </Suspense>
     </div>
   )
 }
@@ -362,8 +402,6 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
   if (items.length === 0 || items.every((item) => item.value <= 0)) {
     return <div className="expo-empty muted">No valued exposure yet.</div>
   }
-  const max = Math.max(...items.map((item) => item.value), 1)
-
   return (
     <div className="expo-mix" aria-label="Exposure mix by sector and type">
       <div className="expo-ribbon" aria-hidden="true">
@@ -371,10 +409,10 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
           <div
             key={sector.label}
             className={`expo-seg${active === index ? ' is-active' : active >= 0 ? ' is-dim' : ''}`}
-            style={{ flexGrow: Math.max(sector.value, 1) }}
+            style={{ flexGrow: Math.max(sector.value, 1), background: rgb(seedOfColor(EXPO_PALETTE[index % EXPO_PALETTE.length]).fill) }}
             onMouseEnter={() => onHover(sector.label)}
             onMouseLeave={() => onHover(null)}
-          ><DitherBar segments={[{ value: 1, color: EXPO_PALETTE[index % EXPO_PALETTE.length] }]} /></div>
+          />
         ))}
       </div>
       <div className="expo-list">
@@ -392,17 +430,16 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
               onMouseLeave={() => onHover(null)}
               onFocus={() => onFocus(sector.label)}
               onBlur={() => onFocus(null)}
+              onClick={() => onFocus(sector.label)}
               aria-pressed={active === index}
-              aria-label={`${sector.label}: ${sector.weight.toFixed(1)}%, ${formatValue(sector.value)}, ${sector.count} ${sector.count === 1 ? 'position' : 'positions'}`}
+              aria-label={`${sector.label} ${sector.weight.toFixed(1)}% ${context} ${formatValue(sector.value)}`}
             >
               <span className="expo-identity">
                 <i className="legend-swatch" style={{ background: rgb(seedOfColor(color).fill) }} />
                 <span className="expo-name" title={sector.label}>{sector.label}</span>
-              </span>
-              <strong className="expo-weight">{sector.weight.toFixed(1)}%</strong>
-              <span className="expo-meta">{context}</span>
+              </span>{' '}
+              <span className="expo-weight">{sector.weight.toFixed(1)}%</span>{' '}
               <span className="expo-value">{formatValue(sector.value)}</span>
-              <DitherBar className="expo-track" segments={[{ value: sector.value, color }]} scale={max} />
             </button>
           )
         })}
@@ -412,6 +449,7 @@ function ExposureMix({ items, formatValue, activeLabel, onHover, onFocus }: {
 }
 
 type AllocationItem = { id: string; symbol: string; value: number; weight: number; pnl: number | null; sector: string }
+const ALLOCATION_PAGE_SIZE = 25
 
 function matchesExposure(item: AllocationItem, highlight: ExposureHighlight): boolean {
   return highlight.positionIds ? highlight.positionIds.has(item.id) : item.sector === highlight.label
@@ -426,10 +464,9 @@ const AllocationTile = memo(function AllocationTile({ item, active, highlight, o
   const widthPercent = Math.max(2, Math.min(12, Math.round(item.weight / 100 * 12))) / 12 * 100
   const matchesHighlight = highlight && matchesExposure(item, highlight)
   const exposureClass = !highlight ? '' : matchesHighlight ? ' allocation-tile--exposure-match' : ' allocation-tile--exposure-muted'
-  const color: DitherColor = item.pnl == null ? 'grey' : item.pnl < 0 ? 'red' : 'green'
-  return <button type="button" className={`allocation-tile${active ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.id)} onFocus={() => onSelect(item.id)} onClick={() => onSelect(item.id)} aria-pressed={active} aria-label={`${item.symbol}, ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`}>
-    <DitherBar className="allocation-tile-fill" segments={[{ value: 1, color }]} />
-    <strong>{item.symbol}</strong><span>{item.weight.toFixed(1)}%</span>
+  const tone = item.pnl == null ? 'neutral' : item.pnl < 0 ? 'negative' : 'positive'
+  return <button type="button" className={`allocation-tile allocation-tile--${tone}${active ? ' allocation-tile--active' : ''}${exposureClass}`} style={{ flexBasis: `max(110px, calc(${widthPercent}% - 4px))` }} onMouseEnter={() => onSelect(item.id)} onFocus={() => onSelect(item.id)} onClick={() => onSelect(item.id)} aria-pressed={active} aria-label={`${item.symbol} ${item.weight.toFixed(1)}% of portfolio, ${item.sector}`} title={item.symbol}>
+    <strong>{item.symbol}</strong>{' '}<span>{item.weight.toFixed(1)}%</span>
   </button>
 })
 
@@ -447,8 +484,14 @@ function AllocationMap({
   hideValues: boolean
 }) {
   const [selected, onSelect] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
+  const pageCount = Math.max(1, Math.ceil(items.length / ALLOCATION_PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount - 1)
+  const start = currentPage * ALLOCATION_PAGE_SIZE
+  const visibleItems = items.slice(start, start + ALLOCATION_PAGE_SIZE)
+  useEffect(() => { setPage((current) => Math.min(current, pageCount - 1)) }, [pageCount])
   if (hideValues) return <HiddenValuesState />
-  const active = items.find((item) => item.id === selected) ?? items[0]
+  const active = visibleItems.find((item) => item.id === selected) ?? visibleItems[0]
   const members = highlight ? items.filter((item) => matchesExposure(item, highlight)) : []
   const detail = highlight ? {
     symbol: highlight.label,
@@ -458,8 +501,12 @@ function AllocationMap({
   } : active
   return <div className="allocation-map-wrap" style={highlight ? { '--exposure-highlight': highlight.color } as CSSProperties : undefined}>
     <div className="allocation-map" aria-label="Allocation treemap">
-      {items.map((item) => <AllocationTile key={item.id} item={item} active={item.id === active?.id} highlight={highlight} onSelect={onSelect} />)}
+      {visibleItems.map((item) => <AllocationTile key={item.id} item={item} active={item.id === active?.id} highlight={highlight} onSelect={onSelect} />)}
     </div>
+    {items.length > ALLOCATION_PAGE_SIZE && <nav className="ledger-pagination allocation-pagination" aria-label="Allocation treemap pages">
+      <span aria-live="polite">{start + 1}–{Math.min(start + ALLOCATION_PAGE_SIZE, items.length)} of {items.length}</span>
+      <div><button className="btn btn--secondary" type="button" aria-label="Previous allocation page" disabled={currentPage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Previous</button><button className="btn btn--secondary" type="button" aria-label="Next allocation page" disabled={currentPage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Next</button></div>
+    </nav>}
     {unmapped.length > 0 && <div className="allocation-unmapped">
       <span className="score-label">Outside treemap</span>
       <ul>{unmapped.map((item) => <li key={item.id}><strong>{item.symbol}</strong><span>{item.priced ? 'No positive value' : 'Unpriced'}</span></li>)}</ul>
@@ -490,165 +537,4 @@ function ContributionBars({
       <DitherBar className="contribution-track" segments={[{ value: item.width, color: positive ? 'green' : 'red' }]} scale={100} />
     </div>
   })}</div></div>
-}
-
-type RiskStatus = 'lower' | 'watch' | 'high'
-const RISK_COLORS: Record<RiskStatus | 'hidden', DitherColor> = { lower: 'green', watch: 'orange', high: 'red', hidden: 'grey' }
-
-function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus {
-  if (value >= highAt) return 'high'
-  if (value >= watchAt) return 'watch'
-  return 'lower'
-}
-
-function RiskProfile({ risk, hideValues, coverage, historyStart, historyEnd }: { risk: ReturnType<typeof calculatePortfolioRisk>; hideValues: boolean; coverage: string | null; historyStart: number; historyEnd: number }) {
-  const [openDefinition, setOpenDefinition] = useState<string | null>(null)
-  const { current, volatility } = risk
-  const mask = (text: string) => hideValues ? '••••' : text
-  const amount = (value: number) => mask(numberFormatter({ style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value))
-  const date = (at: number) => dateFormatter({ day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(at)
-  const historyBasis = "Today's holdings at past prices. Uses every historical observation."
-  const riskRows = [
-    {
-      id: 'below-high',
-      label: 'Current drop from peak',
-      value: Math.abs(current),
-      scaleMax: 30,
-      watchAt: 10,
-      highAt: 20,
-      formula: 'Value = (latest high - latest value) ÷ latest high × 100.',
-      definition: 'Compares the latest value with the highest value reached before it. 0% means it is back at that high.',
-      basis: historyBasis,
-    },
-    {
-      id: 'time-below-peak',
-      label: 'Time below peak',
-      value: risk.daysBelowPeak,
-      scaleMax: 180,
-      unit: ' days',
-      watchAt: 30,
-      highAt: 90,
-      reading: risk.daysBelowPeak == null ? 'Unavailable' : `${risk.daysBelowPeak} ${risk.daysBelowPeak === 1 ? 'day' : 'days'}`,
-      formula: 'Value = latest observation date − most recent peak date, in calendar days.',
-      definition: 'Shows how long the latest value has been below its high within the loaded history. Equal highs reset the date; recovery shows 0 days. Earlier unseen peaks are not included.',
-      basis: `${historyBasis} Meter scale: 0 to 180 days; longer periods fill the meter.`,
-    },
-    {
-      id: 'yearly-movement',
-      label: 'Yearly swings',
-      value: volatility,
-      summary: volatility == null ? 'Daily closes are required for a yearly estimate.' : 'How much daily percentage returns varied, shown as a yearly estimate.',
-      scaleMax: 40,
-      watchAt: 15,
-      highAt: 25,
-      formula: 'Value = daily return standard deviation × √252 × 100.',
-      definition: 'Estimates the size of return swings. Gains and losses both count; this is not a loss probability.',
-      basis: "Today's holdings at past prices. Longer gaps and the latest app valuation are excluded.",
-    },
-    {
-      id: 'down-sessions',
-      label: 'Down sessions',
-      value: risk.downSessionPct,
-      reading: `${risk.downSessions} of ${risk.observedSessions}`,
-      detail: risk.downSessionPct == null ? undefined : `${risk.downSessionPct.toFixed(1)}%`,
-      summary: 'Observed sessions that closed lower.',
-      scaleMax: 100,
-      watchAt: 45,
-      highAt: 55,
-      formula: 'Share = falling close changes ÷ all eligible close changes × 100.',
-      definition: 'Counts falls between consecutive market closes. Gains and flat sessions stay in the total. Missing-session gaps and the current live valuation are excluded. This is observed frequency, not a forecast.',
-      basis: "Today's holdings at past prices. Uses eligible close changes within the loaded history.",
-    },
-  ].map((row) => ({
-    ...row,
-    status: row.value == null ? null : riskStatus(row.value, row.watchAt, row.highAt),
-  }))
-
-  return (
-    <div className="risk-profile">
-      <div className="risk-bars">
-        {riskRows.map((row) => {
-          const tooltipId = `risk-definition-${row.id}`
-          const isOpen = openDefinition === row.id
-          const statusLabel = row.status == null ? 'Unavailable' : row.status === 'lower' ? 'Good' : row.status === 'watch' ? 'To watch' : 'High'
-          const displayedStatus = hideValues || row.status == null ? 'hidden' : row.status
-          const reading = row.value == null ? 'Unavailable' : row.reading ?? `${row.value.toFixed(1)}%`
-          const unit = row.unit ?? '%'
-          const readingContent = <div className="risk-reading">
-            <strong>{mask(row.value == null ? '—' : reading)}</strong>
-            <div className="risk-reading-meta">
-              {!hideValues && row.detail && <span className="risk-observation">{row.detail}</span>}
-              <span className={`risk-status risk-status--${displayedStatus}`}>{hideValues ? 'Hidden' : statusLabel}</span>
-            </div>
-          </div>
-          return (
-            <article className={`risk-bar risk-bar--${displayedStatus}`} key={row.id} data-risk={row.id}>
-              <div className="risk-bar-head">
-                <div>
-                  <span className="risk-label">
-                    {row.label}
-                    <button
-                      type="button"
-                      className="risk-help"
-                      aria-label={`Explain how ${row.label} is calculated and rated`}
-                      aria-expanded={isOpen}
-                      aria-controls={tooltipId}
-                      onClick={() => setOpenDefinition(isOpen ? null : row.id)}
-                    >
-                      i
-                      <span id={tooltipId} role="tooltip" className="risk-help-popover">
-                        <strong>{row.label}</strong>
-                        <span>{row.definition}</span>
-                        <span><b>Formula</b> {row.formula}</span>
-                        <span><b>App guide</b> Good below {row.watchAt}{unit} · To watch from {row.watchAt}{unit} · High from {row.highAt}{unit}</span>
-                        <small>{row.basis} App-defined screening bands.</small>
-                      </span>
-                    </button>
-                  </span>
-                  {row.id !== 'below-high' && row.id !== 'time-below-peak' && <span className="risk-summary">{row.summary}</span>}
-                </div>
-                {row.id !== 'time-below-peak' && readingContent}
-              </div>
-
-              {row.id === 'below-high' && <div className="risk-breakdown">
-                <dl className="risk-calculation" aria-label="Current drop calculation">
-                  <div className="risk-calculation-stat"><dt>Peak value</dt><dd><strong>{amount(risk.peakValue)}</strong></dd></div>
-                  <div className="risk-calculation-stat"><dt>Latest value</dt><dd><strong>{amount(risk.currentValue)}</strong></dd></div>
-                  <div className={`risk-calculation-stat risk-calculation-result${!hideValues && risk.peakValue > risk.currentValue ? ' risk-calculation-result--loss' : ''}`}>
-                    <dt><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 4 8 8M6 12h6V6" /></svg>Below peak</dt>
-                    <dd><strong>{amount(risk.peakValue - risk.currentValue)}</strong></dd>
-                  </div>
-                </dl>
-                {!hideValues && coverage && <small className="risk-calculation-basis">{coverage}</small>}
-              </div>}
-
-              {row.id === 'time-below-peak' && <div className="risk-time-breakdown">
-                <div className="risk-timeline" role="group" aria-label="Time below peak calculation">
-                  <dl className="risk-timeline-date">
-                    <dt>Last observed peak</dt>
-                    <dd><strong>{hideValues ? mask('') : risk.peakAt == null ? 'Unavailable' : <time dateTime={new Date(risk.peakAt).toISOString()}>{date(risk.peakAt)}</time>}</strong></dd>
-                  </dl>
-                  <div className="risk-timeline-reading">{readingContent}</div>
-                  <dl className="risk-timeline-date">
-                    <dt>Latest reading</dt>
-                    <dd><strong>{hideValues ? mask('') : <time dateTime={new Date(historyEnd).toISOString()}>{date(historyEnd)}</time>}</strong></dd>
-                  </dl>
-                </div>
-                {!hideValues && risk.daysBelowPeak === 0 && <p className="risk-summary risk-recovery-note">Latest value is at its observed peak.</p>}
-              </div>}
-
-              <div className="risk-track" role="img" aria-label={hideValues ? `${row.label}: hidden` : `${row.label}: ${reading}, ${statusLabel}. Bar scale 0 to ${row.scaleMax}${unit}.`}>
-                <span className="risk-track-zone risk-track-zone--lower" style={{ width: `${row.watchAt / row.scaleMax * 100}%` }} />
-                <span className="risk-track-zone risk-track-zone--watch" style={{ width: `${(row.highAt - row.watchAt) / row.scaleMax * 100}%` }} />
-                <span className="risk-track-zone risk-track-zone--high" style={{ width: `${(row.scaleMax - row.highAt) / row.scaleMax * 100}%` }} />
-                <DitherBar segments={[{ value: hideValues ? 0 : row.value ?? 0, color: RISK_COLORS[displayedStatus] }]} scale={row.scaleMax} />
-              </div>
-
-            </article>
-          )
-        })}
-      </div>
-      {!hideValues && <small className="risk-history-basis">Current holdings at past prices · {date(historyStart)} to {date(historyEnd)}</small>}
-    </div>
-  )
 }

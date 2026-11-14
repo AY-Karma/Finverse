@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyTheme, BLUE_ACCENT } from './theme'
+import { applyTheme, BLUE_ACCENT, LIGHT_BLUE_ACCENT } from './theme'
 
 afterEach(() => {
   document.documentElement.removeAttribute('style')
@@ -81,9 +81,9 @@ describe('fixed blue theme', () => {
     document.documentElement.style.setProperty('--primary', '#10b981')
     applyTheme({ density: 'compact', mode })
     const root = document.documentElement
-    expect(root.style.getPropertyValue('--primary')).toBe('#3b82f6')
-    expect(root.style.getPropertyValue('--primary-hover')).toBe(BLUE_ACCENT.primaryHover)
-    expect(root.style.getPropertyValue('--primary-focus')).toBe(BLUE_ACCENT.primaryFocus)
+    expect(root.style.getPropertyValue('--primary')).toBe(mode === 'light' ? '#2563eb' : '#3b82f6')
+    expect(root.style.getPropertyValue('--primary-hover')).toBe(mode === 'light' ? LIGHT_BLUE_ACCENT.primaryHover : BLUE_ACCENT.primaryHover)
+    expect(root.style.getPropertyValue('--primary-focus')).toBe(mode === 'light' ? LIGHT_BLUE_ACCENT.primaryFocus : BLUE_ACCENT.primaryFocus)
     expect(root.style.getPropertyValue('--spark')).toBe(BLUE_ACCENT.spark)
     expect(root.dataset.mode).toBe(mode)
     expect(root.dataset.density).toBe('compact')

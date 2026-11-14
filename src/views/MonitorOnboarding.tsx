@@ -39,7 +39,7 @@ export function MonitorOnboarding({ onRequestImport }: { onRequestImport: () => 
         </div>
       </article>
 
-      <footer className="mo-edition-footer"><ActionIcon name="privacy" /><span>Market data starts after import, when enabled.</span></footer>
+      <footer className="mo-edition-footer"><ActionIcon name="privacy" /><span>Portfolio updates start after import, when enabled.</span></footer>
     </section>
   </PortfolioWelcome>
 }

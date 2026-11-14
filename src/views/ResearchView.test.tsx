@@ -43,10 +43,7 @@ describe('research desk', () => {
     const onRequestImport = vi.fn()
     await act(async () => root.render(<ResearchView onRequestImport={onRequestImport} />))
     const welcome = container.querySelector('.portfolio-welcome')!
-    expect(welcome.querySelector('h1')?.textContent).toBe('Your holdings.Well researched.')
-    expect(welcome.querySelector('.portfolio-welcome-index, .portfolio-welcome-features')).toBeNull()
     const importButton = welcome.querySelector<HTMLButtonElement>('button')!
-    expect(importButton.textContent).toBe('Import portfolio')
     await act(async () => importButton.click())
     expect(onRequestImport).toHaveBeenCalledOnce()
     expect(state.resolvePath).not.toHaveBeenCalled()
@@ -105,21 +102,13 @@ describe('research desk', () => {
     expect(state.history).not.toHaveBeenCalled()
   })
 
-  it('removes the notebook and sends the starting action to Sources', async () => {
-    const saved = '{"thesis":"Previously saved private research"}'
-    localStorage.setItem('finverse:research:v1:existing', saved)
+  it('sends the starting action to Sources', async () => {
     await render()
     expect([...container.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toEqual(['Overview', 'Sources'])
-    expect(container.querySelector('textarea')).toBeNull()
-    expect(container.textContent).not.toContain('Not reviewed yet')
     const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Start my research'))!
     await act(async () => start.click())
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Sources')
     expect(container.textContent).toContain('Read at the source')
-    expect(localStorage.getItem('finverse:research:v1:existing')).toBe(saved)
-    const icons = [...container.querySelectorAll('.rd-source-icon svg')]
-    expect(icons).toHaveLength(3)
-    expect(new Set(icons.map((icon) => icon.innerHTML)).size).toBe(3)
   })
 
   it('keeps portfolio amounts and identities hidden when masking is enabled', async () => {

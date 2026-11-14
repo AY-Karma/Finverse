@@ -111,38 +111,6 @@ export function combinedPositionMembers(positions: Position[]): Map<string, Posi
   return members
 }
 
-/** Explain uncertainty in the imported fallback, even when live quotes currently take precedence. */
-export function importedPriceWarnings(folios: Folio[]): string[] {
-  const warnings: string[] = []
-  for (const candidates of groupPositions(positionsWithStatementDates(folios)).values()) for (const { rows } of candidates) {
-    const selected = importedPriceRow(rows)
-    if (!selected) continue
-    const usable = rows.filter(usableImportedPrice)
-    const undatedCount = usable.filter((row) => !row.priceAsOf).length
-    const pricesByDate = new Map<string, Set<number>>()
-    for (const row of usable) {
-      if (!row.priceAsOf) continue
-      const prices = pricesByDate.get(row.priceAsOf) ?? new Set<number>()
-      prices.add(row.lastPrice!)
-      pricesByDate.set(row.priceAsOf, prices)
-    }
-    const conflictingDates = [...pricesByDate].filter(([, prices]) => prices.size > 1).map(([date]) => date).sort()
-    const dates = rows.map((row) => row.priceAsOf).filter((date): date is string => !!date).sort()
-    const latestDate = dates[dates.length - 1]
-    const reasons: string[] = []
-    if (undatedCount) reasons.push(`${undatedCount} usable imported price${undatedCount === 1 ? ' has' : 's have'} no statement date`)
-    if (conflictingDates.length) reasons.push(`imported prices conflict on statement date${conflictingDates.length === 1 ? '' : 's'} ${conflictingDates.join(', ')}`)
-    else if (new Set(usable.map((row) => row.lastPrice)).size > 1) reasons.push('imported prices differ across active accounts')
-    if (latestDate && (!selected.priceAsOf || latestDate > selected.priceAsOf)) reasons.push(`the latest statement dated ${latestDate} has no usable price`)
-    if (!reasons.length) continue
-    const selection = selected.priceAsOf
-      ? `Using ${conflictingDates.includes(selected.priceAsOf) ? 'the first imported usable price' : 'the imported price'} from statement dated ${selected.priceAsOf}, the latest statement date with a usable price.`
-      : 'Using the first imported usable price because no usable price has a known statement date.'
-    warnings.push(`${instrumentLabel(selected)}: ${reasons.join('; ')}. ${selection} Provider observation time is unknown.`)
-  }
-  return warnings
-}
-
 export function combinePositions(positions: Position[]): Position[] {
   const groups = groupPositions(positions)
   const out: Position[] = []
@@ -208,13 +176,16 @@ export function computePortfolioStats(
   positions: Position[],
   quotes: Record<string, LiveQuote> = {},
 ): PortfolioStats {
-  const invested = positions.filter(hasSupportedValuationCurrency).reduce((sum, position) => sum + position.invested, 0)
-  const priced = positions.filter((position) => effectivePrice(position, quotes) != null)
-  const pricedInvested = priced.reduce((sum, position) => sum + position.invested, 0)
-  const currentValue = priced.reduce((sum, position) => sum + positionValue(position, quotes), 0)
+  let invested = 0, pricedInvested = 0, currentValue = 0, pricedCount = 0
   const allocationsBySymbol = new Map<string, { value: number; type: Position['type'] }>()
-  for (const position of priced) {
-    const value = positionValue(position, quotes)
+  for (const position of positions) {
+    if (hasSupportedValuationCurrency(position)) invested += position.invested
+    const price = effectivePrice(position, quotes)
+    if (price == null) continue
+    const value = price * position.quantity
+    pricedCount += 1
+    pricedInvested += position.invested
+    currentValue += value
     const previous = allocationsBySymbol.get(position.ticker)
     if (previous) previous.value += value
     else allocationsBySymbol.set(position.ticker, { value, type: position.type })
@@ -223,7 +194,7 @@ export function computePortfolioStats(
     .sort((a, b) => b.value - a.value)
   const pnl = currentValue - pricedInvested
   return { invested, pricedInvested, currentValue, pnl, pnlPct: pricedInvested > 0 ? (pnl / pricedInvested) * 100 : 0,
-    pricedCount: priced.length, unpricedCount: positions.length - priced.length, valuationComplete: priced.length === positions.length, allocations }
+    pricedCount, unpricedCount: positions.length - pricedCount, valuationComplete: pricedCount === positions.length, allocations }
 }
 
 export interface PortfolioPulse {
@@ -275,7 +246,8 @@ export function portfolioPulse(
   let lossPctSum = 0
   const weights: { symbol: string; value: number; priced: boolean }[] = []
   for (const position of positions) {
-    const value = positionValue(position, quotes)
+    const price = effectivePrice(position, quotes)
+    const value = price == null ? 0 : price * position.quantity
     if (position.type === 'mutual-fund') {
       pulse.mutualValue += value
       pulse.mutualCount += 1
@@ -284,10 +256,11 @@ export function portfolioPulse(
       pulse.equityCount += 1
     }
     totalValue += value
-    weights.push({ symbol: instrumentLabel(position), value, priced: effectivePrice(position, quotes) != null })
-    const pct = positionPnlPct(position, quotes)
+    const symbol = instrumentLabel(position)
+    weights.push({ symbol, value, priced: price != null })
+    const pnl = price == null ? null : value - position.invested
+    const pct = pnl == null || position.invested <= 0 ? null : pnl / position.invested * 100
     if (pct == null) continue
-    const pnl = positionPnl(position, quotes)
     if (pnl == null || pnl === 0) pulse.flat += 1
     else if (pnl > 0) {
       pulse.up += 1
@@ -296,7 +269,6 @@ export function portfolioPulse(
       pulse.down += 1
       lossPctSum += pct
     }
-    const symbol = instrumentLabel(position)
     if (!pulse.best || pct > pulse.best.pct) pulse.best = { symbol, pct }
     if (!pulse.worst || pct < pulse.worst.pct) pulse.worst = { symbol, pct }
   }

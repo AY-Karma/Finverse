@@ -2,7 +2,7 @@ import type { Folio, LiveQuote, PortfolioSnapshot, Position } from './types'
 import { assetTypeLabel, instrumentLabel, normalizePosition } from './instruments'
 import { hasCompatibleFundScheme } from './fundSchemes'
 import { isRegularMarketOpen } from './marketCalendar'
-import { combinePositions, computePortfolioStats, effectivePrice, hasSupportedValuationCurrency, positionPnl, positionsWithStatementDates, positionValue, quoteKey } from './valuation'
+import { combinePositions, computePortfolioStats, effectivePrice, hasSupportedValuationCurrency, positionsWithStatementDates, positionValue, quoteKey } from './valuation'
 
 interface Contribution {
   id: string
@@ -93,16 +93,6 @@ function sectorOf(position: Position): string {
   return assetTypeLabel(position.type)
 }
 
-function quoteChange(position: Position, quotes: Record<string, LiveQuote>): number | null {
-  if (!hasSupportedValuationCurrency(position)) return null
-  const quote = quotes[quoteKey(position)]
-  if (quote?.change != null && Number.isFinite(quote.change)) {
-    const change = quote.change * position.quantity
-    return Number.isFinite(change) ? change : null
-  }
-  return null
-}
-
 const IST_OFFSET_MS = 330 * 60_000
 
 function quoteDate(at: number): string {
@@ -121,18 +111,21 @@ function quoteIsStale(quote: LiveQuote): boolean {
 function buildContributions(positions: Position[], quotes: Record<string, LiveQuote>, currentValue: number, sessionDate: string | null, sessionKeys: Set<string>): Contribution[] {
   return positions
     .map((position) => {
-      const value = positionValue(position, quotes)
-      const quote = hasSupportedValuationCurrency(position) ? quotes[quoteKey(position)] : undefined
-      const inSession = sessionKeys.has(quoteKey(position)) && quote != null && quoteDate(quote.at) === sessionDate
-      const dailyChange = inSession ? quoteChange(position, quotes) : null
+      const price = effectivePrice(position, quotes)
+      const value = price == null ? 0 : price * position.quantity
+      const key = quoteKey(position)
+      const quote = hasSupportedValuationCurrency(position) ? quotes[key] : undefined
+      const inSession = sessionKeys.has(key) && quote != null && quoteDate(quote.at) === sessionDate
+      const change = inSession && Number.isFinite(quote.change) ? quote.change! * position.quantity : NaN
+      const dailyChange = Number.isFinite(change) ? change : null
       return {
         id: position.id,
         symbol: instrumentLabel(position),
         type: position.type,
         value,
-        priced: effectivePrice(position, quotes) != null,
+        priced: price != null,
         weight: currentValue > 0 ? (value / currentValue) * 100 : 0,
-        pnl: positionPnl(position, quotes),
+        pnl: price == null ? null : value - position.invested,
         dailyChange,
         dailyContribution: dailyChange,
         dailyPriceChange: inSession && Number.isFinite(quote.change) ? quote.change! : null,

@@ -6,6 +6,7 @@ import {
   fetchLiveQuotes,
   fetchNavHistory,
   fetchYahooPrice,
+  fetchYahooPrices,
   resolveYahooSymbolCandidates,
   type HistoryPoint,
   type LiveQuotesResult,
@@ -13,37 +14,21 @@ import {
 
 export interface MarketDataAdapter {
   reviewFundScheme(name: string, signal?: AbortSignal): Promise<FundSchemeReview>
-  refreshQuotes(positions: Position[], previous: Record<string, import('./types').LiveQuote>, signal?: AbortSignal): Promise<LiveQuotesResult>
+  refreshQuotes(positions: Position[], previous: Record<string, import('./types').LiveQuote>, signal?: AbortSignal, onProgress?: (result: LiveQuotesResult) => void): Promise<LiveQuotesResult>
   history(position: Position, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
   benchmarkHistory(symbol: string, from: Date, to: Date, signal?: AbortSignal): Promise<HistoryPoint[]>
   quote(symbol: string, signal?: AbortSignal): Promise<{ price: number; change: number | null; pct: number | null; at: number } | null>
+  quotes(symbols: string[], signal?: AbortSignal): Promise<Map<string, PublicMarketQuote>>
 }
 
-interface BenchmarkDefinition {
-  id: string
-  label: string
-  symbol: string | null
-  region: 'India' | 'Global'
-  unavailableReason?: string
+export interface PublicMarketQuote {
+  price: number
+  change: number | null
+  pct: number | null
+  at: number
 }
 
-/** Benchmarks intentionally live beside the data adapter so views never need to know provider symbols. */
-export const BENCHMARKS: BenchmarkDefinition[] = [
-  { id: 'nifty-50', label: 'NIFTY 50', symbol: '^NSEI', region: 'India' },
-  { id: 'nifty-next-50', label: 'NIFTY Next 50', symbol: '^NSMIDCP', region: 'India' },
-  { id: 'nifty-100', label: 'NIFTY 100', symbol: '^CNX100', region: 'India' },
-  { id: 'nifty-200', label: 'NIFTY 200', symbol: '^CNX200', region: 'India' },
-  { id: 'nifty-midcap-50', label: 'NIFTY Midcap 50', symbol: '^NSEMDCP50', region: 'India' },
-  { id: 'sensex', label: 'S&P BSE Sensex', symbol: '^BSESN', region: 'India' },
-  { id: 'sp-500', label: 'S&P 500', symbol: '^GSPC', region: 'Global' },
-  { id: 'nasdaq-composite', label: 'NASDAQ Composite', symbol: '^IXIC', region: 'Global' },
-  { id: 'dow-jones', label: 'Dow Jones', symbol: '^DJI', region: 'Global' },
-  { id: 'ftse-100', label: 'FTSE 100', symbol: '^FTSE', region: 'Global' },
-  { id: 'nikkei-225', label: 'Nikkei 225', symbol: '^N225', region: 'Global' },
-  { id: 'hang-seng', label: 'Hang Seng', symbol: '^HSI', region: 'Global' },
-  { id: 'dax', label: 'DAX', symbol: '^GDAXI', region: 'Global' },
-  { id: 'cac-40', label: 'CAC 40', symbol: '^FCHI', region: 'Global' },
-]
+export { BENCHMARKS } from './marketIndexSelection'
 
 /** Current public adapter. A licensed or first-party adapter can replace it at this seam. */
 export const marketData: MarketDataAdapter = {
@@ -64,4 +49,5 @@ export const marketData: MarketDataAdapter = {
     return fetchHistory(symbol, from, to, signal)
   },
   quote: fetchYahooPrice,
+  quotes: fetchYahooPrices,
 }

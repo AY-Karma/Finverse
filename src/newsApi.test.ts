@@ -6,6 +6,10 @@ const STORY = '<rss><channel><item><title>Reliance rises</title><link>https://ex
 afterEach(() => vi.useRealTimers())
 
 describe('news API', () => {
+  it('requires revalidation after its five-minute edge cache instead of serving ten more stale minutes', async () => {
+    const response = await createNewsHandler({ fetcher: vi.fn(async () => new Response(STORY)) })(new Request('http://localhost/api/news?source=wire-et'))
+    expect(response.headers.get('Vercel-CDN-Cache-Control')).toBe('public, s-maxage=300, must-revalidate')
+  })
   it('hedges a slow company provider after 500ms and cancels the losing request', async () => {
     vi.useFakeTimers()
     const fetcher = vi.fn<typeof fetch>((url, options) => {
@@ -132,5 +136,65 @@ describe('news API', () => {
     expect(responses.some((response) => response.status === 429)).toBe(true)
     expect(fetcher.mock.calls.length).toBeLessThanOrEqual(8)
     expect(responses.find((response) => response.status === 429)?.headers.get('retry-after')).toBeTruthy()
+  })
+
+  it('loads a full calendar month with fixed briefing queries instead of the wire fourteen-day filter', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-06T10:00:00Z'))
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
+    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=briefing&topic=policy&from=2026-10-01&through=2026-10-31'))
+    expect(response.status).toBe(200)
+    const upstream = new URL(fetcher.mock.calls[0][0].toString())
+    expect(upstream.hostname).toBe('news.google.com')
+    expect(upstream.searchParams.get('q')).toContain('RBI OR "repo rate"')
+    expect(upstream.searchParams.get('q')).toContain('after:2026-09-30 before:2026-11-01')
+    expect(upstream.searchParams.get('q')).not.toContain('when:14d')
+  })
+
+  it.each(['global', 'china'])('queries international publications for the %s briefing topic', async (topic) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-06T10:00:00Z'))
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
+    const response = await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=briefing&topic=${topic}&from=2026-11-01&through=2026-11-06`))
+    expect(response.status).toBe(200)
+    expect(new URL(fetcher.mock.calls[0][0].toString()).searchParams.get('gl')).toBe('US')
+  })
+
+  it('uses one combined regional and global recap query without forcing chronological sorting', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-01T10:00:00Z'))
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
+    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=briefing&topic=recap&from=2026-10-01&through=2026-10-31'))
+    expect(response.status).toBe(200)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const upstream = new URL(fetcher.mock.calls[0][0].toString())
+    const query = upstream.searchParams.get('q')!
+    for (const topic of ['"RBI repo rate"', '"China stocks"', '"global stocks"', '"Federal Reserve interest rates"', 'after:2026-09-30 before:2026-11-01']) expect(query).toContain(topic)
+    expect(query).not.toMatch(/OR (?:tariffs|inflation|RBI|ECB) OR/)
+    expect(upstream.searchParams.has('scoring')).toBe(false)
+  })
+
+  it.each([
+    'topic=policy&from=2026-02-30&through=2026-03-04',
+    'topic=policy&from=2026-11-06&through=2026-11-01',
+    'topic=policy&from=2026-09-01&through=2026-11-06',
+    'topic=policy&from=2026-07-01&through=2026-07-06',
+    'topic=policy&from=2026-11-01&through=2026-11-07',
+    'topic=https://private.test&from=2026-11-01&through=2026-11-06',
+    'topic=constructor&from=2026-11-01&through=2026-11-06',
+  ])('rejects invalid or unbounded briefing requests: %s', async (query) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-06T10:00:00Z'))
+    const fetcher = vi.fn<typeof fetch>()
+    expect((await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=briefing&${query}`))).status).toBe(400)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('uses the India calendar day when validating the latest briefing date', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-06T18:31:00Z'))
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
+    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=briefing&topic=india&from=2026-11-01&through=2026-11-07'))
+    expect(response.status).toBe(200)
   })
 })

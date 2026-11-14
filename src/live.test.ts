@@ -10,34 +10,36 @@ import {
   fetchNavHistory,
   fetchYahooPrice,
   isMarketOpen,
-  marketStatusText,
   quoteRefreshIssueText,
+  type LiveQuotesResult,
 } from './live'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
-describe('market status text', () => {
-  it('reports missing, loading, timestamped and disabled market data', () => {
-    expect(marketStatusText(true)).toBe('Market Open - no provider prices yet')
-    expect(marketStatusText(false)).toBe('Market Closed - no provider prices yet')
-    expect(marketStatusText(true, true, true)).toBe('Market Open - fetching latest available data')
-
-    expect(marketStatusText(false, true, true)).toBe('Market Closed - fetching latest available data')
-
-    const timestamp = '01 Oct, 15:15:00 IST'
-    expect(marketStatusText(false, true, false, timestamp)).toBe(`Market Closed - showing prices as of ${timestamp}`)
-    expect(marketStatusText(true, true, false, timestamp)).toBe(`Market Open - showing prices as of ${timestamp}`)
-    expect(marketStatusText(false, true, true, timestamp)).toBe('Market Closed - fetching latest available data')
-    expect(marketStatusText(false, false, false, timestamp)).toBe('External market data off · showing imported prices')
-  })
-
+describe('NSE market session', () => {
   it('treats the market as closed outside the NSE trading window', () => {
     expect(isMarketOpen(new Date('2026-09-23T03:44:00.000Z'))).toBe(false)
     expect(isMarketOpen(new Date('2026-09-23T03:45:00.000Z'))).toBe(true)
     expect(isMarketOpen(new Date('2026-09-23T09:59:00.000Z'))).toBe(true)
     expect(isMarketOpen(new Date('2026-09-23T10:00:00.000Z'))).toBe(false)
+  })
+
+  it.each([false, true])('restricts the live-session URL override to development, DEV=%s', async (dev) => {
+    vi.stubEnv('DEV', dev)
+    vi.stubGlobal('location', { search: '?live=1' })
+    vi.resetModules()
+    const { isMarketOpen: sessionOpen } = await import('./live')
+    expect(sessionOpen(new Date('2026-09-26T18:00:00Z'))).toBe(dev)
+  })
+
+  it('keeps quotes refreshing during the announced Sunday Muhurat session', () => {
+    expect(isMarketOpen(new Date('2026-11-08T08:49:59Z'))).toBe(false)
+    expect(isMarketOpen(new Date('2026-11-08T08:50:00Z'))).toBe(true)
+    expect(isMarketOpen(new Date('2026-11-08T10:00:00Z'))).toBe(false)
   })
 
   it('reports partial quote retention without treating skipped daily NAVs as failures', () => {
@@ -48,6 +50,52 @@ describe('market status text', () => {
 })
 
 describe('market data client', () => {
+  it('retains a newer intraday holding quote when a later refresh falls back to the previous close', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-06T06:00:00Z'))
+    const stock = position('TCS')
+    const previous = { [quoteKey(stock)]: { price: 3300, at: Date.parse('2026-11-06T05:59:00Z'), fetchedAt: Date.parse('2026-11-06T05:59:10Z'), source: 'yahoo' as const, change: 50, changePct: 1.54 } }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => Response.json({
+      fetchedAt: '2026-11-06T06:00:00Z', quotes: [{ symbol: 'TCS.NS', price: 3250, marketTime: '2026-11-05T10:00:00Z', source: 'nse-close', change: 10, changePct: 0.31 }],
+    })))
+    const result = await fetchLiveQuotes([stock], previous)
+    expect(result.quotes[quoteKey(stock)]).toEqual(previous[quoteKey(stock)])
+    expect(result).toMatchObject({ updated: 0, failed: 1, skipped: 0 })
+  })
+
+  it.each(['same observation', 'invalid prior price', 'future prior time'])('accepts a usable quote for %s instead of blocking provider corrections', async (scenario) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-06T06:00:00Z'))
+    const stock = position('TCS'), at = Date.now()
+    const previous = { [quoteKey(stock)]: { price: scenario === 'invalid prior price' ? -1 : 3300, at: scenario === 'same observation' ? at : at + (scenario === 'invalid prior price' ? 60_000 : 600_000), source: 'yahoo' as const } }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => Response.json({
+      fetchedAt: new Date().toISOString(), quotes: [{ symbol: 'TCS.NS', price: 3301, marketTime: new Date().toISOString(), source: 'yahoo', change: 51, changePct: 1.57 }],
+    })))
+    const onProgress = vi.fn()
+    const result = await fetchLiveQuotes([stock], previous, undefined, onProgress)
+    expect(result.quotes[quoteKey(stock)]).toMatchObject({ price: 3301, at })
+    expect(result).toMatchObject({ updated: 1, failed: 0 })
+    expect(onProgress).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ quotes: { [quoteKey(stock)]: expect.objectContaining({ price: 3301, at }) }, updated: 1 }))
+  })
+
+  it('refreshes only the missing completed NSE close in an otherwise covered cached range', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-07T06:00:00Z'))
+    const stored = new Map<string, string>([['finverse:history:v2:CACHECLOSE.NS', JSON.stringify({
+      from: '2026-10-01', to: '2026-11-07', at: Date.now(),
+      points: [{ date: '2026-10-30', close: 100 }, { date: '2026-11-02', close: 101 }, { date: '2026-11-05', close: 105 }],
+    })]])
+    vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key), key: (index: number) => [...stored.keys()][index] ?? null, get length() { return stored.size } })
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ points: [{ date: '2026-11-05', close: 105 }, { date: '2026-11-06', close: 107 }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const from = new Date('2026-10-30T00:00:00+05:30')
+    const to = new Date('2026-11-06T23:59:59+05:30')
+    expect(await fetchHistory('CACHECLOSE.NS', from, to)).toEqual([{ date: '2026-10-30', close: 100 }, { date: '2026-11-02', close: 101 }, { date: '2026-11-05', close: 105 }, { date: '2026-11-06', close: 107 }])
+    expect(String(fetcher.mock.calls[0][0])).toContain('from=2026-11-05&to=2026-11-06')
+    await fetchHistory('CACHECLOSE.NS', from, to)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['equity', 'fund'])('starts independent quote requests while the %s provider is pending', async (slowProvider) => {
     const equity = normalizePosition({ ...position('INFY'), exchangeSource: 'explicit', identityVersion: 2 })
     const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', mfScheme: { code: 709, name: 'Fund Direct Growth', source: 'confirmed' } }
@@ -69,6 +117,66 @@ describe('market data client', () => {
       await pending
     }
     expect(await pending).toMatchObject({ updated: 2, failed: 0 })
+  })
+
+  it('publishes a healthy stock batch before another stock batch and NAV finish', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-09T06:00:00Z'))
+    const observedAt = Date.parse('2026-11-09T05:59:58Z')
+    const stocks = Array.from({ length: 26 }, (_, index) => normalizePosition({ ...position(`PROGRESS${String(index).padStart(2, '0')}`), exchangeSource: 'explicit', identityVersion: 2 }))
+    const fund: Position = { ...position('Progress Fund Direct Growth'), type: 'mutual-fund', mfScheme: { code: 987654, name: 'Progress Fund Direct Growth', source: 'confirmed' } }
+    let releaseStock!: () => void
+    let releaseFund!: () => void
+    const stockGate = new Promise<void>((resolve) => { releaseStock = resolve })
+    const fundGate = new Promise<void>((resolve) => { releaseFund = resolve })
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/quotes') {
+        const symbols = url.searchParams.get('symbols')!.split(',')
+        if (symbols.includes('PROGRESS25.NS')) await stockGate
+        return Response.json({ fetchedAt: new Date().toISOString(), quotes: symbols.map((symbol) => ({ symbol, price: 120, change: 20, changePct: 20, marketTime: new Date(observedAt).toISOString(), source: 'yahoo' })) })
+      }
+      await fundGate
+      return Response.json({ data: [{ date: '09-11-2026', nav: '110' }, { date: '06-11-2026', nav: '100' }] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const onProgress = vi.fn<(part: LiveQuotesResult) => void>()
+    let completed = false
+    const pending = fetchLiveQuotes([...stocks, fund], {}, undefined, onProgress).then((result) => { completed = true; return result })
+    try {
+      await vi.waitFor(() => expect(onProgress).toHaveBeenCalledOnce())
+      const first = onProgress.mock.calls[0][0]
+      expect(first.updated).toBe(25)
+      expect(Object.keys(first.quotes)).toHaveLength(25)
+      expect(first.quotes[quoteKey(stocks[0])]).toMatchObject({ price: 120, source: 'yahoo', at: observedAt })
+      expect(first.quotes[quoteKey(stocks[25])]).toBeUndefined()
+      expect(first.quotes[quoteKey(fund)]).toBeUndefined()
+      expect(completed).toBe(false)
+      releaseStock()
+      await vi.waitFor(() => expect(onProgress).toHaveBeenCalledTimes(2))
+      expect(onProgress.mock.calls[1][0].quotes[quoteKey(stocks[25])]).toMatchObject({ price: 120, source: 'yahoo' })
+      expect(completed).toBe(false)
+    } finally { releaseStock(); releaseFund(); await pending }
+    expect(await pending).toMatchObject({ updated: 27, failed: 0, skipped: 0 })
+    expect(onProgress).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not publish a late stock batch after its caller aborts', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => {
+      await gate
+      return Response.json({ fetchedAt: new Date().toISOString(), quotes: [{ symbol: 'ABORTPROGRESS.NS', price: 120, change: 20, changePct: 20, marketTime: new Date().toISOString(), source: 'yahoo' }] })
+    }))
+    const controller = new AbortController()
+    const onProgress = vi.fn()
+    const pending = fetchLiveQuotes([position('ABORTPROGRESS')], {}, controller.signal, onProgress)
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    controller.abort()
+    release()
+    await rejected
+    expect(onProgress).not.toHaveBeenCalled()
   })
 
   it('queues excess distinct history requests and removes cancelled waiters before fetching', async () => {
@@ -118,6 +226,8 @@ describe('market data client', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
   it.each([{ nav: '120', fundChange: 10, total: 40 }, { nav: '110', fundChange: 0, total: 20 }])('includes a confirmed fund change in a complete same-session portfolio move: $fundChange', async ({ nav, fundChange, total }) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-25T15:00:00Z'))
     const equity = normalizePosition({ ...position('RELIANCE'), exchangeSource: 'explicit', identityVersion: 2 })
     const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', quantity: 2, mfScheme: { code: 701, name: 'Fund Direct Growth', source: 'confirmed' } }
     vi.stubGlobal('fetch', vi.fn(async (url) => String(url).startsWith('/api/quotes')
@@ -396,7 +506,7 @@ describe('market data client', () => {
 
     const result = await fetchLiveQuotes(positions, previous)
 
-    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(fetcher).toHaveBeenCalledTimes(2)
     expect(String(fetcher.mock.calls[0]?.[0])).toContain('RELIANCE.NS%2CTCS.NS')
     expect(result).toMatchObject({ updated: 1, failed: 1, skipped: 0 })
     expect(result.quotes[quoteKey(positions[1])]).toEqual(previous[quoteKey(positions[1])])
@@ -406,7 +516,32 @@ describe('market data client', () => {
     })
   })
 
-  it.each([false, true])('reuses recent NAV checks, keeps equity refreshes running and rechecks after close (previous NAV: %s)', async (hasPrevious) => {
+  it('publishes healthy quotes before targeted missing-symbol recovery completes', async () => {
+    const stocks = [position('HEALTHY'), position('RENAMED')]
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const symbols = new URL(String(input), 'http://localhost').searchParams.get('symbols')!.split(',')
+      const recovery = symbols.length === 1
+      if (recovery) await gate
+      return Response.json({ fetchedAt: new Date().toISOString(), quotes: (recovery ? symbols : ['HEALTHY.NS']).map((symbol) => ({
+        symbol, price: recovery ? 350 : 120, change: 2, changePct: 1, marketTime: new Date().toISOString(), source: 'yahoo',
+      })) })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const progress = vi.fn()
+    const pending = fetchLiveQuotes(stocks, {}, undefined, progress)
+    try {
+      await vi.waitFor(() => expect(progress).toHaveBeenCalledOnce())
+      expect(progress.mock.calls[0][0].quotes[quoteKey(stocks[0])]?.price).toBe(120)
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
+      expect(new URL(String(fetcher.mock.calls[1][0]), 'http://localhost').searchParams.get('symbols')).toBe('RENAMED.NS')
+    } finally { release() }
+    expect(await pending).toMatchObject({ updated: 2, failed: 0 })
+    expect(progress.mock.calls[1][0].quotes[quoteKey(stocks[1])]?.price).toBe(350)
+  })
+
+  it.each([false, true])('honors a caller-requested pending NAV check without an inner 15-minute throttle (previous NAV: %s)', async (hasPrevious) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-25T06:00:00Z'))
     try {
@@ -426,9 +561,9 @@ describe('market data client', () => {
 
       vi.setSystemTime(new Date('2026-09-25T06:05:00Z'))
       const repeated = await fetchLiveQuotes([stock, fund], initial.quotes)
-      expect(repeated).toMatchObject({ updated: 1, skipped: 1, failed: 0 })
-      expect(repeated.quotes[quoteKey(fund)]).toEqual(initial.quotes[quoteKey(fund)])
-      expect(fetcher).toHaveBeenCalledTimes(3)
+      expect(repeated).toMatchObject({ updated: 2, skipped: 0, failed: 0 })
+      expect(repeated.quotes[quoteKey(fund)]).toMatchObject({ price: 120, at: initial.quotes[quoteKey(fund)].at, fetchedAt: Date.now(), source: 'nav' })
+      expect(fetcher).toHaveBeenCalledTimes(4)
       expect(String(fetcher.mock.calls[2][0])).toContain('/api/quotes')
 
       vi.setSystemTime(new Date('2026-09-25T18:00:00Z'))
@@ -436,17 +571,17 @@ describe('market data client', () => {
       const evening = await fetchLiveQuotes([fund], repeated.quotes)
       expect(evening.updated).toBe(1)
       expect(evening.quotes[quoteKey(fund)].at).toBe(Date.parse('2026-09-25T00:00:00+05:30'))
-      expect(fetcher).toHaveBeenCalledTimes(4)
+      expect(fetcher).toHaveBeenCalledTimes(5)
 
       vi.setSystemTime(new Date('2026-09-28T06:00:00Z'))
       expect((await fetchLiveQuotes([fund], evening.quotes)).updated).toBe(1)
-      expect(fetcher).toHaveBeenCalledTimes(5)
+      expect(fetcher).toHaveBeenCalledTimes(6)
     } finally { vi.useRealTimers() }
   })
 
-  it('checks pending NAVs on the 15-minute cadence and adds a newly published same-session move', async () => {
+  it('accepts a scheduled newly published NAV and reuses the completed same-day publication', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-09-25T06:00:00Z'))
+    vi.setSystemTime(new Date('2026-09-25T04:37:00Z'))
     try {
       const fund: Position = { ...position('Fund Direct Growth'), type: 'mutual-fund', mfScheme: { code: 881, name: 'Fund Direct Growth', source: 'confirmed' } }
       const stock = position('INFY')
@@ -462,18 +597,14 @@ describe('market data client', () => {
       const initial = await fetchLiveQuotes(holdings, {})
       expect(investmentWorkspace.readSnapshot({ folios, quotes: initial.quotes })).toMatchObject({ dailyChange: 2, dailyChangeCount: 1, sessionHoldingCount: 1 })
       published = true
-      vi.setSystemTime(new Date('2026-09-25T06:14:59Z'))
-      const early = await fetchLiveQuotes(holdings, initial.quotes)
-      expect(early).toMatchObject({ updated: 1, skipped: 1 })
-      expect(fetcher).toHaveBeenCalledTimes(3)
-      vi.setSystemTime(new Date('2026-09-25T06:15:00Z'))
-      const updated = await fetchLiveQuotes(holdings, early.quotes)
+      vi.setSystemTime(new Date('2026-09-25T08:37:00Z'))
+      const updated = await fetchLiveQuotes(holdings, initial.quotes)
       expect(updated).toMatchObject({ updated: 2, failed: 0 })
       expect(updated.quotes[quoteKey(fund)]).toMatchObject({ at: Date.parse('2026-09-25T00:00:00+05:30'), change: 5 })
       expect(investmentWorkspace.readSnapshot({ folios, quotes: updated.quotes })).toMatchObject({ dailyChange: 7, dailyChangeCount: 2, sessionHoldingCount: 2 })
-      vi.setSystemTime(new Date('2026-09-25T07:00:00Z'))
+      vi.setSystemTime(new Date('2026-09-25T12:37:00Z'))
       expect(await fetchLiveQuotes(holdings, updated.quotes)).toMatchObject({ updated: 1, skipped: 1 })
-      expect(fetcher).toHaveBeenCalledTimes(6)
+      expect(fetcher).toHaveBeenCalledTimes(5)
     } finally { vi.useRealTimers() }
   })
 
@@ -578,7 +709,7 @@ describe('market data client', () => {
     expect(await fetchLiveQuotes([fund], {})).toMatchObject({ updated: 0, failed: 1, quotes: {} })
   })
 
-  it('fetches same-ticker NSE and BSE listings without sharing their quotes', async () => {
+  it('does not fetch or admit a delayed BSE quote beside a same-ticker NSE listing', async () => {
     const holdings = [
       normalizePosition({ ...position('SAME'), id: 'nse', exchange: 'NSE', providerSymbol: 'SAME.NS', identityVersion: 2 }),
       normalizePosition({ ...position('SAME'), id: 'bse', exchange: 'BSE', providerSymbol: 'SAME.BO', identityVersion: 2 }),
@@ -588,9 +719,11 @@ describe('market data client', () => {
       { symbol: 'SAME.BO', price: 200, change: 0, changePct: 0, marketTime: '2026-09-23T06:00:00Z', source: 'yahoo' },
     ] })))
     const result = await fetchLiveQuotes(holdings, {})
-    expect(result.updated).toBe(2)
+    expect(result).toMatchObject({ updated: 1, skipped: 1, failed: 0 })
     expect(result.quotes[quoteKey(holdings[0])].price).toBe(100)
-    expect(result.quotes[quoteKey(holdings[1])].price).toBe(200)
+    expect(result.quotes[quoteKey(holdings[1])]).toBeUndefined()
+    expect(new URL(String(vi.mocked(fetch).mock.calls[0][0]), 'http://localhost').searchParams.get('symbols')).toBe('SAME.NS')
+    expect(holdings[1]).toMatchObject({ exchange: 'BSE', providerSymbol: 'SAME.BO' })
   })
 
   it.each([

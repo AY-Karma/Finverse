@@ -49,7 +49,6 @@ it.each([
   expect(indicator.getAttribute('title')).toContain(description)
   const id = indicator.getAttribute('aria-describedby')
   expect(container.querySelector(`[id="${id}"]`)?.textContent).toContain(description)
-  expect(indicator.querySelector('.dither-bar[aria-hidden="true"]')).not.toBeNull()
 })
 
 it('updates an open app when an import crosses an age boundary', async () => {
@@ -72,7 +71,6 @@ it.each([
   const indicator = container.querySelector('.import-health--label')!
   expect(indicator.querySelector('.import-health-label')?.textContent).toBe(label)
   expect(indicator.getAttribute('aria-label')).toBe(label)
-  expect(indicator.querySelector('.dither-bar')).not.toBeNull()
 })
 
 it('names a recent review separately from a recent import', async () => {

@@ -8,6 +8,7 @@ function originalWorkspace() {
   localStorage.setItem('finverse:folios', 'old holdings')
   localStorage.setItem('finverse:settings', JSON.stringify({ allowExternalData: true, hideValues: true }))
   localStorage.setItem('finverse:history:v2:TCS.NS', 'cached history')
+  localStorage.setItem('finverse:live-quotes:v1', 'cached observations')
   return captureWorkspaceRecords()
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear() })
@@ -19,6 +20,7 @@ describe('workspace restore storage', () => {
     await writeWorkspaceRecords(next, expected)
     expect(localStorage.getItem('finverse:folios')).toBe('new holdings')
     expect(localStorage.getItem('finverse:history:v2:TCS.NS')).toBeNull()
+    expect(localStorage.getItem('finverse:live-quotes:v1')).toBeNull()
     expect(hasWorkspaceRecovery()).toBe(true)
     expect(workspaceWritesBlocked()).toBe(false)
     await restorePreviousWorkspace(captureWorkspaceRecords())

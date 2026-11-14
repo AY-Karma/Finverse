@@ -54,46 +54,6 @@ export function parseMarketCapRecords(value: unknown, now = Date.now()): MarketC
   })
 }
 
-/** Parse only CSV text. No formulas, network calls or security-name matching. */
-export function parseMarketCapCsv(text: string, now = Date.now()): MarketCapRecord[] {
-  if (text.length > 4_000_000) throw new Error('Choose a CSV smaller than 4 MB.')
-  const rows: string[][] = []
-  let row: string[] = [], cell = '', quoted = false, closed = false
-  const pushCell = () => { row.push(cell.trim()); cell = ''; closed = false }
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i]
-    if (quoted) {
-      if (char === '"' && text[i + 1] === '"') { cell += '"'; i++ }
-      else if (char === '"') { quoted = false; closed = true }
-      else cell += char
-    } else if (char === '"' && !cell && !closed) quoted = true
-    else if (char === ',') pushCell()
-    else if (char === '\n' || char === '\r') {
-      if (char === '\r' && text[i + 1] === '\n') i++
-      pushCell()
-      if (row.some(Boolean)) rows.push(row)
-      row = []
-      if (rows.length > MAX_ROWS + 1) throw new Error('Use at most 20,000 classification rows.')
-    } else if ((closed && char.trim()) || char === '"') throw new Error('Check the quoted fields in your CSV.')
-    else cell += char
-  }
-  if (quoted) throw new Error('A quoted CSV field is incomplete.')
-  pushCell()
-  if (row.some(Boolean)) rows.push(row)
-  const headers = rows.shift()?.map((header) => header.replace(/^\uFEFF/, '').toLowerCase()) ?? []
-  const expected = ['as_of', 'isin', 'name', 'cap_band', 'weight_pct', 'parent_isin', 'source']
-  if (headers.length !== expected.length || new Set(headers).size !== expected.length || expected.some((key) => !headers.includes(key))) {
-    throw new Error(`Use these CSV columns: ${expected.join(', ')}.`)
-  }
-  if (!rows.length) throw new Error('The CSV has no classification rows.')
-  const records = rows.map((values, index) => {
-    if (values.length !== headers.length) throw new Error(`CSV row ${index + 2} has the wrong number of fields.`)
-    const get = (key: string) => values[headers.indexOf(key)]
-    return { asOf: get('as_of'), isin: get('isin'), name: get('name'), band: get('cap_band'), weight: Number(get('weight_pct')), parentIsin: get('parent_isin'), source: get('source') }
-  })
-  return parseMarketCapRecords(records, now)
-}
-
 export interface CapExposureMember { id: string; positionId: string; name: string; value: number; asOf: string | null; source: string | null }
 export interface CapExposureBucket { band: CapBand; label: string; value: number; weight: number; members: CapExposureMember[] }
 export function calculateMarketCapExposure(positions: Position[], quotes: Record<string, LiveQuote>, records: MarketCapRecord[]) {

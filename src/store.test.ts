@@ -9,6 +9,12 @@ afterEach(() => {
 })
 
 describe('settings persistence', () => {
+  it('enables market data by default and migrates the retired opt-out', () => {
+    expect(loadSettings().allowExternalData).toBe(true)
+    localStorage.setItem('finverse:settings', JSON.stringify({ allowExternalData: false, mode: 'light', hideValues: true }))
+    expect(loadSettings()).toMatchObject({ allowExternalData: true, mode: 'light', hideValues: true })
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!).allowExternalData).toBe(true)
+  })
   it.each(['custom', 'cobalt'])('migrates the saved %s accent to fixed blue and removes custom colors', (accent) => {
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), accent, customAccent: '#123abc' }))
     const settings = loadSettings()
@@ -26,7 +32,7 @@ describe('settings persistence', () => {
   it('removes retired connection settings and browser data while preserving preferences and portfolios', () => {
     const preferences = {
       currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt',
-      mode: 'light', hideValues: true,
+      mode: 'light', hideValues: true, marketIndices: ['nifty-bank', 'nifty-50'],
     }
     localStorage.setItem('finverse:settings', JSON.stringify({
       ...preferences, accent: 'custom', customAccent: '#7c6cff', provider: 'openai', apiKey: 'retired-key', model: 'retired-model',
@@ -63,8 +69,8 @@ describe('settings persistence', () => {
         localStorage.setItem('finverse:settings', raw)
         const preferences = loadSettings()
         expect(preferences).toEqual({
-          currency: 'INR', allowExternalData: false, density: 'comfortable',
-          accent: 'cobalt', mode: 'dark', hideValues: false,
+          currency: 'INR', allowExternalData: true, density: 'comfortable',
+          accent: 'cobalt', mode: 'dark', hideValues: false, marketIndices: ['nifty-bank', 'nifty-50'],
         })
         expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
       }, raw).not.toThrow()
@@ -76,10 +82,20 @@ describe('settings persistence', () => {
     vi.stubGlobal('localStorage', { getItem: blocked, setItem: blocked, removeItem: blocked })
     vi.stubGlobal('sessionStorage', { removeItem: blocked })
     expect(loadSettings()).toEqual({
-      currency: 'INR', allowExternalData: false, density: 'comfortable',
-      accent: 'cobalt', mode: 'dark', hideValues: false,
+      currency: 'INR', allowExternalData: true, density: 'comfortable',
+      accent: 'cobalt', mode: 'dark', hideValues: false, marketIndices: ['nifty-bank', 'nifty-50'],
     })
     expect(saveSettings(loadSettings())).toBe(false)
+  })
+
+  it('persists valid index choices and repairs missing, invalid or duplicate selections', () => {
+    const settings = { ...loadSettings(), marketIndices: ['sp-500', 'nikkei-225'] as [string, string] }
+    expect(saveSettings(settings)).toBe(true)
+    expect(loadSettings().marketIndices).toEqual(settings.marketIndices)
+    localStorage.setItem('finverse:settings', JSON.stringify({ marketIndices: ['nifty-50', 'nifty-50'] }))
+    expect(loadSettings().marketIndices).toEqual(['nifty-50', 'nifty-bank'])
+    localStorage.setItem('finverse:settings', JSON.stringify({ marketIndices: ['invalid', 'invalid'] }))
+    expect(loadSettings().marketIndices).toEqual(['nifty-bank', 'nifty-50'])
   })
 })
 

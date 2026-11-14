@@ -2,9 +2,9 @@ import './test/storage'
 import { describe, expect, it } from 'vitest'
 import { captureWorkspaceRecords, createWorkspaceArchive, parseWorkspaceArchive, restoreWorkspaceArchive } from './workspaceArchive'
 import { loadSettings } from './store'
-import { LEDGER_STORAGE_KEY } from './investmentLedger'
 import { MARKET_CAP_STORAGE_KEY } from './marketCapExposure'
 
+const LEDGER_STORAGE_KEY = 'finverse:investment-ledger:v1'
 const ledger = [{ id: 'buy-1', accountId: 'account-1', date: '2024-01-02', type: 'buy', ticker: 'TCS', exchange: 'NSE', quantity: 1, amount: 100, currency: 'INR' }]
 const marketCap = [{ asOf: '2024-01-01', isin: 'INE467B01029', name: 'TCS', band: 'large', weight: 100, parentIsin: '', source: 'AMFI' }]
 

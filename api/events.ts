@@ -4,7 +4,9 @@ import { readNseCsv } from './nseReference.js'
 
 const DAY_MS = 86_400_000
 const IST_OFFSET_MS = 19_800_000
-const CACHE_MS = 5 * 60_000
+const CACHE_MS = 15 * 60_000
+const CALENDAR_CACHE_MS = 60 * 60_000
+const REFERENCE_CACHE_MS = 6 * 60 * 60_000
 const PARTIAL_CACHE_MS = 15_000
 const EQUITY_MASTER_URL = 'https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv'
 const HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }
@@ -81,7 +83,7 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
   const budget = createRequestBudget(now)
   const sourceBudget = createRequestBudget(now)
 
-  const loadEquityReference = () => sourceBudget(EQUITY_MASTER_URL, CACHE_MS, async (signal) => {
+  const loadEquityReference = () => sourceBudget(EQUITY_MASTER_URL, REFERENCE_CACHE_MS, async (signal) => {
     try {
       const deadline = AbortSignal.any([signal, AbortSignal.timeout(4_000)])
       const response = await fetcher(EQUITY_MASTER_URL, { signal: deadline })
@@ -109,7 +111,7 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
         { kind: 'filings', label: 'NSE filings', path: `/api/corporate-announcements?index=equities&from_date=${queryDate(since)}&to_date=${queryDate(today)}`, from: since, to: today },
       ]
       const feedsTask = Promise.all(sources.map(async (source) => {
-        const response = await sourceBudget(source.path, CACHE_MS, async (signal) => {
+        const response = await sourceBudget(source.path, source.kind === 'filings' ? CACHE_MS : CALENDAR_CACHE_MS, async (signal) => {
           try {
             const deadline = AbortSignal.any([signal, AbortSignal.timeout(4_000)])
             const upstream = await fetcher(`https://www.nseindia.com${source.path}`, { signal: deadline })

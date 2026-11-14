@@ -19,8 +19,10 @@ import type { LiveQuotesResult } from './live'
 import type { ImportRowIssue } from './spreadsheet'
 import { createWorkspaceArchive } from './workspaceArchive'
 import { canConfirmFundScheme, type FundSchemeCandidate } from './fundSchemes'
-import { applyNsePricing, type NsePricingCandidate } from './nsePricing'
-import { hasInrDenomination, normalizePosition } from './instruments'
+import { applyNsePricing, preferNsePricing, type NsePricingCandidate } from './nsePricing'
+import { nextNavRefreshAt as navRefreshDeadline } from './navRefreshSchedule'
+import { loadCachedQuotes, saveCachedQuotes } from './liveQuoteCache'
+import { BSE_PRICING_NOTICE, hasInrDenomination, normalizePosition } from './instruments'
 import { combinedPositionMembers, hasSupportedValuationCurrency, quoteKey } from './valuation'
 import { loadMonitorState } from './monitor'
 import { remapMonitorReferences } from './workspaceReferences'
@@ -28,8 +30,9 @@ import { captureWorkspaceRecords, workspaceWritesBlocked, writeWorkspaceRecords 
 import { latestUndoableAccount, planStatementImport, undoStatementImport, type StatementImportOptions } from './accountStatements'
 import {
   isMarketOpen,
+  resolveYahooSymbol,
   MANUAL_REFRESH_COOLDOWN_MS,
-  NAV_REFRESH_MS,
+  CLOSED_QUOTE_RECHECK_MS,
   manualRefreshCheck,
   recordManualRefresh,
 } from './live'
@@ -38,12 +41,12 @@ export type View = 'overview' | 'holdings' | 'insights' | 'research' | 'settings
 
 type RefreshResult =
   | { ok: true; retryInMs: number }
-  | { ok: false; reason: 'disabled' | 'cooldown' | 'failed'; retryInMs: number }
+  | { ok: false; reason: 'disabled' | 'no-live-listings' | 'scheduled-nav' | 'cooldown' | 'failed'; retryInMs: number }
 
-const MARKET_CHECK_MS = 30_000 // how often the market-open state is re-evaluated
-const EQUITY_REFRESH_MS = 30_000
+const EQUITY_REFRESH_MS = 1_000
+const FAILED_QUOTE_REFRESH_MS = 30_000
 const MAX_REFRESH_BACKOFF_MS = 5 * 60_000
-const CLOSED_REFRESH_MS = 24 * 60 * 60_000
+const NAV_SLOT_WINDOW_MS = 60_000
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
 
 export interface ImportPreview {
@@ -101,7 +104,8 @@ function readPersistedSettings(): string | null | undefined {
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [folios, setFoliosState] = useState<Folio[]>(() => loadFolios())
   const [savedSettings, setSettingsState] = useState<Settings>(() => loadSettings())
-  const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>({})
+  const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>(() => savedSettings.allowExternalData
+    ? loadCachedQuotes(folios.flatMap((folio) => folio.positions)) : {})
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [marketDataRefreshing, setMarketDataRefreshing] = useState(savedSettings.allowExternalData && folios.some((folio) => folio.positions.length > 0))
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
@@ -120,13 +124,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const durableFoliosRef = useRef(initialDurableFolios)
   const [initialDurableSettings] = useState(readPersistedSettings)
   const durableSettingsRef = useRef(initialDurableSettings)
-  const liveQuotesRef = useRef<Record<string, LiveQuote>>({})
-  const manualRefreshControllers = useRef(new Set<AbortController>())
+  const liveQuotesRef = useRef(liveQuotes)
+  const lastQuoteCacheWrite = useRef<number | null>(null)
+  const activeRefreshControllers = useRef(new Set<AbortController>())
   const activeQuoteController = useRef<AbortController | null>(null)
+  const activeNavController = useRef<AbortController | null>(null)
+  const quoteResults = useRef<Partial<Record<'equity' | 'nav', LiveQuotesResult>>>({})
   const loadedQuoteKey = useRef<string | null>(null)
-  const nextNavRefreshAt = useRef(0)
-  const lastQuoteCheck = useRef(0)
   const failedQuoteChecks = useRef(0)
+  const lastQuoteCheck = useRef(0)
   const scheduleQuotes = useRef<((failed: boolean, checked?: boolean) => void) | null>(null)
 
   const assertCurrentWorkspace = useCallback(() => {
@@ -135,7 +141,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       || (durableSettingsRef.current !== undefined && localStorage.getItem('finverse:settings') !== durableSettingsRef.current)) {
       workspaceChangedRef.current = true
       setWorkspaceChanged(true)
-      for (const controller of manualRefreshControllers.current) controller.abort()
+      for (const controller of activeRefreshControllers.current) controller.abort()
       throw new Error('This workspace changed in another tab. Reload before saving changes.')
     }
     if (workspaceWritesBlocked()) throw new Error('Workspace recovery is pending. Reload before saving changes.')
@@ -169,7 +175,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!event.key || !['finverse:folios', 'finverse:settings', 'finverse:monitor:v1', 'finverse:workspace-write:v1', 'finverse:investment-ledger:v1', 'finverse:market-cap:v1'].includes(event.key)) return
       workspaceChangedRef.current = true
       setWorkspaceChanged(true)
-      for (const controller of manualRefreshControllers.current) controller.abort()
+      for (const controller of activeRefreshControllers.current) controller.abort()
     }
     window.addEventListener('storage', changed)
     return () => window.removeEventListener('storage', changed)
@@ -181,10 +187,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [assertCurrentWorkspace])
 
   const holdings = useMemo(() => investmentWorkspace.prepareHoldings(folios), [folios])
-  const snapshot = useMemo(
-    () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES, history: portfolioHistory }),
-    [folios, holdings, liveQuotes, settings.allowExternalData, portfolioHistory],
+  const valuation = useMemo(
+    () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES }),
+    [folios, holdings, liveQuotes, settings.allowExternalData],
   )
+  const snapshot = useMemo(() => ({ ...valuation, history: portfolioHistory }), [valuation, portfolioHistory])
   const rawPositions = snapshot.rawPositions
   const positions = snapshot.positions
   const positionsRef = useRef(positions)
@@ -194,16 +201,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [folios],
   )
   useEffect(() => () => {
-    for (const controller of manualRefreshControllers.current) {
+    for (const controller of activeRefreshControllers.current) {
       controller.abort()
       if (activeQuoteController.current === controller) activeQuoteController.current = null
     }
-    manualRefreshControllers.current.clear()
+    activeRefreshControllers.current.clear()
   }, [folioRefreshKey, settings.allowExternalData])
 
   const setLiveQuotes = useCallback((q: Record<string, LiveQuote>) => {
+    const current = liveQuotesRef.current
+    const keys = Object.keys(q)
+    if (keys.length === Object.keys(current).length && keys.every((key) => {
+      const before = current[key], after = q[key]
+      return before && before.price === after.price && before.at === after.at && before.source === after.source
+        && before.fetchedAt === after.fetchedAt && before.change === after.change && before.changePct === after.changePct
+    })) return current
     liveQuotesRef.current = q
     setLiveQuotesState(q)
+    const now = Date.now()
+    if (lastQuoteCacheWrite.current == null || now - lastQuoteCacheWrite.current >= 10_000) {
+      saveCachedQuotes(positionsRef.current, q, now)
+      lastQuoteCacheWrite.current = now
+    }
+    return q
+  }, [])
+
+  useEffect(() => {
+    const flush = () => {
+      if (!workspaceChangedRef.current) saveCachedQuotes(positionsRef.current, liveQuotesRef.current)
+    }
+    const visibility = () => { if (document.hidden) flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', visibility)
+    return () => { window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', visibility); flush() }
   }, [])
 
   const persistPortfolioChange = useCallback(async (next: Folio[], history?: PortfolioSnapshot[]) => {
@@ -217,12 +247,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await writeWorkspaceRecords({ ...expected, 'finverse:folios': JSON.stringify(next), 'finverse:monitor:v1': JSON.stringify({ version: 1, ...monitor }), ...(history ? { 'finverse:portfolio-snapshots': JSON.stringify(history) } : {}) }, expected, { keepRecoveryCopy: false })
     durableFoliosRef.current = localStorage.getItem('finverse:folios')
     foliosRef.current = next
-    for (const controller of manualRefreshControllers.current) controller.abort()
-    setLiveQuotes({})
+    for (const controller of activeRefreshControllers.current) controller.abort()
+    const activeKeys = new Set(next.flatMap((folio) => folio.positions).map(quoteKey))
+    const retained = setLiveQuotes(Object.fromEntries(Object.entries(liveQuotesRef.current).filter(([key]) => activeKeys.has(key))))
+    saveCachedQuotes(next.flatMap((folio) => folio.positions), retained)
+    lastQuoteCacheWrite.current = Date.now()
     setFoliosState(next)
     if (history) setPortfolioHistory(history)
     window.dispatchEvent(new Event('finverse:monitor-restored'))
   }, [assertCurrentWorkspace, setLiveQuotes, settings])
+
+  useEffect(() => {
+    if (!settings.allowExternalData || !folios.length) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let busy = false
+    const enrich = async () => {
+      if (busy || document.hidden || controller.signal.aborted) return
+      busy = true
+      try {
+        assertCurrentWorkspace()
+        const original = foliosRef.current.flatMap((folio) => folio.positions)
+        const enriched = await preferNsePricing(original, controller.signal)
+        controller.signal.throwIfAborted()
+        if (enriched === original) return
+        const resolved = new Map(enriched.map((position) => [position.id, position]))
+        const next = foliosRef.current.map((folio) => ({ ...folio,
+          positions: folio.positions.map((position) => resolved.get(position.id) ?? position) }))
+        await persistPortfolioChange(next)
+      } catch {
+        if (!controller.signal.aborted) timer = setTimeout(() => { void enrich() }, 5 * 60_000)
+      } finally { busy = false }
+    }
+    void enrich()
+    document.addEventListener('visibilitychange', enrich)
+    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener('visibilitychange', enrich) }
+  }, [assertCurrentWorkspace, folioRefreshKey, persistPortfolioChange, settings.allowExternalData, folios.length])
 
   const confirmFolioUnchanged = useCallback(async (id: string) => {
     assertCurrentWorkspace()
@@ -260,7 +320,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const next = foliosRef.current.map((folio) => ({ ...folio, positions: folio.positions.map((position) => {
       if (!ids.has(position.id)) return position
       const corrected = normalizePosition({ ...position, ...correction, ticker: correction.ticker.trim(), providerSymbol: correction.providerSymbol?.trim() || undefined, isin: correction.isin?.trim() || undefined, sector: correction.sector?.trim() || undefined, pricingListing: undefined, instrumentKey: undefined, identityVersion: 2, exchangeSource: 'explicit', identityIssue: undefined, reportedExchange: undefined, reportedCurrency: undefined })
-      if (corrected.identityIssue) throw new Error(corrected.identityIssue)
+      if (corrected.identityIssue && corrected.identityIssue !== BSE_PRICING_NOTICE) throw new Error(corrected.identityIssue)
       return corrected
     }) }))
     const history = loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
@@ -292,7 +352,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const buffer = await file.arrayBuffer()
       const { parseSpreadsheetPreviewInWorker } = await import('./spreadsheetClient')
       const parsed = await parseSpreadsheetPreviewInWorker(buffer)
-      const summary = importIdentitySummary(parsed.positions)
+      let imported = parsed.positions
+      if (settings.allowExternalData) {
+        const controller = new AbortController()
+        activeRefreshControllers.current.add(controller)
+        try {
+          assertCurrentWorkspace()
+          imported = await preferNsePricing(imported, controller.signal)
+        } catch { /* An unavailable reference must not block an offline import. */ }
+        finally { activeRefreshControllers.current.delete(controller) }
+      }
+      const summary = importIdentitySummary(imported)
       return {
         id: crypto.randomUUID(),
         fileName: file.name || 'Portfolio',
@@ -304,7 +374,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         createdAt: Date.now(),
       }
     },
-    [],
+    [assertCurrentWorkspace, settings.allowExternalData],
   )
 
   const balanceEventHistory = useCallback((next: Folio[], event: NonNullable<PortfolioSnapshot['event']>) => {
@@ -370,7 +440,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [folios, positions, settings, portfolioHistory])
 
-  // Manual refresh includes NAVs; rapid automatic cycles request equities only.
+  // Equities and scheduled NAV batches have independent request lifecycles.
+  const refreshQuoteGroup = useCallback(async (group: 'equity' | 'nav'): Promise<LiveQuotesResult | null> => {
+    if (!settings.allowExternalData || workspaceChangedRef.current) return null
+    assertCurrentWorkspace()
+    const slot = group === 'equity' ? activeQuoteController : activeNavController
+    if (slot.current && !slot.current.signal.aborted) return null
+    const requested = positionsRef.current.filter((position) => (position.type === 'mutual-fund') === (group === 'nav'))
+    if (!requested.length) return null
+    const controller = new AbortController()
+    slot.current = controller
+    activeRefreshControllers.current.add(controller)
+    const ownsIndicator = group === 'equity' || !positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
+    if (ownsIndicator) setMarketDataRefreshing(true)
+    if (group === 'equity') setQuoteNextRefreshAt(null)
+    const apply = (result: LiveQuotesResult) => {
+      const activeKeys = new Set(positionsRef.current.map(quoteKey))
+      const requestedKeys = new Set(requested.map(quoteKey))
+      const merged = Object.fromEntries(Object.entries(liveQuotesRef.current).filter(([key]) => activeKeys.has(key)))
+      for (const [key, quote] of Object.entries(result.quotes)) {
+        if (!activeKeys.has(key) || !requestedKeys.has(key)) continue
+        if (!merged[key] || merged[key].at <= quote.at) merged[key] = quote
+      }
+      const applied = setLiveQuotes(merged)
+      quoteResults.current[group] = result
+      const results = Object.values(quoteResults.current)
+      setMarketDataResult({ quotes: applied, updated: results.reduce((sum, item) => sum + item.updated, 0),
+        failed: results.reduce((sum, item) => sum + item.failed, 0), skipped: results.reduce((sum, item) => sum + item.skipped, 0) })
+    }
+    try {
+      const result = await marketData.refreshQuotes(requested, liveQuotesRef.current, controller.signal, (partial) => {
+        if (!controller.signal.aborted && !workspaceChangedRef.current) apply(partial)
+      })
+      controller.signal.throwIfAborted()
+      assertCurrentWorkspace()
+      apply(result)
+      return result
+    } catch (cause) {
+      if (controller.signal.aborted || workspaceChangedRef.current) throw cause
+      const result = { quotes: {}, updated: 0, failed: requested.length, skipped: 0 }
+      apply(result)
+      return result
+    } finally {
+      activeRefreshControllers.current.delete(controller)
+      if (slot.current === controller) {
+        slot.current = null
+        if (ownsIndicator) setMarketDataRefreshing(false)
+      }
+    }
+  }, [assertCurrentWorkspace, settings.allowExternalData, setLiveQuotes])
+
   const refreshNow = useCallback(async (): Promise<RefreshResult> => {
     try { assertCurrentWorkspace() }
     catch (cause) {
@@ -378,60 +497,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ok: false, reason: 'disabled', retryInMs: 0 }
     }
     if (!settings.allowExternalData || positionsRef.current.length === 0) return { ok: false, reason: 'disabled', retryInMs: 0 }
-    if (activeQuoteController.current) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
+    const hasEquities = positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
+    if (!hasEquities) return { ok: false, reason: positionsRef.current.every((position) => position.type === 'mutual-fund') ? 'scheduled-nav' : 'no-live-listings', retryInMs: 0 }
+    const slot = activeQuoteController
+    if (slot.current && !slot.current.signal.aborted) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
     const check = manualRefreshCheck()
     if (!check.allowed) return { ok: false, reason: 'cooldown', retryInMs: check.retryInMs ?? 0 }
-    const controller = new AbortController()
-    activeQuoteController.current = controller
-    manualRefreshControllers.current.add(controller)
-    setMarketDataRefreshing(true)
-    setQuoteNextRefreshAt(null)
     try {
-      const result = await marketData.refreshQuotes(positionsRef.current, liveQuotesRef.current, controller.signal)
-      controller.signal.throwIfAborted()
-      setMarketDataResult(result)
-      setLiveQuotes(result.quotes)
+      const result = await refreshQuoteGroup('equity')
+      if (!result) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
       const failed = result.failed > 0 && result.updated === 0 && result.skipped === 0
       scheduleQuotes.current?.(failed)
       if (failed) return { ok: false, reason: 'failed', retryInMs: 0 }
       recordManualRefresh()
       return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
     } catch {
-      if (!controller.signal.aborted) {
-        setMarketDataResult({ quotes: liveQuotesRef.current, updated: 0, failed: positionsRef.current.length, skipped: 0 })
-        scheduleQuotes.current?.(true)
-      }
+      if (!workspaceChangedRef.current) scheduleQuotes.current?.(false, false)
       return { ok: false, reason: 'failed', retryInMs: 0 }
-    } finally {
-      controller.abort()
-      manualRefreshControllers.current.delete(controller)
-      if (activeQuoteController.current === controller) {
-        activeQuoteController.current = null
-        setMarketDataRefreshing(false)
-      }
     }
-  }, [assertCurrentWorkspace, settings.allowExternalData, setLiveQuotes])
+  }, [assertCurrentWorkspace, settings.allowExternalData, refreshQuoteGroup])
 
   useEffect(() => {
+    quoteResults.current = {}
     if (!settings.allowExternalData || positions.length === 0) {
       setMarketDataRefreshing(false)
       setMarketDataResult(null)
       setQuoteNextRefreshAt(null)
       setQuoteLastCheckedAt(null)
       loadedQuoteKey.current = null
-      nextNavRefreshAt.current = 0
-      return
     }
+    if (!positionsRef.current.some((position) => position.type === 'mutual-fund' || resolveYahooSymbol(position))) {
+      setMarketDataRefreshing(false)
+      setQuoteNextRefreshAt(null)
+    }
+  }, [folioRefreshKey, settings.allowExternalData, positions.length])
+
+  useEffect(() => {
+    if (!settings.allowExternalData || !positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))) return
     let open = isMarketOpen()
     let closeRefreshPending = false
     let active = true
     let nextAt = 0
-    let nextNavAt = nextNavRefreshAt.current
-    const controller = new AbortController()
-    const hasEquities = () => positionsRef.current.some((position) => position.type !== 'mutual-fund')
-    const hasFunds = () => positionsRef.current.some((position) => position.type === 'mutual-fund')
-    if (!activeQuoteController.current) setMarketDataRefreshing(false)
-
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined
+    const queue = () => {
+      clearTimeout(refreshTimer)
+      if (open && !document.hidden) refreshTimer = setTimeout(() => {
+        updateMarket()
+        if (open) void refresh()
+      }, Math.max(0, nextAt - Date.now()))
+    }
     const schedule = (failed: boolean, checked = true) => {
       if (!active) return
       if (checked) {
@@ -439,94 +553,79 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setQuoteLastCheckedAt(lastQuoteCheck.current)
       }
       failedQuoteChecks.current = failed ? Math.min(failedQuoteChecks.current + 1, 4) : 0
-      const wait = Math.min(EQUITY_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS)
-      nextAt = Date.now() + wait
-      setQuoteNextRefreshAt(open && hasEquities() && !document.hidden ? nextAt : null)
+      nextAt = Date.now() + (failed ? Math.min(FAILED_QUOTE_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS) : EQUITY_REFRESH_MS)
+      setQuoteNextRefreshAt(open && !document.hidden ? nextAt : null)
+      queue()
     }
     scheduleQuotes.current = schedule
-
-    const refresh = async (includeFunds = false, fundsOnly = false) => {
-      if (!active || workspaceChangedRef.current || activeQuoteController.current || document.hidden) return
-      try { assertCurrentWorkspace() } catch { return }
-      const requested = fundsOnly ? positionsRef.current.filter((position) => position.type === 'mutual-fund')
-        : includeFunds ? positionsRef.current : positionsRef.current.filter((position) => position.type !== 'mutual-fund')
-      if (!requested.length) { setQuoteNextRefreshAt(null); return }
-      activeQuoteController.current = controller
-      setMarketDataRefreshing(true)
-      setQuoteNextRefreshAt(null)
+    const refresh = async () => {
+      if (!active || document.hidden || (activeQuoteController.current && !activeQuoteController.current.signal.aborted)) return
+      loadedQuoteKey.current = folioRefreshKey
       try {
-        const result = await marketData.refreshQuotes(requested, liveQuotesRef.current, controller.signal)
-        if (!active || controller.signal.aborted) return
-        const activeKeys = new Set(positionsRef.current.map(quoteKey))
-        const requestedKeys = new Set(requested.map(quoteKey))
-        const retained = Object.fromEntries(Object.entries(liveQuotesRef.current).filter(([key]) => activeKeys.has(key) && !requestedKeys.has(key)))
-        const merged = { ...result, quotes: { ...retained, ...result.quotes } }
-        setLiveQuotes(merged.quotes)
-        setMarketDataResult(merged)
-        if (includeFunds && !fundsOnly) loadedQuoteKey.current = folioRefreshKey
-        const failed = result.failed > 0 && result.updated === 0 && result.skipped === 0
-        if (includeFunds || fundsOnly) {
-          nextNavAt = Date.now() + (result.failed > 0 ? MAX_REFRESH_BACKOFF_MS : NAV_REFRESH_MS)
-          nextNavRefreshAt.current = nextNavAt
-        }
-        if (!fundsOnly) schedule(failed)
+        const result = await refreshQuoteGroup('equity')
+        if (active && result) schedule(result.failed > 0 && result.updated === 0 && result.skipped === 0)
       } catch {
-        if (active && !controller.signal.aborted) {
-          setMarketDataResult({ quotes: liveQuotesRef.current, updated: 0, failed: requested.length, skipped: 0 })
-          if (includeFunds || fundsOnly) {
-            nextNavAt = Date.now() + MAX_REFRESH_BACKOFF_MS
-            nextNavRefreshAt.current = nextNavAt
-          }
-          if (!fundsOnly) schedule(true)
-        }
-      } finally {
-        if (activeQuoteController.current === controller) activeQuoteController.current = null
-        if (active) {
-          setMarketDataRefreshing(false)
-          if (fundsOnly) setQuoteNextRefreshAt(open && hasEquities() && !document.hidden ? nextAt : null)
-        }
+        if (active && !workspaceChangedRef.current) schedule(false, false)
       }
     }
-
-    if (loadedQuoteKey.current !== folioRefreshKey) void refresh(true)
+    if (loadedQuoteKey.current !== folioRefreshKey) void refresh()
     else schedule(false, false)
-
     const updateMarket = () => {
       const nowOpen = isMarketOpen()
       if (open && !nowOpen) closeRefreshPending = true
       const marketOpened = !open && nowOpen
       open = nowOpen
-      if (marketOpened) { closeRefreshPending = false; void refresh(true) }
+      if (marketOpened) { closeRefreshPending = false; void refresh() }
       else if (closeRefreshPending && !document.hidden && !activeQuoteController.current) {
         closeRefreshPending = false
-        void refresh(true)
+        void refresh()
       }
       if (!open) setQuoteNextRefreshAt(null)
     }
-    const openTimer = window.setInterval(updateMarket, MARKET_CHECK_MS)
-    const refreshTimer = window.setInterval(() => {
-      if (hasFunds() && Date.now() >= nextNavAt) void refresh(false, true)
-      else if (open && hasEquities() && Date.now() >= nextAt) void refresh()
-    }, 1000)
-    const onVisibility = () => {
+    const timer = window.setInterval(updateMarket, EQUITY_REFRESH_MS)
+    const visibility = () => {
+      clearTimeout(refreshTimer)
       if (document.hidden) { setQuoteNextRefreshAt(null); return }
       updateMarket()
-      if (activeQuoteController.current) return
-      if (open && (loadedQuoteKey.current !== folioRefreshKey || Date.now() >= nextAt)) void refresh(loadedQuoteKey.current !== folioRefreshKey)
-      else if (!open && Date.now() - lastQuoteCheck.current >= CLOSED_REFRESH_MS) void refresh(true)
-      else setQuoteNextRefreshAt(open && hasEquities() ? nextAt : null)
+      if ((open && Date.now() >= nextAt) || loadedQuoteKey.current !== folioRefreshKey
+        || (!open && Date.now() - lastQuoteCheck.current >= CLOSED_QUOTE_RECHECK_MS)) void refresh()
+      else { setQuoteNextRefreshAt(open ? nextAt : null); queue() }
     }
-    document.addEventListener('visibilitychange', onVisibility)
+    document.addEventListener('visibilitychange', visibility)
     return () => {
       active = false
-      controller.abort()
-      if (activeQuoteController.current === controller) activeQuoteController.current = null
+      activeQuoteController.current?.abort()
       if (scheduleQuotes.current === schedule) scheduleQuotes.current = null
-      window.clearInterval(openTimer)
-      window.clearInterval(refreshTimer)
-      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(timer)
+      clearTimeout(refreshTimer)
+      document.removeEventListener('visibilitychange', visibility)
     }
-  }, [assertCurrentWorkspace, folioRefreshKey, positions.length, settings.allowExternalData, setLiveQuotes])
+  }, [folioRefreshKey, settings.allowExternalData, positions.length, refreshQuoteGroup])
+
+  useEffect(() => {
+    if (!settings.allowExternalData || !positionsRef.current.some((position) => position.type === 'mutual-fund')) return
+    let active = true
+    let timer: ReturnType<typeof setTimeout>
+    const schedule = () => {
+      const scheduledAt = navRefreshDeadline()
+      timer = setTimeout(() => {
+        if (!active) return
+        schedule()
+        const lateness = Date.now() - scheduledAt
+        // A suspended tab skips missed windows rather than fetching on return.
+        if (document.hidden || lateness < 0 || lateness >= NAV_SLOT_WINDOW_MS) return
+        void refreshQuoteGroup('nav').catch(() => {
+          // Permission, workspace or identity changes cancel the old request.
+        })
+      }, Math.max(0, scheduledAt - Date.now()))
+    }
+    schedule()
+    return () => {
+      active = false
+      activeNavController.current?.abort()
+      clearTimeout(timer)
+    }
+  }, [folioRefreshKey, settings.allowExternalData, positions.length, refreshQuoteGroup])
 
   // Keep a small local performance history so the portfolio story survives
   // between sessions without sending holdings to a remote system.
@@ -536,7 +635,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (snapshot.positions.length === 0 || !snapshot.valuationComplete || snapshot.currentValue <= 0) return
     // When external prices are enabled, wait for the first quote response.
     // Recording the imported fallback first created artificial intraday cliffs.
-    if (settings.allowExternalData && snapshot.lastUpdatedAt == null) return
+    if (settings.allowExternalData && (snapshot.lastUpdatedAt == null || !marketDataResult?.updated)) return
     setPortfolioHistory((current) => {
       const next = appendPortfolioSnapshot({
         at: Date.now(),
@@ -547,7 +646,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }, current)
       return next.length === current.length && next[next.length - 1]?.at === current[current.length - 1]?.at ? current : next
     })
-  }, [settings.allowExternalData, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length, snapshot.valuationComplete])
+  }, [settings.allowExternalData, marketDataResult?.updated, snapshot.currentValue, snapshot.invested, snapshot.lastUpdatedAt, snapshot.pnl, snapshot.positions.length, snapshot.valuationComplete])
 
   const value = useMemo<Store>(() => ({
     folios,

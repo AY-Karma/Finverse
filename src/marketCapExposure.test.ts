@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateMarketCapExposure, parseMarketCapCsv, parseMarketCapRecords, type MarketCapRecord } from './marketCapExposure'
+import { calculateMarketCapExposure, parseMarketCapRecords, type MarketCapRecord } from './marketCapExposure'
 import type { Position } from './types'
 
 const NOW = Date.UTC(2026, 9, 31)
@@ -10,10 +10,6 @@ const record = (changes: Partial<MarketCapRecord> = {}): MarketCapRecord => ({ a
 const position = (changes: Partial<Position> = {}): Position => ({ id: 'p1', ticker: 'COMPANY', name: 'Company', type: 'stock', isin: STOCK, quantity: 10, buyPrice: 80, lastPrice: 100, invested: 800, ...changes })
 
 describe('market-cap disclosure validation', () => {
-  it('reads CSV quotes, BOM, reordered columns and explicit dated provenance', () => {
-    const rows = parseMarketCapCsv('\uFEFFsource,name,isin,as_of,parent_isin,weight_pct,cap_band\r\n"AMFI, September","Company ""One""",INE002A01018,2026-09-30,,100,large\r\n', NOW)
-    expect(rows[0]).toMatchObject({ name: 'Company "One"', source: 'AMFI, September', band: 'large', isin: STOCK })
-  })
   it('rejects impossible or future dates, guessed symbols, invalid bands and missing provenance', () => {
     for (const change of [{ asOf: '2026-02-30' }, { asOf: '2027-01-01' }, { isin: 'RELIANCE' }, { band: 'mega' }, { source: '' }]) {
       expect(() => parseMarketCapRecords([record(change as Partial<MarketCapRecord>)], NOW)).toThrow()
@@ -23,10 +19,6 @@ describe('market-cap disclosure validation', () => {
     expect(() => parseMarketCapRecords([record(), record({ band: 'small' })], NOW)).toThrow(/duplicate/)
     expect(() => parseMarketCapRecords([record({ parentIsin: FUND, weight: 60 }), record({ parentIsin: FUND, isin: STOCK_TWO, weight: 41 })], NOW)).toThrow(/exceed 100/)
     expect(() => parseMarketCapRecords([record({ weight: 70 })], NOW)).toThrow(/direct classifications/)
-  })
-  it('rejects malformed CSV rather than partially importing it', () => {
-    expect(() => parseMarketCapCsv('as_of,isin,name,cap_band,weight_pct,parent_isin,source\n2026-09-30,INE002A01018,"unfinished', NOW)).toThrow(/incomplete/)
-    expect(() => parseMarketCapCsv('as_of,isin,name,cap_band,weight_pct,parent_isin,source\n2026-09-30,INE002A01018,Company,large,,\n', NOW)).toThrow(/fields/)
   })
 })
 

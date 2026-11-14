@@ -7,7 +7,7 @@
 .session-contributors-note {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -23,13 +23,13 @@
   gap: 8px;
   padding-top: 12px;
   border-top: 1px solid var(--hairline);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .session-contributors-total strong,
 .session-contributors-row > strong,
 .session-contributors-remainder strong {
-  font: 500 12px var(--font-mono);
+  font: 600 14px var(--font-mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -44,16 +44,17 @@
 
 .session-contributors-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(64px, 0.8fr) auto;
-  align-items: center;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 6px 12px;
 }
+.session-contributors-row > strong { grid-column: 2; grid-row: 1; }
 
 .session-contributors-name {
   display: grid;
   min-width: 0;
   gap: 2px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .session-contributors-name > span {
@@ -65,15 +66,21 @@
 .session-contributors-name small,
 .session-contributors-remainder small {
   color: var(--ink-subtle);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .session-contributors-track {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: 100%;
   height: 12px;
   overflow: hidden;
   border-radius: 2px;
   background: var(--surface-3);
 }
+.session-contributors-track > span { display: block; height: 100%; }
+.session-contributors-track > .up { background: var(--semantic-success); }
+.session-contributors-track > .down { background: var(--semantic-danger); }
 
 .session-contributors-remainder {
   display: flex;
@@ -82,12 +89,12 @@
   gap: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--hairline);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .session-contributors-remainder > span { display: grid; gap: 2px; }
 
-@media (max-width: 560px) {
-  .session-contributors-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
-  .session-contributors-track { grid-column: 1 / -1; grid-row: 2; }
-}
+.session-contributors .session-contributors-row--compact { gap: 6px 12px; }
+.session-contributors .session-contributors-row--compact .holding-move-identity { gap: 8px; font-size: 14px; }
+.session-contributors .session-contributors-row--compact .holding-move-pct { font-size: 14px; }
+.session-contributors .session-contributors-row--compact > strong { font-size: 14px; }

@@ -1,0 +1,23 @@
+.market-story-chart { width: 100%; min-width: 0; margin: 0; }
+.market-story-chart svg { display: block; width: 100%; height: clamp(84px, 14cqh, 120px); overflow: visible; }
+.market-story-chart-grid { stroke: var(--hairline); stroke-dasharray: 2 6; }
+.market-story-chart-baseline { stroke: var(--ink-faint); stroke-opacity: .45; stroke-dasharray: 4 5; }
+.market-story-chart-line { stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; animation: market-story-draw 850ms ease-out both; }
+.market-story-chart-dates { display: flex; justify-content: space-between; gap: 12px; color: var(--ink-muted); font-size: 14px; line-height: 1.4; }
+.market-story-chart-empty { margin: 0; color: var(--ink-muted); font-size: 14px; }
+.story-frame--market .story-art-stage { flex: 0 1 auto; margin: clamp(20px, 4cqh, 32px) 0 clamp(24px, 4.5cqh, 36px); }
+.story-frame--market .story-rows { flex: 1; min-height: 0; align-content: space-evenly; gap: 12px; }
+@container (max-height: 760px) {
+  .story-frame--market .story-art-stage { margin: 16px 0; }
+  .story-frame--market .story-rows { gap: 8px; margin-top: 8px; }
+}
+@container (max-height: 660px) {
+  .story-frame--market .story-content { padding-block: 14px 16px; }
+  .story-frame--market .story-content h2 { font-size: 24px; }
+  .story-frame--market .story-metric { margin-top: 12px; }
+  .story-frame--market .story-art-stage { margin: 12px 0; }
+  .story-frame--market .market-story-chart svg { height: 72px; }
+  .story-frame--market .story-rows { gap: 6px; margin-top: 0; }
+}
+@keyframes market-story-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .market-story-chart-line { animation: none; } }

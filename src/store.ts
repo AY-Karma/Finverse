@@ -3,6 +3,7 @@ import { normalizePosition } from './instruments'
 import { workspaceWritesBlocked } from './workspaceStorage'
 import { isMfSchemeMapping } from './fundSchemes'
 import { isNsePricingListing } from './nsePricingProtocol'
+import { normalizeMarketIndexIds } from './marketIndexSelection'
 
 const FOLIOS_KEY = 'finverse:folios'
 const LEGACY_POSITIONS_KEY = 'finverse:positions'
@@ -171,7 +172,7 @@ export function saveSettings(settings: Settings): boolean {
   if (workspaceWritesBlocked()) return false
   const { allowExternalData, density, mode, hideValues } = settings
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency: 'INR', allowExternalData, density, accent: 'cobalt', mode, hideValues }))
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency: 'INR', allowExternalData, density, accent: 'cobalt', mode, hideValues, marketIndices: normalizeMarketIndexIds(settings.marketIndices) }))
     return true
   } catch {
     return false
@@ -195,7 +196,7 @@ function clearRetiredStorage(): void {
 
 export function loadSettings(): Settings {
   const defaults: Settings = {
-    currency: 'INR', allowExternalData: false,
+    currency: 'INR', allowExternalData: true,
     density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false,
   }
   clearRetiredStorage()
@@ -209,11 +210,12 @@ export function loadSettings(): Settings {
   }
   const settings: Settings = {
     currency: defaults.currency,
-    allowExternalData: parsed.allowExternalData === true,
+    allowExternalData: defaults.allowExternalData,
     density: parsed.density === 'compact' ? 'compact' : defaults.density,
     accent: defaults.accent,
     mode: parsed.mode === 'light' ? 'light' : defaults.mode,
     hideValues: parsed.hideValues === true,
+    marketIndices: normalizeMarketIndexIds(parsed.marketIndices),
   }
   saveSettings(settings)
   return settings

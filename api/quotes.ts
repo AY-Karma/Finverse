@@ -1,3 +1,4 @@
+import { fetchLatestNseClose, type NseCloseState } from './nseClosingPrices.js'
 import {
   MAX_MARKET_SYMBOLS,
   isMarketSymbol,
@@ -6,10 +7,13 @@ import {
   type QuotesPayload,
 } from '../src/marketDataProtocol.js'
 import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { createNseSymbolResolver } from './nseSymbolChanges.js'
+import { getMarketCalendarInfo } from '../src/marketCalendar.js'
 
 const UPSTREAM_TIMEOUT_MS = 4_000
-const NSE_CLOSE_CACHE_MS = 60 * 60 * 1000
+const YAHOO_SYMBOL_LIMIT = 20
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000
+const BSE_QUOTES_DISABLED = 'Delayed BSE quotes are disabled. Use a verified NSE pricing mapping.'
 
 interface QuoteHandlerDependencies {
   fetcher: typeof fetch
@@ -32,17 +36,6 @@ interface YahooSparkResponse {
   }
 }
 
-interface NseClose {
-  price: number
-  previousClose: number | null
-  marketTime: string
-}
-
-interface NseCloseState {
-  cache?: { expiresAt: number; prices: Map<string, NseClose> }
-  pending?: Promise<Map<string, NseClose>>
-}
-
 const RESPONSE_HEADERS = {
   'Cache-Control': 'no-store',
   'Content-Type': 'application/json; charset=utf-8',
@@ -52,7 +45,7 @@ const RESPONSE_HEADERS = {
 
 const CACHE_HEADERS = {
   ...RESPONSE_HEADERS,
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=15, must-revalidate',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=1, must-revalidate',
 }
 
 function json(data: unknown, status: number, cache = false): Response {
@@ -72,6 +65,7 @@ function parseSymbols(request: Request): { symbols: string[] } | { error: string
   if (requested.some((symbol) => !isMarketSymbol(symbol))) {
     return { error: 'Symbols must use a supported market symbol format.' }
   }
+  if (requested.every((symbol) => symbol.endsWith('.BO'))) return { error: BSE_QUOTES_DISABLED }
   return { symbols: [...new Set(requested)].sort() }
 }
 
@@ -89,10 +83,11 @@ function movement(price: number, previousClose: number | null) {
   return { change, changePct: rounded((change / previousClose) * 100) }
 }
 
-async function fetchYahooQuotes(
+async function fetchYahooQuoteChunk(
   symbols: string[],
   fetcher: typeof fetch,
   signal: AbortSignal,
+  now: number,
 ): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
   const url = new URL('https://query1.finance.yahoo.com/v7/finance/spark')
   url.searchParams.set('symbols', symbols.join(','))
@@ -117,6 +112,8 @@ async function fetchYahooQuotes(
       const meta = item.response?.[0]?.meta
       if (!symbol || !symbols.includes(symbol) || !meta) continue
       if (!finitePositive(meta.regularMarketPrice) || !finitePositive(meta.regularMarketTime)) continue
+      const marketTime = meta.regularMarketTime * 1000
+      if (!Number.isFinite(marketTime) || marketTime > now + 300_000) continue
       const previousClose = finitePositive(meta.chartPreviousClose)
         ? meta.chartPreviousClose
         : finitePositive(meta.previousClose)
@@ -127,7 +124,7 @@ async function fetchYahooQuotes(
         price: meta.regularMarketPrice,
         previousClose,
         ...movement(meta.regularMarketPrice, previousClose),
-        marketTime: new Date(meta.regularMarketTime * 1000).toISOString(),
+        marketTime: new Date(marketTime).toISOString(),
         source: 'yahoo',
       })
     }
@@ -139,113 +136,19 @@ async function fetchYahooQuotes(
   }
 }
 
-function reportCandidates(now: number): string[] {
-  const ist = new Date(now + IST_OFFSET_MS)
-  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes()
-  const firstOffset = minutes >= 17 * 60 ? 0 : 1
-  const dates: string[] = []
-  for (let offset = firstOffset; offset < firstOffset + 8; offset += 1) {
-    const candidate = new Date(ist)
-    candidate.setUTCDate(candidate.getUTCDate() - offset)
-    if (candidate.getUTCDay() === 0 || candidate.getUTCDay() === 6) continue
-    const yyyy = candidate.getUTCFullYear()
-    const mm = String(candidate.getUTCMonth() + 1).padStart(2, '0')
-    const dd = String(candidate.getUTCDate()).padStart(2, '0')
-    dates.push(`${dd}${mm}${yyyy}`)
-  }
-  return dates
-}
-
-function parseNseDate(value: string): string | null {
-  const match = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(value)
-  if (!match) return null
-  const month = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-    .indexOf(match[2].toLowerCase())
-  if (month < 0) return null
-  return `${match[3]}-${String(month + 1).padStart(2, '0')}-${match[1].padStart(2, '0')}`
-}
-
-function csvCells(line: string): string[] {
-  return line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, ''))
-}
-
-function parseNseReport(csv: string): Map<string, NseClose> {
-  const lines = csv.split(/\r?\n/).filter(Boolean)
-  const headers = csvCells(lines[0] ?? '').map((header) => header.toUpperCase())
-  const symbolIndex = headers.indexOf('SYMBOL')
-  const seriesIndex = headers.indexOf('SERIES')
-  const dateIndex = headers.indexOf('DATE1')
-  const closeIndex = headers.indexOf('CLOSE_PRICE')
-  const previousIndex = headers.indexOf('PREV_CLOSE')
-  if ([symbolIndex, seriesIndex, dateIndex, closeIndex, previousIndex].some((index) => index < 0)) {
-    return new Map()
-  }
-
-  const prices = new Map<string, NseClose>()
-  const seriesRanks = new Map<string, number>()
-  for (const line of lines.slice(1)) {
-    const cells = csvCells(line)
-    const symbol = cells[symbolIndex]?.toUpperCase()
-    if (!symbol) continue
-    const seriesRank = cells[seriesIndex]?.toUpperCase() === 'EQ' ? 2 : 1
-    if ((seriesRanks.get(symbol) ?? 0) >= seriesRank) continue
-    const price = Number(cells[closeIndex])
-    const previousClose = Number(cells[previousIndex])
-    const sessionDate = parseNseDate(cells[dateIndex] ?? '')
-    if (!finitePositive(price) || !sessionDate) continue
-    prices.set(symbol, {
-      price,
-      previousClose: finitePositive(previousClose) ? previousClose : null,
-      marketTime: new Date(`${sessionDate}T15:30:00+05:30`).toISOString(),
-    })
-    seriesRanks.set(symbol, seriesRank)
-  }
-  return prices
-}
-
-async function fetchLatestNseClose(
-  fetcher: typeof fetch,
-  now: number,
-  state: NseCloseState,
-): Promise<Map<string, NseClose>> {
-  if (state.cache && state.cache.expiresAt > now) return state.cache.prices
-  if (state.pending) return state.pending
-  const task = (async () => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 4_000)
-    try {
-      for (const date of reportCandidates(now).slice(0, 3)) {
-        if (controller.signal.aborted) break
-        try {
-          const response = await fetcher(
-            `https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_${date}.csv`,
-            {
-              headers: { Accept: 'text/csv' },
-              signal: AbortSignal.any([controller.signal, AbortSignal.timeout(1_200)]),
-            },
-          )
-          if (!response.ok) continue
-          const prices = parseNseReport(await readBoundedText(response, 8 * 1024 * 1024, controller.signal))
-          if (prices.size === 0) continue
-          state.cache = { prices, expiresAt: now + NSE_CLOSE_CACHE_MS }
-          return prices
-        } catch {
-          continue
-        }
-      }
-      const prices = new Map<string, NseClose>()
-      state.cache = { prices, expiresAt: now + 15_000 }
-      return prices
-    } finally {
-      clearTimeout(timeout)
+async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal: AbortSignal, now: number): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
+  const chunks: string[][] = []
+  for (let start = 0; start < symbols.length; start += YAHOO_SYMBOL_LIMIT) chunks.push(symbols.slice(start, start + YAHOO_SYMBOL_LIMIT))
+  const results: Awaited<ReturnType<typeof fetchYahooQuoteChunk>>[] = []
+  let cursor = 0
+  await Promise.all(Array.from({ length: Math.min(2, chunks.length) }, async () => {
+    while (cursor < chunks.length && !signal.aborted) {
+      const index = cursor++
+      results[index] = await fetchYahooQuoteChunk(chunks[index], fetcher, signal, now)
     }
-  })()
-  state.pending = task
-  try {
-    return await task
-  } finally {
-    state.pending = undefined
-  }
+  }))
+  const errors = [...new Set(results.flatMap((result) => result.error ? [result.error] : []))]
+  return { quotes: results.flatMap((result) => result.quotes), ...(errors.length ? { error: errors.join(' ') } : {}) }
 }
 
 async function nseFallbackQuotes(
@@ -284,24 +187,72 @@ export function createQuoteHandler(
   const now = dependencies.now ?? Date.now
   const budget = createRequestBudget(now)
   const nseState: NseCloseState = {}
+  const resolveNseSymbol = createNseSymbolResolver(fetcher, now)
 
   return async (request: Request) => {
     if (request.method !== 'GET') return json({ error: 'Method not allowed.' }, 405)
     const parsed = parseSymbols(request)
     if ('error' in parsed) return json({ error: parsed.error }, 400)
 
-    return budget(parsed.symbols.join(','), 15_000, async (signal) => {
+    return budget(parsed.symbols.join(','), 1_000, async (signal) => {
+      const started = Date.now()
       const fetchedAt = now()
-      const yahoo = await fetchYahooQuotes(parsed.symbols, fetcher, signal)
-      const quotes = yahoo.error
-        ? await nseFallbackQuotes(parsed.symbols, fetcher, fetchedAt, nseState)
-        : yahoo.quotes
+      const yahoo = await fetchYahooQuotes(parsed.symbols.filter((symbol) => !symbol.endsWith('.BO')), fetcher, signal, fetchedAt)
+      const calendar = getMarketCalendarInfo(new Date(fetchedAt))
+      const completedDate = calendar.available && calendar.lastSessionClose
+        ? new Date(calendar.lastSessionClose.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10) : null
+      const isCurrent = (quote: MarketQuotePayload) => !quote.symbol.endsWith('.NS') || !completedDate
+        || new Date(Date.parse(quote.marketTime) + IST_OFFSET_MS).toISOString().slice(0, 10) >= completedDate
+      const stale = new Set(yahoo.quotes.filter((quote) => !isCurrent(quote)).map((quote) => quote.symbol))
+      const available = new Map<string, MarketQuotePayload & { resolvedSymbol?: string }>(yahoo.quotes.filter(isCurrent).map((quote) => [quote.symbol, quote]))
+      const missing = parsed.symbols.filter((symbol) => symbol.endsWith('.NS') && !available.has(symbol))
+      if (missing.length && available.size === 0) {
+        const controller = new AbortController()
+        const recoverySignal = AbortSignal.any([signal, controller.signal])
+        const recover = async () => {
+          const renames = Promise.all(missing.map(async (symbol) => ({ symbol, current: await resolveNseSymbol(symbol).catch(() => null) })))
+          const fallback = await nseFallbackQuotes(missing, fetcher, fetchedAt, nseState)
+          if (recoverySignal.aborted) return
+          for (const quote of fallback) if (isCurrent(quote) && !available.has(quote.symbol)) available.set(quote.symbol, quote)
+          const changed = (await renames).filter((item): item is { symbol: string; current: string } => !!item.current && !available.has(item.symbol))
+          if (recoverySignal.aborted || !changed.length) return
+          const currentSymbols = [...new Set(changed.map((item) => item.current))]
+          const retried = await fetchYahooQuotes(currentSymbols, fetcher, recoverySignal, fetchedAt)
+          if (recoverySignal.aborted) return
+          const currentQuotes = new Map(retried.quotes.filter(isCurrent).map((quote) => [quote.symbol, quote]))
+          const recordResolved = () => {
+            for (const { symbol, current } of changed) {
+              const quote = currentQuotes.get(current)
+              if (quote && !available.has(symbol)) available.set(symbol, { ...quote, symbol, resolvedSymbol: current })
+            }
+          }
+          recordResolved()
+          const stillMissing = currentSymbols.filter((symbol) => !currentQuotes.has(symbol))
+          if (stillMissing.length) {
+            const currentFallback = await nseFallbackQuotes(stillMissing, fetcher, fetchedAt, nseState)
+            if (recoverySignal.aborted) return
+            for (const quote of currentFallback) if (isCurrent(quote)) currentQuotes.set(quote.symbol, quote)
+            recordResolved()
+          }
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([
+            recover().catch(() => {}),
+            new Promise<void>((resolve) => { timer = setTimeout(() => { controller.abort(); resolve() }, Math.max(0, 8_000 - (Date.now() - started))) }),
+          ])
+        } finally {
+          clearTimeout(timer)
+          controller.abort()
+        }
+      }
+      const quotes = [...available.values()]
       const returned = new Set(quotes.map((quote) => quote.symbol))
       const errors: QuoteErrorPayload[] = parsed.symbols
         .filter((symbol) => !returned.has(symbol))
         .map((symbol) => ({
           symbol,
-          message: yahoo.error ?? 'No quote returned by the provider.',
+          message: symbol.endsWith('.BO') ? BSE_QUOTES_DISABLED : stale.has(symbol) ? `The provider quote is older than the last completed NSE session (${completedDate}).` : yahoo.error ?? 'No quote returned by the provider.',
         }))
       const payload: QuotesPayload = {
         provider: providerFor(quotes),

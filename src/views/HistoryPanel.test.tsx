@@ -252,10 +252,11 @@ describe('Holding Price History', () => {
     expect(container.textContent).toContain('Enable external market data')
     expect(container.querySelector('[role="alert"]')).toBeNull()
   })
-  it('tracks the second listing of a shared ticker and keeps it when the range changes', async () => {
+  it('tracks the second NSE-mapped listing of a shared imported ticker and keeps it when the range changes', async () => {
     store.positions = [
       { ...defaultPosition, id: 'nse-listing', ticker: 'TWIN', exchange: 'NSE', currency: 'INR', providerSymbol: 'TWIN.NS' },
-      { ...defaultPosition, id: 'bse-listing', ticker: 'TWIN', exchange: 'BSE', currency: 'INR', providerSymbol: 'TWIN.BO' },
+      { ...defaultPosition, id: 'bse-listing', ticker: 'TWIN', exchange: 'BSE', currency: 'INR', providerSymbol: 'TWIN.BO', isin: 'INF204KB14I2',
+        pricingListing: { exchange: 'NSE', isin: 'INF204KB14I2', providerSymbol: 'TWIN2.NS', type: 'etf', source: 'nse-master', verifiedAt: Date.now() } },
     ]
     history.mockImplementation(async (position) => [
       { date: '2026-09-21', close: 100 },
@@ -263,13 +264,13 @@ describe('Holding Price History', () => {
     ])
     await renderPanel()
     const labels = [...container.querySelectorAll<HTMLOptionElement>('datalist option')].map((option) => option.value)
-    expect(labels).toEqual(['TWIN · NSE · INR · TWIN.NS', 'TWIN · BSE · INR · TWIN.BO'])
+    expect(labels).toEqual(['TWIN · NSE · INR · TWIN.NS', 'TWIN · BSE · INR · TWIN.BO · INF204KB14I2'])
     expect(labels.join(' ')).not.toMatch(/nse-listing|bse-listing/)
 
     await trackHolding(labels[1])
     expect(history.mock.lastCall?.[0]).toBe(store.positions[1])
     expect(container.querySelector('.history-last')?.textContent).toBe('₹210.00')
-    expect(container.querySelector('.history-source')?.textContent).toContain('TWIN.BO')
+    expect(container.querySelector('.history-source')?.textContent).toContain('TWIN2.NS')
 
     await act(async () => { container.querySelector<HTMLButtonElement>('.range-btn')!.click() })
     expect(history.mock.lastCall?.[0]).toBe(store.positions[1])

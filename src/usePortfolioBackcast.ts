@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { dateFormatter } from './formatters'
 import { marketData } from './marketData'
 import { applyPortfolioQuoteOverlay, buildPortfolioBackcast, type PortfolioBackcastHistory } from './portfolioBackcast'
@@ -20,6 +20,10 @@ export function usePortfolioBackcast({ positions, quotes, allowExternalData }: {
   const [historical, setHistorical] = useState<{ key: string; history: PortfolioBackcastHistory } | null>(null)
   const [reusableHistory, setReusableHistory] = useState(() => new Map<string, CachedHistory>())
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [retryAttempt, setRetryAttempt] = useState(0)
+  const forceRefresh = useRef(false)
+  const cancelRequest = useRef<(() => void) | null>(null)
   const [days, setDays] = useState(INITIAL_DAYS)
   const key = useMemo(() => JSON.stringify(positions.map((position) => [
     position.id, position.instrumentKey, position.identityIssue, position.ticker, position.type,
@@ -38,16 +42,26 @@ export function usePortfolioBackcast({ positions, quotes, allowExternalData }: {
       }
       setHistorical(null)
       setLoading(false)
+      setError(false)
       return
     }
-    if (cached && Date.now() >= cached.at && Date.now() - cached.at < HISTORY_REUSE_MS) {
+    if (cached && !forceRefresh.current && Date.now() >= cached.at && Date.now() - cached.at < HISTORY_REUSE_MS) {
       setHistorical(cached)
       setLoading(false)
+      setError(false)
       return
     }
+    forceRefresh.current = false
     let alive = true
     const controller = new AbortController()
+    const cancel = () => {
+      alive = false
+      controller.abort()
+      setLoading(false)
+    }
+    cancelRequest.current = cancel
     setLoading(true)
+    setError(false)
     void buildPortfolioBackcast(positions, marketData, days, controller.signal).then((history) => {
       if (!alive) return
       if (history.points.length >= 2) {
@@ -60,18 +74,20 @@ export function usePortfolioBackcast({ positions, quotes, allowExternalData }: {
           return next
         })
       }
-      setHistorical({ key, history })
+      if (history.points.length >= 2) setHistorical({ key, history })
+      setError(history.points.length < 2)
       setLoading(false)
     }).catch(() => {
       if (!alive) return
-      setHistorical(null)
+      setError(true)
       setLoading(false)
     })
     return () => {
       alive = false
       controller.abort()
+      if (cancelRequest.current === cancel) cancelRequest.current = null
     }
-  }, [allowExternalData, days, key, cacheKey, cached])
+  }, [allowExternalData, days, key, cacheKey, cached, retryAttempt])
 
   const source = cached?.history ?? (historical?.key === key ? historical.history : null)
   const backcast = useMemo(() => allowExternalData && source
@@ -86,5 +102,12 @@ export function usePortfolioBackcast({ positions, quotes, allowExternalData }: {
     setDays((current) => Math.min(MAX_DAYS, current + PAGE_DAYS))
   }
 
-  return { backcast, history, loading, days, key, requestMore, observationLabel }
+  const retry = () => {
+    if (loading || !allowExternalData || positions.length === 0) return
+    forceRefresh.current = true
+    setRetryAttempt((current) => current + 1)
+  }
+  const cancel = () => cancelRequest.current?.()
+
+  return { backcast, history, loading, error, refreshing: loading && history.length >= 2, retry, cancel, days, key, requestMore, observationLabel }
 }

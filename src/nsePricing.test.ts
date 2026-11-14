@@ -1,5 +1,5 @@
 import './test/storage'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyNsePricing, loadNseInstrumentTypes, loadNsePricingCandidates, type NsePricingCandidate } from './nsePricing'
 import { hasVerifiedNsePricing, normalizePosition } from './instruments'
 import { loadFolios, loadSettings, saveFolios, saveSettings } from './store'
@@ -15,7 +15,7 @@ const candidate: NsePricingCandidate = { exchange: 'NSE', type: 'stock', isin: '
 const imported = (): Position => normalizePosition({ id: 'bse-tcs', type: 'stock', ticker: '532540', name: 'TCS', exchange: 'BSE',
   isin: candidate.isin, quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120, currency: 'INR', exchangeSource: 'explicit' })
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear() })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear() })
 
 describe('verified NSE valuation preference', () => {
   it('preserves imported BSE details while routing current and historical quote identity to NSE', () => {
@@ -100,5 +100,106 @@ describe('verified NSE valuation preference', () => {
     const archive = createWorkspaceArchive([], loadSettings(), [])
     const restored = parseWorkspaceArchive(JSON.stringify({ ...archive, settings: legacy }))
     expect(restored.archive.settings).not.toHaveProperty('quoteRefreshSeconds')
+  })
+})
+
+describe('automatic NSE pricing preference', () => {
+  beforeEach(() => vi.resetModules())
+
+  it('maps a parsed BSE CSV by official ISIN without changing its imported financials or venue', async () => {
+    const { preferNsePricing } = await import('./nsePricing')
+    const csv = 'Symbol,Quantity,Average Price,Last Price,Exchange,ISIN\n532540,10,100,120,BSE,INE467B01029'
+    const parsed = parseSpreadsheetWithDiagnostics(new TextEncoder().encode(csv).buffer as ArrayBuffer).positions
+    const before = structuredClone(parsed[0])
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ candidates: [candidate] })))
+    const [preferred] = await preferNsePricing(parsed)
+    expect(preferred).toMatchObject({ ticker: before.ticker, exchange: 'BSE', providerSymbol: before.providerSymbol,
+      isin: before.isin, quantity: 10, buyPrice: 100, invested: 1000, lastPrice: 120, currency: 'INR', pricingListing: candidate })
+    expect(preferred.identityIssue).toBeUndefined()
+    expect(resolveYahooSymbol(preferred)).toBe('TCS.NS')
+    expect(parsed[0]).toEqual(before)
+  })
+
+  it('uses the exact official security type when the export called an ETF a stock', async () => {
+    const { preferNsePricing } = await import('./nsePricing')
+    const etf = { ...candidate, type: 'etf' as const, providerSymbol: 'GOLDBEES.NS' }
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ candidates: [etf] })))
+    const [preferred] = await preferNsePricing([imported()])
+    expect(preferred.type).toBe('etf')
+    expect(preferred.quantity).toBe(10)
+    expect(preferred.exchange).toBe('BSE')
+    expect(resolveYahooSymbol(preferred)).toBe('GOLDBEES.NS')
+  })
+
+  it('leaves BSE-only holdings on imported values and reuses verified no-match results for one hour', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const { preferNsePricing } = await import('./nsePricing')
+    const fetcher = vi.fn(async () => Response.json({ candidates: [] }))
+    vi.stubGlobal('fetch', fetcher)
+    const positions = [imported()]
+    expect(await preferNsePricing(positions)).toBe(positions)
+    vi.setSystemTime(Date.now() + 59 * 60_000)
+    expect(await preferNsePricing(positions)).toBe(positions)
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(resolveYahooSymbol(positions[0])).toBeNull()
+    vi.setSystemTime(Date.now() + 60_000)
+    await preferNsePricing(positions)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not send already-verified, missing-ISIN, foreign-currency, foreign-venue or fund holdings', async () => {
+    const { preferNsePricing } = await import('./nsePricing')
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    const positions = [applyNsePricing(imported(), candidate), { ...imported(), isin: undefined },
+      { ...imported(), currency: undefined, reportedCurrency: 'EUR' }, { ...imported(), exchange: 'LSE' as const },
+      { ...imported(), type: 'mutual-fund' as const }]
+    expect(await preferNsePricing(positions)).toBe(positions)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('shares pending reference requests and reuses a completed exact match', async () => {
+    const { preferNsePricing } = await import('./nsePricing')
+    let release!: (response: Response) => void
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { release = resolve }))
+    vi.stubGlobal('fetch', fetcher)
+    const first = preferNsePricing([imported()])
+    const second = preferNsePricing([{ ...imported(), id: 'another-account' }])
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce())
+    release(Response.json({ candidates: [candidate] }))
+    expect((await first)[0].pricingListing).toMatchObject(candidate)
+    expect((await second)[0].pricingListing).toMatchObject(candidate)
+    await preferNsePricing([imported()])
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it('rejects mismatched or ambiguous results without caching them as valid mappings', async () => {
+    const { preferNsePricing } = await import('./nsePricing')
+    const fetcher = vi.fn(async () => Response.json({ candidates: [{ ...candidate, isin: 'INE009A01021' }] }))
+    vi.stubGlobal('fetch', fetcher)
+    await expect(preferNsePricing([imported()])).rejects.toThrow('invalid matches')
+    fetcher.mockImplementation(async () => Response.json({ candidates: [candidate, candidate] }))
+    await expect(preferNsePricing([imported()])).rejects.toThrow('invalid matches')
+    fetcher.mockImplementation(async () => Response.json({ candidates: [candidate] }))
+    expect((await preferNsePricing([imported()]))[0].pricingListing).toMatchObject(candidate)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('honours cancellation before work and while an exact reference request is pending', async () => {
+    const { preferNsePricing } = await import('./nsePricing')
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, options?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(options.signal!.reason), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    const cancelled = new AbortController()
+    cancelled.abort()
+    await expect(preferNsePricing([imported()], cancelled.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetcher).not.toHaveBeenCalled()
+    const controller = new AbortController()
+    const pending = preferNsePricing([imported()], controller.signal)
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce())
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect((fetcher.mock.calls[0][1]!.signal as AbortSignal).aborted).toBe(true)
   })
 })

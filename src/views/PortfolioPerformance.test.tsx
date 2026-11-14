@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { Activity, act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { investmentWorkspace } from '../investmentWorkspace'
 import type { PortfolioBackcastHistory } from '../portfolioBackcast'
 import { loadSettings } from '../store'
 import type { Position, PortfolioSnapshot } from '../types'
 import type { useStore } from '../useStore'
 import { quoteKey } from '../valuation'
+import { isRegularMarketOpen } from '../marketCalendar'
 import { PortfolioPerformance } from './PortfolioPerformance'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -42,6 +43,8 @@ async function renderPerformance(backcast = points(), options: { positions?: Pos
 
 const rerender = async (scope?: Scope) => act(async () => root!.render(<PortfolioPerformance scope={scope} />))
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!
+
+beforeEach(() => { vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null) })
 
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
@@ -85,6 +88,7 @@ it('keeps the chart and observation readout current without refetching history',
   state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 180, at: Date.parse('2026-10-01T15:30:00+05:30'), source: 'yahoo' } } }
   await rerender()
   expect(latestValue()).toBe('₹180.00')
+  expect(container.querySelector('[data-risk="below-high"] .risk-reading strong')?.textContent).toBe('18.2%')
   expect(state.build).toHaveBeenCalledTimes(1)
 })
 
@@ -241,9 +245,188 @@ it('shows missing scoped holdings without fetching history or offering tracked b
   expect(button('Tracked').disabled).toBe(true)
 })
 
+it('retries unavailable history from the same screen without changing holding scope', async () => {
+  await renderPerformance([])
+  expect(container.textContent).toContain('Historical prices are unavailable')
+  state.build.mockResolvedValueOnce({ points: points(), coveredPositions: defaultPositions, holdingsIncluded: 1, holdingsTotal: 1 })
+  await act(async () => button('Retry history').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(state.build).toHaveBeenCalledTimes(2)
+  expect(state.build.mock.calls[1][0]).toEqual(state.build.mock.calls[0][0])
+})
+
+it('retains useful history after failure and cancels a retry without accepting its late result', async () => {
+  await renderPerformance()
+  state.build.mockRejectedValueOnce(new Error('Network unavailable'))
+  await act(async () => button('Earlier history').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(container.textContent).toContain('History update failed. Showing saved prices.')
+  let resolve!: (history: PortfolioBackcastHistory) => void
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcastHistory>((done) => { resolve = done }))
+  await act(async () => button('Retry history').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  const signal = state.build.mock.lastCall?.[3] as AbortSignal
+  await act(async () => button('Cancel update').click())
+  expect(signal.aborted).toBe(true)
+  await act(async () => resolve({ points: points([800, 900]), coveredPositions: defaultPositions, holdingsIncluded: 1, holdingsTotal: 1 }))
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('220')
+  expect(container.textContent).not.toContain('Updating historical prices')
+})
+
 it('formats compact chart labels in INR', async () => {
   await renderPerformance(points([200000, 220000]))
   await rerender()
   expect(container.querySelector('[data-chart]')?.getAttribute('data-axis')).toBe('₹2.2L')
   expect(container.querySelector('.insight-chart-metric--value strong')?.textContent).toBe('₹2,20,000')
 })
+
+it('places risk after performance and keeps it on shared market history when viewing tracked balances', async () => {
+  const history = [100, 1000].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: value, pnl: 0, holdingCount: index + 1 }))
+  await renderPerformance(points([200, 180]), { history })
+  const performance = container.querySelector('.portfolio-performance')!
+  const risk = performance.nextElementSibling!
+  expect(risk.querySelector('.panel-title')?.textContent).toBe('Portfolio risk checks')
+  expect(risk.querySelector('[data-risk="below-high"] .risk-reading strong')?.textContent).toBe('10.0%')
+  expect(state.build).toHaveBeenCalledTimes(1)
+  await act(async () => button('Tracked').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('1000')
+  expect(risk.querySelector('[data-risk="below-high"] .risk-reading strong')?.textContent).toBe('10.0%')
+  expect(state.build).toHaveBeenCalledTimes(1)
+})
+
+it('does not substitute tracked balances for loading or unavailable risk history', async () => {
+  let resolve!: (history: PortfolioBackcastHistory) => void
+  state.build.mockImplementationOnce(() => new Promise<PortfolioBackcastHistory>((done) => { resolve = done }))
+  const history = [100, 1000].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: value, pnl: 0, holdingCount: index + 1 }))
+  await renderPerformance([], { history })
+  const risk = container.querySelector('.portfolio-performance')!.nextElementSibling!
+  expect(risk.textContent).toMatch(/loading/i)
+  expect(risk.querySelector('[data-risk]')).toBeNull()
+  await act(async () => button('Tracked').click())
+  expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('1000')
+  expect(risk.querySelector('[data-risk]')).toBeNull()
+  await act(async () => resolve({ points: [], coveredPositions: [], holdingsIncluded: 0, holdingsTotal: 1 }))
+  expect(risk.textContent).toMatch(/unavailable/i)
+  expect(risk.querySelector('[data-risk]')).toBeNull()
+  expect(state.build).toHaveBeenCalledTimes(1)
+})
+
+it('describes a same-day drop as less than one day below peak instead of claiming recovery', async () => {
+  await renderPerformance([
+    { at: Date.parse('2026-11-04T09:00:00+05:30'), value: 120, invested: 100 },
+    { at: Date.parse('2026-11-04T12:00:00+05:30'), value: 110, invested: 100 },
+  ])
+  const time = container.querySelector('[data-risk="time-below-peak"]')!
+  expect(time.querySelector('.risk-reading > strong')?.textContent).toBe('Less than 1 day')
+  expect(time.textContent).toContain('Below peak since today.')
+  expect(time.textContent).not.toContain('Latest value is at its observed peak.')
+})
+
+it('does not annualize sparse monthly observations as daily returns', async () => {
+  await renderPerformance([100, 80, 110].map((value, index) => ({ at: Date.UTC(2026, index, 1) - 5.5 * 3600000, value, invested: 100 })))
+  const volatility = container.querySelectorAll('.risk-reading')[2]
+  expect(volatility?.textContent).toContain('Unavailable')
+  expect(volatility?.textContent).not.toMatch(/\d+\.\d+%/)
+  expect(container.textContent).toContain('Daily closes are required')
+})
+
+it('shows the exact peak, latest value and rupee drop behind the current drawdown', async () => {
+  await renderPerformance([12000.75, 15000.5, 13400.25].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: 100 })))
+  const calculation = container.querySelector('.risk-calculation')!
+  expect([...calculation.querySelectorAll('dt')].map((label) => label.textContent)).toEqual(['Peak value', 'Below peak', 'Latest value'])
+  expect([...calculation.querySelectorAll('dd')].map((reading) => reading.textContent)).toEqual(['₹15,000.50', '₹1,600.25', '₹13,400.25'])
+  expect(calculation.querySelector('.risk-calculation-result--loss')).not.toBeNull()
+  expect(calculation.closest('.risk-bar')?.querySelector('.risk-reading strong')?.textContent).toBe('10.7%')
+  state.store.settings.hideValues = true
+  await act(async () => root!.render(<PortfolioPerformance />))
+  expect(calculation.querySelectorAll('strong')).toHaveLength(3)
+  expect([...calculation.querySelectorAll('strong')].every((element) => element.textContent === '••••')).toBe(true)
+  expect(calculation.innerHTML).not.toMatch(/₹|15000|13400|1600/)
+  expect(calculation.querySelector('.risk-calculation-result--loss')).toBeNull()
+})
+
+it('labels partial historical coverage without substituting the full portfolio value', async () => {
+  const positions: Position[] = ['AAA', 'BBB'].map((ticker) => ({ id: ticker, ticker, name: ticker, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }))
+  const points = [150, 120].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: 100 }))
+  state.build.mockResolvedValueOnce({ points, coveredPositions: [positions[0]], holdingsIncluded: 1, holdingsTotal: 2 })
+  await renderPerformance(points, { positions })
+  expect(container.querySelector('.risk-calculation-stat:last-child dd')?.textContent).toBe('₹120.00')
+  expect(container.querySelector('.risk-calculation-basis')?.textContent).toBe('History covers 1 of 2 holdings · 50% of priced INR value.')
+})
+
+it('replaces duplicate risk cards with peak duration and exact eligible down-session counts', async () => {
+  const dates = ['21', '22', '23', '24', '25', '29', '30']
+  await renderPerformance([100, 100, 90, 95, 80, 60, 50].map((value, index) => ({
+    at: Date.parse(`2026-09-${dates[index]}T15:30:00+05:30`), value, invested: 100,
+    ...(index === 6 ? { isCurrent: true } : {}),
+  })))
+  const duration = container.querySelector('[data-risk="time-below-peak"]')!
+  const sessions = container.querySelector('[data-risk="down-sessions"]')!
+  expect(duration.querySelector('.risk-reading strong')?.textContent).toBe('8 days')
+  expect(duration.querySelector('.risk-bar-head .risk-reading')).toBeNull()
+  expect(duration.querySelector('.risk-timeline-reading .risk-reading strong')?.textContent).toBe('8 days')
+  expect([...duration.querySelectorAll('.risk-timeline dt')].map((label) => label.textContent)).toEqual(['Last observed peak', 'Latest reading'])
+  expect([...duration.querySelectorAll('.risk-timeline time')].map((reading) => reading.textContent)).toEqual(['22 Sept 2026', '30 Sept 2026'])
+  expect(sessions.querySelector('.risk-reading strong')?.textContent).toBe('2 of 4')
+  expect(sessions.querySelector('.risk-observation')?.textContent).toBe('50.0%')
+  expect(sessions.querySelector('.risk-session-ratio')?.getAttribute('aria-label')).toBe('2 lower closes and 2 higher or unchanged closes')
+  expect(duration.querySelector('.risk-status')?.textContent).toBe('Good')
+  expect(duration.querySelector('.risk-track canvas')).not.toBeNull()
+  expect(duration.querySelector('.risk-track')?.getAttribute('aria-label')).toBe('Time below peak: 8 days, Good. Bar scale 0 to 180 days.')
+  expect(sessions.querySelector('.risk-status')?.textContent).toBe('To watch')
+  expect(container.querySelector('.risk-history-basis')?.textContent).toContain('30 Sept 2026')
+
+  state.store.settings.hideValues = true
+  await act(async () => root!.render(<PortfolioPerformance />))
+  for (const card of [duration, sessions]) {
+    expect(card.querySelector('.risk-reading strong')?.textContent).toBe('••••')
+    expect(card.innerHTML).not.toMatch(/2 of 4|50\.0%|22 Sept 2026|8 days/)
+  }
+  expect(sessions.querySelector('.risk-session-split')).toBeNull()
+  expect(duration.querySelector('.risk-track')?.getAttribute('aria-label')).toBe('Time below peak: hidden')
+  expect(duration.querySelector('.risk-timeline time')).toBeNull()
+  expect(duration.innerHTML).not.toMatch(/2026-09-22|2026-09-30/)
+  expect(container.querySelector('.risk-history-basis')).toBeNull()
+})
+
+it('shows recovery as zero days and leaves down-session frequency unavailable for sparse history', async () => {
+  await renderPerformance([100, 80, 100].map((value, index) => ({ at: Date.UTC(2026, index, 1), value, invested: 100 })))
+  expect(container.querySelector('[data-risk="time-below-peak"] .risk-reading strong')?.textContent).toBe('0 days')
+  expect(container.querySelector('[data-risk="time-below-peak"] .risk-summary')?.textContent).toBe('Latest value is at its observed peak.')
+  expect(container.querySelector('[data-risk="down-sessions"] .risk-reading')?.textContent).toContain('Unavailable')
+  expect(container.querySelector('[data-risk="down-sessions"] .risk-reading')?.textContent).not.toContain('0 of 0')
+})
+
+it.each([[29, 'Good', 'lower'], [30, 'To watch', 'watch'], [89, 'To watch', 'watch'], [90, 'High', 'high']] as const)(
+  'rates %i days below peak as %s with matching meter bands', async (days, label, status) => {
+    const start = Date.parse('2026-01-05T00:00:00+05:30')
+    await renderPerformance([{ at: start, value: 100, invested: 100 }, { at: start + days * 86400000, value: 90, invested: 100 }])
+    const card = container.querySelector('[data-risk="time-below-peak"]')!
+    expect(card.classList.contains(`risk-bar--${status}`)).toBe(true)
+    expect(card.querySelector('.risk-status')?.textContent).toBe(label)
+    expect(card.querySelectorAll('.risk-track-zone')).toHaveLength(3)
+    const help = card.querySelector<HTMLButtonElement>('.risk-help')!
+    await act(async () => help.click())
+    expect(help.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById(help.getAttribute('aria-controls')!)?.textContent).toContain('Good below 30 days · To watch from 30 days · High from 90 days')
+  },
+)
+
+it.each([[8, 'Good', 'lower'], [9, 'To watch', 'watch'], [10, 'To watch', 'watch'], [11, 'High', 'high']] as const)(
+  'rates %i of 20 down sessions as %s without losing the exact percentage', async (down, label, status) => {
+    const points: PortfolioBackcastHistory['points'] = []
+    let value = 100
+    for (let at = Date.parse('2026-09-01T12:00:00+05:30'); points.length < 21; at += 86400000) {
+      if (!isRegularMarketOpen(new Date(at))) continue
+      if (points.length) value *= points.length <= down ? 0.99 : 1.01
+      points.push({ at, value, invested: 100 })
+    }
+    await renderPerformance(points)
+    const card = container.querySelector('[data-risk="down-sessions"]')!
+    expect(card.classList.contains(`risk-bar--${status}`)).toBe(true)
+    expect(card.querySelector('.risk-status')?.textContent).toBe(label)
+    expect(card.querySelector('.risk-reading strong')?.textContent).toBe(`${down} of 20`)
+    expect(card.querySelector('.risk-observation')?.textContent).toBe(`${(down * 5).toFixed(1)}%`)
+    expect(card.querySelector('.risk-session-ratio')?.getAttribute('aria-label')).toBe(`${down} lower closes and ${20 - down} higher or unchanged closes`)
+  },
+)

@@ -48,6 +48,23 @@ describe('company events API', () => {
     expect(second.events[0].symbol).toBe('OTHER')
   })
 
+  it('rechecks filings every fifteen minutes while retaining slower calendars and identity references', async () => {
+    let time = NOW
+    const fetcher = provider()
+    const handler = createEventsHandler({ fetcher, now: () => time })
+    await handler(request())
+    time += 15 * 60_000
+    await handler(request())
+    expect(fetcher.mock.calls.filter(([url]) => url.toString().includes('corporate-announcements'))).toHaveLength(2)
+    expect(fetcher.mock.calls.filter(([url]) => url.toString().includes('event-calendar'))).toHaveLength(1)
+    expect(fetcher.mock.calls.filter(([url]) => url.toString().includes('corporateActions'))).toHaveLength(1)
+    expect(fetcher.mock.calls.filter(([url]) => url.toString().endsWith('EQUITY_L.csv'))).toHaveLength(1)
+    time += 45 * 60_000
+    await handler(request())
+    expect(fetcher.mock.calls.filter(([url]) => url.toString().includes('event-calendar'))).toHaveLength(2)
+    expect(fetcher.mock.calls.filter(([url]) => url.toString().endsWith('EQUITY_L.csv'))).toHaveLength(1)
+  })
+
   it('retries a recovered source for the same symbols while keeping healthy sources cached', async () => {
     let time = NOW, available = false
     const normal = provider()
