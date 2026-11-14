@@ -11,7 +11,7 @@
 [data-mode='light'] .portfolio-risk-checks { --risk-positive: #08712f; --risk-watch: #8b5610; --risk-high: #ad3030; }
 .portfolio-risk-checks .risk-summary { font-size: 14px; }
 .portfolio-risk-checks > .panel-head { margin-bottom: 20px; }
-.portfolio-risk-checks .risk-bars { gap: 20px; }
+.portfolio-risk-checks .risk-bars { grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .portfolio-risk-checks .risk-bar { gap: 18px; padding: 20px; }
 .portfolio-risk-checks .risk-bar-head { gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--hairline); }
 .portfolio-risk-checks .risk-bar-head > div:first-child { gap: 8px; }
@@ -21,7 +21,6 @@
 .portfolio-risk-checks .risk-timeline { padding-top: 0; border-top: 0; }
 .portfolio-risk-checks .risk-history-basis { margin-top: 18px; }
 .risk-help-popover--floating { font-size: 14px; }
-@container (max-width: 740px) { .portfolio-risk-checks .risk-bars { grid-template-columns: minmax(0, 1fr); } }
 .portfolio-risk-checks .risk-track { height: 14px; gap: 0; border-radius: 2px; }
 .portfolio-risk-checks .risk-track .dither-bar { position: absolute; inset: 0; height: 100%; background: transparent; }
 .risk-breakdown { container-type: inline-size; }
