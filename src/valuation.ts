@@ -111,38 +111,6 @@ export function combinedPositionMembers(positions: Position[]): Map<string, Posi
   return members
 }
 
-/** Explain uncertainty in the imported fallback, even when live quotes currently take precedence. */
-export function importedPriceWarnings(folios: Folio[]): string[] {
-  const warnings: string[] = []
-  for (const candidates of groupPositions(positionsWithStatementDates(folios)).values()) for (const { rows } of candidates) {
-    const selected = importedPriceRow(rows)
-    if (!selected) continue
-    const usable = rows.filter(usableImportedPrice)
-    const undatedCount = usable.filter((row) => !row.priceAsOf).length
-    const pricesByDate = new Map<string, Set<number>>()
-    for (const row of usable) {
-      if (!row.priceAsOf) continue
-      const prices = pricesByDate.get(row.priceAsOf) ?? new Set<number>()
-      prices.add(row.lastPrice!)
-      pricesByDate.set(row.priceAsOf, prices)
-    }
-    const conflictingDates = [...pricesByDate].filter(([, prices]) => prices.size > 1).map(([date]) => date).sort()
-    const dates = rows.map((row) => row.priceAsOf).filter((date): date is string => !!date).sort()
-    const latestDate = dates[dates.length - 1]
-    const reasons: string[] = []
-    if (undatedCount) reasons.push(`${undatedCount} usable imported price${undatedCount === 1 ? ' has' : 's have'} no statement date`)
-    if (conflictingDates.length) reasons.push(`imported prices conflict on statement date${conflictingDates.length === 1 ? '' : 's'} ${conflictingDates.join(', ')}`)
-    else if (new Set(usable.map((row) => row.lastPrice)).size > 1) reasons.push('imported prices differ across active accounts')
-    if (latestDate && (!selected.priceAsOf || latestDate > selected.priceAsOf)) reasons.push(`the latest statement dated ${latestDate} has no usable price`)
-    if (!reasons.length) continue
-    const selection = selected.priceAsOf
-      ? `Using ${conflictingDates.includes(selected.priceAsOf) ? 'the first imported usable price' : 'the imported price'} from statement dated ${selected.priceAsOf}, the latest statement date with a usable price.`
-      : 'Using the first imported usable price because no usable price has a known statement date.'
-    warnings.push(`${instrumentLabel(selected)}: ${reasons.join('; ')}. ${selection} Provider observation time is unknown.`)
-  }
-  return warnings
-}
-
 export function combinePositions(positions: Position[]): Position[] {
   const groups = groupPositions(positions)
   const out: Position[] = []

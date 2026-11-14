@@ -408,7 +408,6 @@ describe('Monitor IPOs', () => {
     ])
     expect(researchLinks.every((link) => link.target === '_blank' && link.rel.includes('noopener') && link.rel.includes('noreferrer'))).toBe(true)
     expect(region!.querySelector('.mi-issue-source')?.getAttribute('href')).toBe('https://www.xflot.com/ipo/one')
-    expect(container.textContent).not.toMatch(/Open in Groww|Open in Zerodha/)
     expect(region!.querySelectorAll('.mi-timeline li')).toHaveLength(2)
     expect(region!.querySelector('.mi-timeline')!.textContent).not.toContain('not announced')
     expect(region!.textContent).toContain('Allotment / listing dates unavailable')

@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, use } from "react"
+import { createContext } from "react"
 import type { Seed } from "./palette"
 
 /** A single tooltip row — one series (cartesian/radar) or one slice (pie). */
@@ -36,13 +36,3 @@ export type CommonChart = {
 }
 
 export const CommonChartContext = createContext<CommonChart | null>(null)
-
-export function useCommonChart() {
-  const ctx = use(CommonChartContext)
-  if (!ctx) {
-    throw new Error(
-      "<Legend /> / <Tooltip /> must be used within a chart root."
-    )
-  }
-  return ctx
-}

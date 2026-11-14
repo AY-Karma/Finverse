@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createIpoGmpHistoryHandler, parseArchivedIpoGmp, parseIpoGmpTrend } from '../api/ipoGmpHistory'
+import { createIpoGmpHistoryHandler, parseIpoGmpTrend } from '../api/ipoGmpHistory'
 import { isIpoGmpHistoryResponse } from './ipoGmpHistoryProtocol'
 import type { IpoIssue } from './ipoProtocol'
 
@@ -81,12 +81,12 @@ describe('dated historical GMP parsing', () => {
   })
 
   it('uses the latest genuine daily observation before listing rather than the accuracy-score number', () => {
-    const gmp = parseArchivedIpoGmp(html([
+    const gmp = parseIpoGmpTrend(html([
       point({ d: '2026-10-14', m: 180, lo: 175, hi: 182 }),
       point({ d: '2026-10-21', m: 132, lo: 130 }), point(),
       point({ d: '2026-10-23', m: 66, lo: 65, hi: 100 }),
       point({ d: '2026-10-24', m: 66, lo: 66, hi: 66 }),
-    ]), issue(), PAGE, NOW)!
+    ]), issue(), PAGE, NOW)!.gmp!
     expect(gmp).toMatchObject({ amount: 80, asOfDate: '2026-10-22', observedAt: null,
       source: 'GMP Today', sourceUrl: `https://gmptoday.in/ipo/${PAGE}/`, sources: 9, rangeLow: 65, rangeHigh: 137 })
     expect(gmp.percent).toBeCloseTo(80 / 586 * 100)
@@ -99,31 +99,31 @@ describe('dated historical GMP parsing', () => {
     ['Tonbo Imaging India', 'tonbo-imaging', 700, 441],
   ])('accepts the recorded %s archive only against its matching offer facts', (name, slug, price, amount) => {
     const page = html([point({ m: amount, lo: amount - 2, hi: amount + 3 })], { name, slug, price, singleQuotes: true })
-    const gmp = parseArchivedIpoGmp(page, issue({ name: `${name} Limited`, priceMax: price }), slug, NOW)!
+    const gmp = parseIpoGmpTrend(page, issue({ name: `${name} Limited`, priceMax: price }), slug, NOW)!.gmp!
     expect(gmp.amount).toBe(amount)
     expect(gmp.asOfDate).toBe('2026-10-22')
   })
 
   it.each([0, -5])('preserves a genuine %s premium', (amount) => {
-    expect(parseArchivedIpoGmp(html([point({ m: amount, lo: amount, hi: amount })]), issue(), PAGE, NOW)?.amount).toBe(amount)
+    expect(parseIpoGmpTrend(html([point({ m: amount, lo: amount, hi: amount })]), issue(), PAGE, NOW)?.gmp?.amount).toBe(amount)
   })
 
   it('excludes backfills, future days, missing observations and invalid date/range data', () => {
     const points = [point({ bf: true }), point({ d: '2026-11-09' }), point({ d: '2026-02-31' }),
       point({ m: null }), point({ lo: 90 }), point({ n: 0 })]
-    expect(parseArchivedIpoGmp(html(points), issue(), PAGE, NOW)).toBeNull()
-    expect(parseArchivedIpoGmp(html([]), issue(), PAGE, NOW)).toBeNull()
-    expect(parseArchivedIpoGmp(html([point(), point({ m: 90 })]), issue(), PAGE, NOW)).toBeNull()
+    expect(parseIpoGmpTrend(html(points), issue(), PAGE, NOW)).toBeNull()
+    expect(parseIpoGmpTrend(html([]), issue(), PAGE, NOW)).toBeNull()
+    expect(parseIpoGmpTrend(html([point(), point({ m: 90 })]), issue(), PAGE, NOW)).toBeNull()
   })
 
   it.each([{ name: 'Another Issuer' }, { price: 585 }, { date: '24 Oct 2026' }, { board: 'SME' }, { slug: 'another-issuer' }])('fails closed on different issuer or offer facts %j', (options) => {
-    expect(parseArchivedIpoGmp(html([point()], options), issue(), PAGE, NOW)).toBeNull()
+    expect(parseIpoGmpTrend(html([point()], options), issue(), PAGE, NOW)).toBeNull()
   })
 
   it('rejects changed chart structure and never invents a page or quote timestamp', () => {
-    expect(() => parseArchivedIpoGmp(html().replace('data-points=', 'unknown='), issue(), PAGE, NOW)).toThrow()
+    expect(() => parseIpoGmpTrend(html().replace('data-points=', 'unknown='), issue(), PAGE, NOW)).toThrow()
     const noUpdate = html().replace('name="gmp-built"', 'name="unknown"')
-    expect(parseArchivedIpoGmp(noUpdate, issue(), PAGE, NOW)).toMatchObject({ observedAt: null, sourceUpdatedAt: null })
+    expect(parseIpoGmpTrend(noUpdate, issue(), PAGE, NOW)?.gmp).toMatchObject({ observedAt: null, sourceUpdatedAt: null })
   })
 })
 
@@ -242,7 +242,7 @@ describe('historical response boundary', () => {
   })
 
   it('requires a safe issue identity and an explicit daily observation without fabricated clock time', () => {
-    const response = { slug: SLUG, gmp: parseArchivedIpoGmp(html(), issue(), PAGE, NOW), checkedAt: NOW }
+    const response = { slug: SLUG, gmp: parseIpoGmpTrend(html(), issue(), PAGE, NOW)?.gmp, checkedAt: NOW }
     expect(isIpoGmpHistoryResponse(response)).toBe(true)
     expect(isIpoGmpHistoryResponse({ ...response, slug: '../other' })).toBe(false)
     expect(isIpoGmpHistoryResponse({ ...response, gmp: { ...response.gmp, asOfDate: '2026-02-31' } })).toBe(false)

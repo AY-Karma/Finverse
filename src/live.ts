@@ -32,20 +32,6 @@ function istDate(date: Date = new Date()): string {
   return new Date(date.getTime() + (5 * 60 + 30) * 60 * 1000).toISOString().slice(0, 10)
 }
 
-export function marketStatusText(
-  open: boolean,
-  externalEnabled = true,
-  isRefreshing = false,
-  pricesAsOf?: string,
-): string {
-  if (!externalEnabled) {
-    return 'External market data off \u00b7 showing imported prices'
-  }
-  const marketLabel = open ? 'Market Open' : 'Market Closed'
-  if (isRefreshing) return `${marketLabel} - fetching latest available data`
-  return `${marketLabel} - ${pricesAsOf ? `showing prices as of ${pricesAsOf}` : 'no provider prices yet'}`
-}
-
 // ---------------------------------------------------------------------------
 // Quote keys + price resolution (single source of truth for live + sheet price)
 // ---------------------------------------------------------------------------

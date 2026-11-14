@@ -10,7 +10,6 @@ import {
   fetchNavHistory,
   fetchYahooPrice,
   isMarketOpen,
-  marketStatusText,
   quoteRefreshIssueText,
   type LiveQuotesResult,
 } from './live'
@@ -21,21 +20,7 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
-describe('market status text', () => {
-  it('reports missing, loading, timestamped and disabled market data', () => {
-    expect(marketStatusText(true)).toBe('Market Open - no provider prices yet')
-    expect(marketStatusText(false)).toBe('Market Closed - no provider prices yet')
-    expect(marketStatusText(true, true, true)).toBe('Market Open - fetching latest available data')
-
-    expect(marketStatusText(false, true, true)).toBe('Market Closed - fetching latest available data')
-
-    const timestamp = '01 Oct, 15:15:00 IST'
-    expect(marketStatusText(false, true, false, timestamp)).toBe(`Market Closed - showing prices as of ${timestamp}`)
-    expect(marketStatusText(true, true, false, timestamp)).toBe(`Market Open - showing prices as of ${timestamp}`)
-    expect(marketStatusText(false, true, true, timestamp)).toBe('Market Closed - fetching latest available data')
-    expect(marketStatusText(false, false, false, timestamp)).toBe('External market data off · showing imported prices')
-  })
-
+describe('NSE market session', () => {
   it('treats the market as closed outside the NSE trading window', () => {
     expect(isMarketOpen(new Date('2026-09-23T03:44:00.000Z'))).toBe(false)
     expect(isMarketOpen(new Date('2026-09-23T03:45:00.000Z'))).toBe(true)

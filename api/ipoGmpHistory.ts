@@ -145,11 +145,6 @@ export function parseIpoGmpTrend(html: string, issue: IpoIssue, pageSlug: string
   return { points: eligible.map((point) => ({ date: point.d, amount: point.m })), sourceUrl, sourceUpdatedAt, gmp }
 }
 
-/** Preserve the historical quote contract separately from a longer pre-bidding trend. */
-export function parseArchivedIpoGmp(html: string, issue: IpoIssue, pageSlug: string, at: number): IpoGmp | null {
-  return issue.status === 'LISTED' ? parseIpoGmpTrend(html, issue, pageSlug, at)?.gmp ?? null : null
-}
-
 function parseSitemap(html: string): string[] {
   const slugs = [...html.matchAll(/<loc>\s*https:\/\/gmptoday\.in\/ipo\/([a-z0-9][a-z0-9-]{0,149})\/\s*<\/loc>/g)].map((match) => match[1])
   if (!slugs.length || slugs.length > 2000) throw new Error('IPO archive directory format changed.')

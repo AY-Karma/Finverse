@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Folio, Position } from './types'
-import { combinedPositionMembers, combinePositions, computePortfolioStats, importedPriceWarnings, nativePrice, portfolioPulse, positionPnl, positionsWithStatementDates, quoteKey } from './valuation'
+import { combinedPositionMembers, combinePositions, computePortfolioStats, nativePrice, portfolioPulse, positionPnl, positionsWithStatementDates, quoteKey } from './valuation'
 
 function position(overrides: Partial<Position>): Position {
   return {
@@ -81,43 +81,33 @@ describe('imported price selection', () => {
     expect(combinePositions(positionsWithStatementDates([...folios].reverse()))[0].lastPrice).toBe(130)
     expect(computePortfolioStats(merged)).toMatchObject({ currentValue: 2340, invested: 1800 })
     expect(computePortfolioStats(merged, { [quoteKey(merged[0])]: { price: 140, at: 1, source: 'yahoo' } }).currentValue).toBe(2520)
-    expect(importedPriceWarnings(folios)[0]).toContain('imported prices differ across active accounts')
-    expect(importedPriceWarnings(folios)[0]).toContain('statement dated 2026-10-11')
   })
 
-  it('uses the first imported usable price for undated accounts and discloses the uncertainty', () => {
+  it('uses the first imported usable price for undated accounts', () => {
     const folios = [account(first, null), account(second, null)]
     const merged = combinePositions(positionsWithStatementDates(folios))
     expect(merged[0]).toMatchObject({ lastPrice: 120, priceAsOf: null })
     expect(computePortfolioStats(merged).currentValue).toBe(2160)
-    expect(importedPriceWarnings(folios)).toEqual([expect.stringContaining('2 usable imported prices have no statement date')])
-    expect(importedPriceWarnings(folios)[0]).toContain('Using the first imported usable price')
   })
 
-  it('keeps import order for conflicting prices on the same statement date and warns', () => {
+  it('keeps import order for conflicting prices on the same statement date', () => {
     const folios = [account(first, '2026-10-11'), account(second, '2026-10-11')]
     expect(combinePositions(positionsWithStatementDates(folios))[0].lastPrice).toBe(120)
-    expect(importedPriceWarnings(folios)).toEqual([expect.stringContaining('imported prices conflict on statement date 2026-10-11')])
-    expect(importedPriceWarnings(folios)[0]).toContain('Using the first imported usable price')
   })
 
-  it.each([null, -1, Number.NaN, Number.POSITIVE_INFINITY])('falls back when the latest statement has an unusable price %s and explains it', (lastPrice) => {
+  it.each([null, -1, Number.NaN, Number.POSITIVE_INFINITY])('falls back when the latest statement has an unusable price %s', (lastPrice) => {
     const folios = [account(first, '2026-10-10'), account({ ...second, lastPrice }, '2026-10-11')]
     expect(combinePositions(positionsWithStatementDates(folios))[0]).toMatchObject({ lastPrice: 120, priceAsOf: '2026-10-10' })
-    expect(importedPriceWarnings(folios)[0]).toContain('the latest statement dated 2026-10-11 has no usable price')
-    expect(importedPriceWarnings(folios)[0]).toContain('statement dated 2026-10-10')
   })
 
   it('prefers a dated zero price over an earlier undated price', () => {
     const folios = [account(first, null), account({ ...second, lastPrice: 0 }, '2026-10-11')]
     expect(combinePositions(positionsWithStatementDates(folios))[0]).toMatchObject({ lastPrice: 0, priceAsOf: '2026-10-11' })
-    expect(importedPriceWarnings(folios)[0]).toContain('1 usable imported price has no statement date')
   })
 
   it('falls back to an undated price when all dated statements lack a usable price', () => {
     const folios = [account(first, null), account({ ...second, lastPrice: null }, '2026-10-11')]
     expect(combinePositions(positionsWithStatementDates(folios))[0]).toMatchObject({ lastPrice: 120, priceAsOf: null })
-    expect(importedPriceWarnings(folios)[0]).toContain('the latest statement dated 2026-10-11 has no usable price')
   })
 
   it('preserves reviewed MF mappings while choosing the latest compatible account price', () => {
@@ -131,12 +121,11 @@ describe('imported price selection', () => {
     })])
   })
 
-  it('treats invalid statement dates as unknown and does not warn about incompatible listings', () => {
+  it('treats invalid statement dates as unknown and keeps incompatible listings separate', () => {
     const invalid = [account(first, '2026-02-30')]
     expect(positionsWithStatementDates(invalid)[0].priceAsOf).toBeNull()
-    expect(importedPriceWarnings(invalid)[0]).toContain('no statement date')
     const incompatible = [account({ ...first, exchange: 'NSE' }, '2026-10-10'), account({ ...second, exchange: 'BSE' }, '2026-10-11')]
-    expect(importedPriceWarnings(incompatible)).toEqual([])
+    expect(combinePositions(positionsWithStatementDates(incompatible))).toHaveLength(2)
   })
 })
 

@@ -4,7 +4,6 @@ import { MARKET_INDEX_CHOICES, selectedMarketIndices } from './marketIndexSelect
 
 export const INDEX_REFRESH_MS = 1_000
 const FAILED_INDEX_REFRESH_MS = 30_000
-export const MARKET_INDICES = selectedMarketIndices()
 
 export interface MarketIndexSnapshot {
   quotes: Record<string, PublicMarketQuote>

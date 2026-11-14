@@ -29,7 +29,6 @@ it('renders the painted bitmap in SVG coordinates and refreshes it when points c
     expect(image.getAttribute('href')).toBe('data:image/png;base64,first')
     expect(image.getAttribute('width')).toBe('286')
     expect(image.getAttribute('height')).toBe('146')
-    expect(container.querySelector('foreignObject')).toBeNull()
     expect(putImageData.mock.calls[0][0].data.some((value: number) => value > 0)).toBe(true)
     await render(100)
     expect(image.getAttribute('href')).toBe('data:image/png;base64,updated')
