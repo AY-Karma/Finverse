@@ -1,4 +1,5 @@
 import type { Position } from './types'
+import { delay, fetchText } from './http'
 import { holdingIdentity } from './monitor'
 import { combinePositions } from './valuation'
 
@@ -56,28 +57,6 @@ const RETRY_DELAY_MS = 700
 
 type TextFetcher = (url: string, signal?: AbortSignal) => Promise<string>
 
-async function fetchText(url: string, signal?: AbortSignal): Promise<string> {
-  const timeout = AbortSignal.timeout(12_000)
-  const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.text()
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const abort = () => {
-      clearTimeout(timer)
-      reject(new DOMException('Retry was cancelled.', 'AbortError'))
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', abort)
-      resolve()
-    }, ms)
-    if (signal?.aborted) abort()
-    else signal?.addEventListener('abort', abort, { once: true })
-  })
-}
-
 interface RawNewsItem {
   title: string
   link: string
@@ -101,19 +80,30 @@ function xmlTag(block: string, tag: string): string | undefined {
   return match ? decodeXml(match[1]) : undefined
 }
 
-/** Tolerant RSS 2.0 reader for publisher feeds and news search results. */
+const SOCIAL_PUBLISHERS = /^(?:instagram|facebook|twitter|x|tiktok|youtube|reddit|linkedin|threads|pinterest|quora)\b/i
+
+/** News search appends " - Publisher" to headlines; the publisher is already shown beside the story. */
+function withoutPublisherSuffix(title: string, publisher: string): string {
+  const suffix = ` - ${publisher}`
+  if (title.length <= suffix.length || !title.toLowerCase().endsWith(suffix.toLowerCase())) return title
+  return title.slice(0, -suffix.length).trimEnd()
+}
+
+/** Tolerant RSS 2.0 reader for publisher feeds and news search results. Social posts are not news. */
 export function rssItems(payload: string, fallbackPublisher: string): RawNewsItem[] {
   return [...payload.matchAll(/<item>([\s\S]*?)<\/item>/gi)].flatMap((match) => {
     const block = match[1]
     const title = xmlTag(block, 'title') ?? ''
     const link = (xmlTag(block, 'link') ?? '').trim()
     if (!title || !link || !/^https?:\/\//i.test(link)) return []
+    const publisher = xmlTag(block, 'source') ?? xmlTag(block, 'news:source') ?? fallbackPublisher
+    if (SOCIAL_PUBLISHERS.test(publisher)) return []
     const dateText = xmlTag(block, 'pubDate')
     const parsedAt = dateText ? Date.parse(dateText) : Number.NaN
     return [{
-      title,
+      title: withoutPublisherSuffix(title, publisher),
       link,
-      publisher: xmlTag(block, 'source') ?? xmlTag(block, 'news:source') ?? fallbackPublisher,
+      publisher,
       publishedAt: Number.isFinite(parsedAt) ? parsedAt : undefined,
     }]
   })

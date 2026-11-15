@@ -63,6 +63,24 @@ describe('portfolio saving', () => {
     } finally { await act(async () => root.unmount()) }
   })
 
+  it('does not show a price refresh when only scheduled NAVs or unconfirmed listings remain', async () => {
+    vi.useFakeTimers({ now: new Date('2026-11-15T19:30:00Z') })
+    vi.spyOn(live, 'isMarketOpen').mockReturnValue(false)
+    localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), allowExternalData: true }))
+    localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'account', name: 'Account', importedAt: 1, positions: [
+      { id: 'fund', ticker: 'PPFCF', name: 'Parag Parikh Flexi Cap Fund', type: 'mutual-fund', quantity: 1, buyPrice: 10, invested: 10, lastPrice: 12 },
+    ] }]))
+    let store!: ReturnType<typeof useStore>
+    const Capture = () => { store = useStore(); return null }
+    const root = createRoot(document.createElement('div'))
+    try {
+      await act(async () => root.render(<StoreProvider><Capture /></StoreProvider>))
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+      expect(refreshQuotes).not.toHaveBeenCalled()
+      expect(store.marketDataRefreshing).toBe(false)
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('allows correcting a mistaken foreign venue when the original amounts are explicitly INR', async () => {
     const position: Position = { id: 'inr-venue', ticker: 'TCS', name: 'TCS', type: 'stock', exchange: 'LSE', currency: 'INR', providerSymbol: 'TCS', identityVersion: 2, exchangeSource: 'explicit', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 }
     localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'account', name: 'Account', importedAt: 1, positions: [position] }]))

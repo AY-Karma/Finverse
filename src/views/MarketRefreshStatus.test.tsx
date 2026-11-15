@@ -19,7 +19,7 @@ it('keeps market status stable during refreshes and labels imported prices when 
     expect(container.textContent).toBe('Market open')
     expect(dot.className).toBe(restingClass)
     await act(async () => root.render(<MarketRefreshStatus {...props} externalEnabled={false} />))
-    expect(container.textContent).toBe('External market data off · showing imported prices')
+    expect(container.textContent).toBe('Market data paused · showing imported prices')
   } finally { await act(async () => root.unmount()) }
 })
 

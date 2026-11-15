@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { usePortfolioBackcast } from '../usePortfolioBackcast'
 import { useStore } from '../useStore'
-import { formatCurrency, formatPercent, effectivePrice } from '../valuation'
+import { formatCurrency, formatPercent, effectivePrice, plusSign } from '../valuation'
 import { PortfolioRiskChecks } from './PortfolioRiskChecks'
 import { HiddenValuesState } from './HiddenValuesState'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
@@ -57,7 +57,7 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
             <small>{mode === 'tracked' ? 'Cost recorded at each snapshot' : "Cost of today's holdings"}</small>
           </div>
           <div className="insight-chart-metric insight-chart-metric--gap">
-            <span>Value − invested</span><strong className={gap == null ? '' : gap >= 0 ? 'up' : 'down'}>{gap == null ? '—' : `${gap >= 0 ? '+' : ''}${value(gap)}`}</strong>
+            <span>Value − invested</span><strong className={gap == null ? '' : gap >= 0 ? 'up' : 'down'}>{gap == null ? '—' : `${plusSign(gap)}${value(gap)}`}</strong>
             <small>{gapPct == null ? 'Current difference' : formatPercent(gapPct)}</small>
           </div>
         </div>}
@@ -73,7 +73,7 @@ export function PortfolioPerformance({ scope = 'all' }: { scope?: Scope }) {
             yAxisLabel="Value"
             appearance="insight"
             onReachStart={mode === 'backcast' && backcast ? requestMore : undefined}
-          /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{positions.length === 0 ? 'No holdings in this view' : loading ? 'Building your historical series' : settings.allowExternalData ? 'Historical prices are unavailable' : 'External market data is off'}</strong><span>{positions.length === 0 ? 'Select another holding type to see its performance.' : loading ? 'Matching current holdings with historical closes.' : mode === 'tracked' ? 'Tracked balances appear after two market-day snapshots.' : settings.allowExternalData ? 'Use tracked snapshots as they accumulate, or retry historical prices.' : 'Enable it in Settings or use saved tracked balances.'}</span>{mode === 'backcast' && positions.length > 0 && settings.allowExternalData && !loading && <button type="button" className="btn btn--secondary" onClick={retry}>Retry history</button>}</div>}
+          /> : <div className="chart-empty chart-empty--tracking"><i aria-hidden="true" /><strong>{positions.length === 0 ? 'No holdings in this view' : loading ? 'Building your historical series' : settings.allowExternalData ? 'Historical prices are unavailable' : 'Market data paused'}</strong><span>{positions.length === 0 ? 'Select another holding type to see its performance.' : loading ? 'Matching current holdings with historical closes.' : mode === 'tracked' ? 'Tracked balances appear after two market-day snapshots.' : settings.allowExternalData ? 'Use tracked snapshots as they accumulate, or retry historical prices.' : 'Reload this tab to resume market data, or use saved tracked balances.'}</span>{mode === 'backcast' && positions.length > 0 && settings.allowExternalData && !loading && <button type="button" className="btn btn--secondary" onClick={retry}>Retry history</button>}</div>}
         </div>
       </>}
     </section>

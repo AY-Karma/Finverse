@@ -1,5 +1,6 @@
 import { useMemo, useState, type CSSProperties } from 'react'
-import { formatCurrency, type Allocation, type PortfolioPulse } from '../valuation'
+import { formatCurrency, signedPercent, type Allocation, type PortfolioPulse } from '../valuation'
+import { privateValue } from '../privacy'
 import { allocationColor, DitherDonut } from './overview/DitherCharts'
 import { DitherBar } from './DitherBar'
 import { HiddenValuesState } from './HiddenValuesState'
@@ -17,7 +18,7 @@ export function AllocationCard({
   pulse: PortfolioPulse
 }) {
   const [active, setActive] = useState<number | null>(null)
-  const mask = (text: string) => (hideValues ? '••••••' : text)
+  const mask = (text: string) => privateValue(text, hideValues)
 
   const valued = useMemo(() => allocations.filter((a) => a.value > 0), [allocations])
   const total = valued.reduce((sum, item) => sum + item.value, 0)
@@ -139,7 +140,7 @@ export function AllocationCard({
                 <span className="alloc-key-block alloc-key-block--up">
                   <span className="alloc-key-name"><i className="alloc-dot up" />In profit</span>
                   <strong><span className="alloc-metric-value">{p.up}</span> position{p.up === 1 ? '' : 's'}</strong>
-                  <small>{p.avgWinPct != null ? <>Average gain <span className="alloc-metric-value">{mask(`+${p.avgWinPct.toFixed(1)}%`)}</span></> : 'No winning positions'}</small>
+                  <small>{p.avgWinPct != null ? <>Average gain <span className="alloc-metric-value">{mask(signedPercent(p.avgWinPct, 1))}</span></> : 'No winning positions'}</small>
                 </span>
                 {p.flat > 0 && (
                   <span className="alloc-key-block">
@@ -156,8 +157,8 @@ export function AllocationCard({
               </div>
               {(p.best || p.worst) && (
                 <div className={`alloc-edge-notes${p.flat > 0 ? ' alloc-edge-notes--three' : ''}`}>
-                  {p.best && <span className={p.best.pct >= 0 ? 'up' : 'down'}>Best <strong title={mask(p.best.symbol)}>{mask(p.best.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.best.pct >= 0 ? '+' : ''}${p.best.pct.toFixed(1)}%`)}</b></span>}
-                  {p.worst && <span className={`alloc-edge-note--last ${p.worst.pct >= 0 ? 'up' : 'down'}`}>Worst <strong title={mask(p.worst.symbol)}>{mask(p.worst.symbol)}</strong> <b className="alloc-metric-value">{mask(`${p.worst.pct >= 0 ? '+' : ''}${p.worst.pct.toFixed(1)}%`)}</b></span>}
+                  {p.best && <span className={p.best.pct >= 0 ? 'up' : 'down'}>Best <strong title={mask(p.best.symbol)}>{mask(p.best.symbol)}</strong> <b className="alloc-metric-value">{mask(signedPercent(p.best.pct, 1))}</b></span>}
+                  {p.worst && <span className={`alloc-edge-note--last ${p.worst.pct >= 0 ? 'up' : 'down'}`}>Worst <strong title={mask(p.worst.symbol)}>{mask(p.worst.symbol)}</strong> <b className="alloc-metric-value">{mask(signedPercent(p.worst.pct, 1))}</b></span>}
                 </div>
               )}
             </section>

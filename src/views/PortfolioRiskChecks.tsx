@@ -2,6 +2,8 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { calculatePortfolioRisk } from '../portfolioRisk'
 import type { PortfolioBackcastHistory } from '../portfolioBackcast'
 import { dateFormatter, numberFormatter } from '../formatters'
+import { privateValue } from '../privacy'
+import { signedPercent } from '../valuation'
 import type { DitherColor } from '../components/dither-kit/palette'
 import { RiskHelp } from './RiskHelp'
 import { DitherBar } from './DitherBar'
@@ -35,7 +37,7 @@ function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus 
 function RiskProfile({ risk, history, hideValues, coverage, historyStart, historyEnd }: { risk: ReturnType<typeof calculatePortfolioRisk>; history: PortfolioBackcastHistory['points']; hideValues: boolean; coverage: string | null; historyStart: number; historyEnd: number }) {
   const [openDefinition, setOpenDefinition] = useState<string | null>(null)
   const { current, volatility } = risk
-  const mask = (text: string) => hideValues ? '••••' : text
+  const mask = (text: string) => privateValue(text, hideValues)
   const amount = (value: number) => mask(numberFormatter({ style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value))
   const date = (at: number) => dateFormatter({ day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(at)
   const historyBasis = "Today's holdings at past prices. Uses every historical observation."
@@ -232,7 +234,7 @@ function DailyReturnSpread({ returns, reading }: { returns: number[]; reading: R
       <span className="risk-daily-zero">0</span>
       <span className="risk-daily-limit risk-daily-limit--high">+{(largest * 100).toFixed(1)}%</span>
       <span className="risk-daily-limit risk-daily-limit--low">−{(largest * 100).toFixed(1)}%</span>
-      {recent.map((change, index) => <span className="risk-daily-column" key={index} title={`${change >= 0 ? '+' : ''}${(change * 100).toFixed(2)}%`} aria-hidden="true">
+      {recent.map((change, index) => <span className="risk-daily-column" key={index} title={signedPercent(change * 100)} aria-hidden="true">
         <i className={change < 0 ? 'is-negative' : change === 0 ? 'is-flat' : ''} style={{ height: `${Math.abs(change) / largest * 50}%`, top: change < 0 ? '50%' : undefined, bottom: change >= 0 ? '50%' : undefined }} />
       </span>)}
     </div>

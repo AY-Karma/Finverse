@@ -462,7 +462,7 @@ describe('portfolio news', () => {
     state.store.settings.allowExternalData = false
     await renderPanel()
     expect(container.querySelector('.mn-search, .mn-holding-search')).toBeNull()
-    expect(container.textContent).toContain('External data is off')
+    expect(container.textContent).toContain('Market data paused')
     expect(loadFeed).not.toHaveBeenCalled()
   })
 

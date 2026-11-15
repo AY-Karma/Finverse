@@ -220,7 +220,7 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
       {nsePending.length > 0 && <div className="nse-approval-actions">
         <button type="button" className="btn btn--primary btn--small" aria-busy={approvingNse} disabled={saving || !!nsePlan || !settings.allowExternalData} onClick={() => void findNseMatches()}>{approvingNse ? 'Checking NSE matches…' : 'Auto-approve NSE matches'}</button>
         <p className="nse-pricing-note"><strong>NSE pricing preferred</strong><span>Verified matches use NSE prices. Our current BSE feed is delayed by about 15 minutes.</span></p>
-        {!settings.allowExternalData && <span className="hint">Enable external market data in Settings to check NSE matches.</span>}
+        {!settings.allowExternalData && <span className="hint">Market data is paused because this workspace changed in another tab. Reload to continue.</span>}
       </div>}
       {reviewCount > 0 && <div className="import-actions">
         <button type="button" className="btn btn--secondary btn--small" aria-busy={approvingAll} disabled={saving || !!nsePlan} onClick={() => void approveAll()}>{approvingAll ? 'Approving default listings…' : 'Approve all default listings'}</button>

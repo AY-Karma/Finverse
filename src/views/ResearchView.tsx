@@ -1,10 +1,10 @@
 import { numberFormatter, dateFormatter } from '../formatters'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { Position } from '../types'
 import type { View } from '../useStore'
 import { useStore } from '../useStore'
 import { assetTypeLabel, instrumentLabel } from '../instruments'
-import { marketLinks, researchSource, resolveScreenerCompanyPath, reviewQuestions, supportsCompanyResearch, type ResearchLink } from '../research'
+import { marketLinks, researchSource, reviewQuestions, type ResearchLink } from '../research'
 import { monogramTile } from '../logos'
 import { privateValue, visibleQuotes } from '../privacy'
 import { effectivePrice, formatCurrency, formatPercent, hasSupportedValuationCurrency, positionPnl, positionPnlPct, positionValue, quoteKey } from '../valuation'
@@ -31,7 +31,6 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
   const hide = settings.hideValues
   const mask = (text: string) => privateValue(text, hide)
   const { navigation, updateNavigation, returnToHoldings } = useResearchNavigation(active, onUrlChange)
-  const [paths, setPaths] = useState<Record<string, string | null>>({})
   const headingRef = useRef<HTMLHeadingElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const previousHolding = useRef(navigation.holding)
@@ -49,22 +48,13 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
   const page = Math.min(Math.floor(navigation.page), pageCount - 1)
   const visibleRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
   const selected = navigation.holding ? positions.find((position) => position.id === navigation.holding) : visibleRows[0]?.position
-  const key = selected ? JSON.stringify([selected.id, selected.type, selected.ticker, selected.exchange, selected.isin]) : ''
   const pricedCount = rows.filter((row) => row.value != null).length
+  const marketPricedCount = positions.filter((position) => quotes[quoteKey(position)] != null).length
   const totalValue = rows.reduce((total, row) => total + (row.value || 0), 0)
   const value = selected && effectivePrice(selected, quotes) != null ? positionValue(selected, quotes) : null
   const pnl = selected ? positionPnl(selected, quotes) : null
   const pnlPct = selected ? positionPnlPct(selected, quotes) : null
   const weight = singleCurrency && pricedCount === positions.length && totalValue > 0 && value != null ? value / totalValue * 100 : null
-
-  useEffect(() => {
-    if (!active || hide || !settings.allowExternalData || !selected || !supportsCompanyResearch(selected)) return
-    const controller = new AbortController()
-    void resolveScreenerCompanyPath(selected.ticker, controller.signal).then((path) => {
-      if (!controller.signal.aborted) setPaths((previous) => ({ ...previous, [key]: path }))
-    }).catch(() => { /* A labeled source search remains available. */ })
-    return () => controller.abort()
-  }, [active, selected?.ticker, key, settings.allowExternalData, hide])
 
   useEffect(() => {
     if (!active) return
@@ -93,13 +83,13 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
   const basis = value == null ? 'Price unavailable' : validQuote
     ? `${quote.source === 'nav' ? 'Daily NAV' : quote.source === 'nse-close' ? 'NSE close' : 'Yahoo quote'} · ${Number.isFinite(quote.at) ? DATE_FORMAT.format(quote.at) : 'Date unknown'}`
     : 'Imported price · Date unknown'
-  const links = selected && !hide ? marketLinks(selected, settings.allowExternalData ? paths[key] : null) : []
+  const links = selected && !hide ? marketLinks(selected) : []
   const questions = selected ? reviewQuestions(selected.type) : []
   const tabs = [{ id: 'overview', label: 'Overview' }, { id: 'sources', label: 'Sources' }] as const
 
   return <div className={`research-desk${navigation.holding ? ' rd-has-selection' : ''}`}>
     <header className="rd-page-head"><div><h1 className="page-title">Research</h1><p>Know what you own. Follow the evidence.</p></div></header>
-    <div className="rd-context"><span>{mask(`${positions.length} investments`)}</span><span>{mask(`${pricedCount}/${positions.length} priced`)}</span><span><i className={`rd-status-dot${settings.allowExternalData ? ' is-on' : ''}`} />External data {settings.allowExternalData ? 'on' : 'off'}</span><span className="rd-context-end">{hide ? 'Masked mode enabled' : 'Research starts with your holdings'}</span></div>
+    <div className="rd-context"><span>{mask(`${positions.length} investments`)}</span><span>{mask(`${marketPricedCount}/${positions.length} with market prices`)}</span>{!settings.allowExternalData && <span><i className="rd-status-dot" />Market data paused</span>}<span className="rd-context-end">{hide ? 'Masked mode enabled' : 'Research starts with your holdings'}</span></div>
     <div className="rd-toolbar" role="search" aria-label="Find an investment">
       <label className="rd-search"><SearchIcon /><input type="search" value={hide ? '' : navigation.query} disabled={hide} maxLength={200} placeholder={hide ? 'Masked mode enabled' : 'Find a holding...'} aria-label="Search research holdings" onChange={(event) => updateNavigation({ query: event.target.value, page: 0, holding: '', tab: 'overview' })} /></label>
       <label className="rd-filter"><span>Asset</span><select aria-label="Filter by asset type" value={hide ? 'all' : navigation.asset} disabled={hide} onChange={(event) => updateNavigation({ asset: event.target.value, group: 'all', page: 0, holding: '', tab: 'overview' })}><option value="all">All assets</option>{(['stock', 'mutual-fund', 'etf', 'other'] as const).map((type) => <option value={type} key={type}>{assetTypeLabel(type)}</option>)}</select></label>
@@ -131,7 +121,7 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
           <div className="rd-tab-content" id="rd-tab-panel" role="tabpanel" aria-labelledby={`rd-tab-${navigation.tab}`} tabIndex={0}>
             {navigation.tab === 'overview' && <>
               <section className="rd-section"><div className="rd-section-head"><h3>Your holding</h3><span className="rd-basis">{basis}</span></div><dl className="rd-metrics"><Metric label="Holding value" value={amount(value, 'Unpriced')} /><Metric label="Unrealized return" value={privateValue(pnlPct == null ? 'Unavailable' : formatPercent(pnlPct), settings.hideValues)} movement={!settings.hideValues && pnl != null ? pnl >= 0 ? 'up' : 'down' : ''} /><Metric label="Portfolio weight" value={privateValue(weight == null ? 'Unavailable' : `${weight.toFixed(1)}%`, settings.hideValues)} /><Metric label="Invested amount" value={amount(selected.invested)} /><Metric label={selected.type === 'mutual-fund' ? 'Units held' : 'Quantity held'} value={privateValue(numberFormatter({ maximumFractionDigits: 4 }).format(selected.quantity), settings.hideValues)} /><Metric label={selected.type === 'mutual-fund' ? 'NAV per unit' : 'Price per unit'} value={amount(effectivePrice(selected, quotes))} /></dl>{weight == null && <p className="rd-footnote">Portfolio weight needs complete prices in one currency.</p>}<p className="rd-footnote">Values shown in INR. Unrealized return is since purchase, not today.</p></section>
-              {!hide && <section className="rd-section rd-history"><HistoryPanel scope="all" position={selected} active={active} /></section>}
+              {!hide && <section className="rd-section rd-history"><HistoryPanel position={selected} active={active} /></section>}
               <section className="rd-section"><div className="rd-section-head"><div><h3>A starting point for your review</h3><p>{selected.type === 'mutual-fund' ? 'Understand the mandate, costs and risk before comparing returns.' : selected.type === 'etf' ? 'Understand what it tracks and the cost of holding it.' : 'Follow the evidence, then revisit your reason to own.'}</p></div></div><ol className="rd-review-guide">{questions.slice(0, 3).map((question, index) => <li key={question.id}><span>{String(index + 1).padStart(2, '0')}</span>{question.text}</li>)}</ol><button type="button" className="btn btn--secondary" onClick={() => updateNavigation({ tab: 'sources' })}><ActionIcon name="research" />Start my research</button>
               <details className="rd-sources-preview"><summary>Source shortcuts</summary><SourceList links={links.slice(0, 2)} hidden={hide} /><p className="rd-footnote">Sources open in a new tab and receive the investment name or symbol.</p></details></section>
             </>}

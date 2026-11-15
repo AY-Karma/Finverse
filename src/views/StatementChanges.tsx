@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Folio, Position } from '../types'
 import { compareStatements } from '../statementChanges'
-import { formatCurrency } from '../valuation'
+import { formatCurrency, signedPoints } from '../valuation'
 import { ActionIcon } from './ActionIcon'
 import './statementChanges.css'
 
@@ -68,7 +68,7 @@ export function StatementChanges({ before, after, beforeDate, afterDate, hideVal
               {change.before && change.after && change.before.invested !== change.after.invested && <small>Cost {units.format(change.before.invested)} {change.before.currency} → {units.format(change.after.invested)} {change.after.currency}</small>}
             </td>
             <td>{weight(change.before?.weight)} → {weight(change.after?.weight)}
-              {change.weightChange != null && Math.abs(change.weightChange) >= 0.005 && <small className={change.weightChange > 0 ? 'up' : 'down'}>{change.weightChange >= 0 ? '+' : ''}{change.weightChange.toFixed(2)} pts</small>}
+              {change.weightChange != null && Math.abs(change.weightChange) >= 0.005 && <small className={change.weightChange > 0 ? 'up' : 'down'}>{signedPoints(change.weightChange, 2)}</small>}
             </td>
             <td>{statementValue(change.before)} → {statementValue(change.after)}</td>
           </tr>

@@ -56,7 +56,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
 
   return <div className="mp-page">
     <header className="mp-hero"><div className="mp-hero-main">
-      <div><h1 className="page-title">Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : <>External data off · <a href="/app/settings">Settings</a></>}</p></div>
+      <div><h1 className="page-title">Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : 'Market data paused · reload this tab'}</p></div>
       <button className="mp-button" type="button" disabled={controller.refreshing || !controller.allowExternalData} onClick={() => { void controller.refresh(); refreshEvents() }}>{controller.refreshing ? 'Refreshing prices…' : 'Refresh prices'}</button>
     </div></header>
     <nav className="mp-section-links" aria-label="Monitor sections"><a href="#monitor-news-heading">News</a><a href="#monitor-ipos-heading">IPOs</a><a href="#monitor-upcoming-heading">Upcoming</a><a href="#monitor-watch-rules">Watches</a></nav>

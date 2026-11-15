@@ -4,6 +4,7 @@ import type { MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
 import { privateValue, visibleQuotes } from '../privacy'
 import { dateFormatter, numberFormatter } from '../formatters'
+import { signedPercent } from '../valuation'
 
 type PanelProps = { controller: MonitorController }
 export type RuleRequest = { holdingId: string; revision: number }
@@ -242,7 +243,7 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
             </details>
           </div>
           {!controller.hideValues && observation.quote && <p className="mp-rule-observation">
-            {rule.condition === 'daily_move' ? `${observation.quote.changePct! > 0 ? '+' : ''}${observation.quote.changePct!.toFixed(2)}% day move` : numberFormatter({ style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(observation.quote.price)}
+            {rule.condition === 'daily_move' ? `${signedPercent(observation.quote.changePct!)} day move` : numberFormatter({ style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(observation.quote.price)}
             {' · '}{observation.matched ? 'Condition met' : observation.distance === 0 ? 'At watch level' : observation.distance !== undefined ? `${observation.distance.toFixed(2)}${rule.condition === 'daily_move' ? ' pts' : '%'} to level` : 'Distance unavailable'}
             <br />{observation.quote.source === 'nav' ? 'Published NAV' : observation.quote.source === 'nse-close' ? 'NSE close' : 'Yahoo Finance'} · {dateFormatter({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(observation.quote.at)} IST
           </p>}

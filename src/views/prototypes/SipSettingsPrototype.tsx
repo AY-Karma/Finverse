@@ -1,6 +1,7 @@
 // Local SIP tracking prototype. All changes are in memory.
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { useStore } from '../../useStore'
+import { privateValue } from '../../privacy'
 import { ActionIcon } from '../ActionIcon'
 import { SipSelect } from './SipSelect'
 import { FundSchemeReview, FundSchemeReviewContent } from '../FundSchemeReview'
@@ -75,7 +76,7 @@ export function SipSettingsPrototype() {
   const addButton = useRef<HTMLButtonElement>(null)
   const editorTrigger = useRef<HTMLElement | null>(null)
   const prefix = useId()
-  const mask = (value: string) => hidden ? '••••••' : value
+  const mask = (value: string) => privateValue(value, hidden)
   const fundName = (id: string) => demo === 'worst' && id === 'pp' ? 'Nippon India Nifty Smallcap 250 Momentum Quality 100 Index Fund' : FUNDS.find((fund) => fund.id === id)!.name
   const shownAmount = (plan: Plan) => demo === 'worst' && plan.id === 'plan-pp' ? 1234567.89 : plan.amount
   const active = plans.filter((plan) => !plan.paused)
@@ -126,7 +127,7 @@ export function SipSettingsPrototype() {
     const existing = plans.find((plan) => plan.id === id)
     const plan: Plan = { ...draft, amount, id, paused: existing?.paused ?? false, skipped: existing?.skipped ?? false }
     setPlans((current) => existing ? current.map((item) => item.id === id ? plan : item) : [...current, plan])
-    setMessage(existing ? 'SIP tracking updated.' : 'SIP tracking added. Unit additions remain pending.'); closeEditor()
+    setMessage(existing ? 'SIP tracking updated.' : 'SIP tracking added.'); closeEditor()
   }
   function updatePlan(id: string, patch: Partial<Plan>, notice = '') {
     setPlans((current) => current.map((plan) => plan.id === id ? { ...plan, ...patch } : plan)); setMessage(notice)
@@ -144,10 +145,8 @@ export function SipSettingsPrototype() {
     const plan = active[0]
     if (!plan) { setMessage('No active SIP instalments to check.'); return }
     const scheduled = nextSipDate(plan)
-    const projected = projectedNavDate(plan.fundId, scheduled)
     const scheduledLabel = `${date(scheduled)}${isWeekendSipDate(scheduled) ? ' falls on a weekend' : ' is the scheduled date'}.`
-    setMessage(`${scheduledLabel} ${navDateLabel(plan.fundId, scheduled)} ${projected.status === 'available' ? 'Actual NAV still depends on fund receipt and cut-off eligibility.' : 'A verified calendar is needed before selecting a date.'} No units added without a published, applicable NAV.`)
-
+    setMessage(`${scheduledLabel} ${navDateLabel(plan.fundId, scheduled)} No units added.`)
   }
   const editorForm = (fixedFund = editor !== 'new') => <form className="sip-editor" onSubmit={save} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeEditor() } }}>
     <div className="sip-editor-head"><div><h4>{editor === 'new' ? 'Track a monthly SIP' : 'Edit SIP tracking'}</h4><p>{fixedFund ? mask(`${fundName(draft.fundId)} · Direct · Growth`) : 'For a SIP you already have with your provider.'}</p></div><button className="sip-icon" type="button" aria-label="Close SIP editor" onClick={closeEditor}><ActionIcon name="close" /></button></div>
@@ -160,7 +159,7 @@ export function SipSettingsPrototype() {
     </div>
     <p className="sip-note">Choose a first instalment after your latest statement.</p>
     {draft.day > 28 && <p className="sip-note">In shorter months, use the last calendar day. The scheme’s business-day rules still apply.</p>}
-    <div className="sip-estimate-note"><ActionIcon name="latest" /><p><strong>NAV estimate uses the next business day.</strong> Weekends and listed holidays are skipped using the 2026 MF exchange calendar. Fund receipt and cut-off times can delay the actual NAV. An import confirms allotted units.</p></div>
+    <div className="sip-estimate-note"><ActionIcon name="latest" /><p><strong>NAV estimate uses the next business day.</strong> Weekends and listed holidays are skipped using the 2026 MF exchange calendar.</p></div>
     {error && <p className="sip-error" role="alert">{error}</p>}
     <div className="sip-form-actions"><button type="submit" className="btn btn--primary">{editor === 'new' ? 'Add SIP tracking' : 'Save changes'}</button><button type="button" className="btn btn--secondary" onClick={closeEditor}>Cancel</button></div>
   </form>
@@ -178,7 +177,7 @@ export function SipSettingsPrototype() {
     {planActions(plan)}{deleteConfirmation(plan)}
   </div>
 
-  return <div className="sip-prototype" data-variant="C">
+  return <div className="sip-prototype">
     <div className="sip-prototype-caption"><span>Prototype</span><span>{importedFunds.length ? 'SIP changes reset on reload · Scheme approvals are saved' : 'Sample data · Changes reset on reload'}</span>
     <aside className="sip-prototype-bar" aria-label="SIP prototype controls" onClick={(event) => event.stopPropagation()}>
       <details className="sip-demo-controls"><summary>Demo tools</summary><div className="sip-demo-panel">
@@ -200,10 +199,9 @@ export function SipSettingsPrototype() {
             ) : <>
               <div className="sip-section-head"><div><h3>Recurring SIPs</h3><p>Your existing SIPs, tracked between imports.</p></div>{availableFunds.length > 0 && <button ref={addButton} type="button" className="btn btn--primary" onClick={() => openEditor()} disabled={demo === 'loading'}>+ Add SIP</button>}</div>
               <div className="sip-monthly"><span>Monthly contribution</span><strong>{mask(money(monthly))}<span> / month</span></strong><span>{active.length} active · {plans.length - active.length} paused</span></div>
-              {!editor && <p className="sip-intro">Track your existing schedules here. Unit additions need an applicable dated NAV and statement reconciliation.</p>}
               {demo === 'loading' ? <div className="sip-feedback" role="status">Loading your SIP schedules…</div> : <>
                 {(demo === 'waiting' || demo === 'failure') && <div className={`sip-feedback${demo === 'failure' ? ' sip-feedback--error' : ''}`} role={demo === 'failure' ? 'alert' : 'status'}><ActionIcon name={demo === 'failure' ? 'warning' : 'latest'} /><div><strong>{demo === 'failure' ? 'NAV unavailable. No units added.' : 'Waiting for a dated NAV.'}</strong><p>{demo === 'failure' ? 'Your schedule is saved. Retry when the NAV source is available.' : 'The next contribution stays pending until its expected NAV is published.'}</p></div>{demo === 'failure' && <button type="button" className="btn btn--secondary" onClick={() => { setDemo('waiting'); setMessage('Retry requested in this prototype.') }}>Try again</button>}</div>}
-                {plans.length === 0 && !editor && <div className="sip-empty"><ActionIcon name="calendar" /><h4>Track your recurring SIP.</h4><p>Save the amount and date. Unit additions stay pending until an applicable dated NAV is available.</p><button type="button" className="btn btn--secondary" onClick={() => openEditor()}>Track your first SIP</button></div>}
+                {plans.length === 0 && !editor && <div className="sip-empty"><ActionIcon name="calendar" /><h4>Track your recurring SIP.</h4><p>Save the amount and date to start tracking.</p><button type="button" className="btn btn--secondary" onClick={() => openEditor()}>Track your first SIP</button></div>}
                 <div className="sip-in-place">{editor === 'new' && editorForm()}{plans.map((plan) => <div className="sip-inline-fund" key={plan.id}>{planRow(plan)}</div>)}</div>
               </>}
               {message && <p className="sip-message" role="status">{message}</p>}

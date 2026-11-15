@@ -75,7 +75,7 @@ it('ignores retired manual classifications and provides no extra upload tasks', 
 it('does not fetch or use sourced data with external market data off', async () => {
   await render(false, false)
   expect(loadMarketCapReference).not.toHaveBeenCalled()
-  expect(container.textContent).toContain('External market data is off')
+  expect(container.textContent).toContain('Market data paused')
   expect(container.querySelector('.market-cap-band--unclassified')?.textContent).toContain('100.0%')
   await render()
   expect(container.querySelector('.market-cap-band--large')?.textContent).toContain('100.0%')

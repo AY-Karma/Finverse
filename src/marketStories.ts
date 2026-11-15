@@ -3,7 +3,7 @@ import { calculateHoldingMarketMoves, holdingMovePeriod, holdingMoveToday, type 
 import type { InvestmentSnapshot } from './investmentWorkspace'
 import type { Position } from './types'
 import { buildPeriodInsights } from './periodStoryInsights'
-import { formatCurrency, formatPercent, quoteKey } from './valuation'
+import { formatPercent, quoteKey, signedCurrency } from './valuation'
 import type { WeeklyStoryContent } from './weeklyStories'
 
 export type MarketStoryTone = 'neutral' | 'positive' | 'negative'
@@ -84,10 +84,6 @@ export interface MarketStoryRecap {
 
 function tone(value: number): MarketStoryTone {
   return value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral'
-}
-
-function signedCurrency(value: number): string {
-  return `${value > 0 ? '+' : ''}${formatCurrency(value)}`
 }
 
 function observations(rows: HoldingMarketMove[]) {

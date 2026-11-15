@@ -2,10 +2,9 @@ import { useId } from 'react'
 import { dateFormatter, numberFormatter } from '../formatters'
 import { getMarketCalendarInfo } from '../marketCalendar'
 import type { StoryInsight } from '../marketStories'
-import { formatCurrency, formatPercent } from '../valuation'
+import { formatPercent, signedCurrency } from '../valuation'
 import './personalStoryVisual.css'
 
-const signedAmount = (value: number) => `${value > 0 ? '+' : ''}${formatCurrency(value)}`
 const direction = (value: number) => value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral'
 const date = (value: string) => new Date(`${value}T00:00:00Z`)
 
@@ -25,7 +24,7 @@ export function PersonalStoryVisual({ insight, from, through }: { insight: Story
       { label: 'Net', start: 0, end: insight.net, amount: insight.net, x: 303, color: insight.net < 0 ? 'var(--semantic-danger)' : insight.net > 0 ? 'var(--semantic-success)' : 'var(--ink)' },
     ]
     return <div className="personal-story personal-story--bridge">
-      <figure className="personal-bridge-chart" aria-label={`Positive price changes ${signedAmount(insight.gains)}, negative price changes ${signedAmount(insight.losses)}, net movement ${signedAmount(insight.net)}.`}>
+      <figure className="personal-bridge-chart" aria-label={`Positive price changes ${signedCurrency(insight.gains)}, negative price changes ${signedCurrency(insight.losses)}, net movement ${signedCurrency(insight.net)}.`}>
         <svg viewBox="0 0 400 270" fill="none" aria-hidden="true" focusable="false">
           <path d={`M20 ${y(0)}H380`} stroke="var(--hairline-strong)" />
           <path d={`M99 ${y(insight.gains)}H169M233 ${y(insight.net)}H303`} stroke="var(--ink-faint)" strokeDasharray="3 5" />
@@ -34,13 +33,13 @@ export function PersonalStoryVisual({ insight, from, through }: { insight: Story
             const bottom = Math.max(y(column.start), y(column.end))
             return <g key={column.label}>
               {column.amount !== 0 ? <rect className={`personal-bridge-column${column.amount < 0 ? ' personal-bridge-column--fall' : ''}`} style={{ animationDelay: `${index * .12}s` }} x={column.x} y={top} width="64" height={Math.max(.5, bottom - top)} rx="3" fill={column.color} fillOpacity={index === 1 ? '.72' : '1'} /> : <path d={`M${column.x} ${top}h64`} stroke={column.color} strokeWidth="2" />}
-              <text x={column.x + 32} y={column.amount < 0 && index === 2 ? bottom + 21 : top - 12} textAnchor="middle" fill={column.color}>{signedAmount(column.amount)}</text>
+              <text x={column.x + 32} y={column.amount < 0 && index === 2 ? bottom + 21 : top - 12} textAnchor="middle" fill={column.color}>{signedCurrency(column.amount)}</text>
               <text className="personal-bridge-column-label" x={column.x + 32} y="248" textAnchor="middle">{column.label}</text>
             </g>
           })}
         </svg>
       </figure>
-      <div className="personal-session-driver"><span><small>Largest drag</small><strong>{insight.leader}</strong></span><b className={`story-tone--${direction(insight.leaderChange)}`}>{signedAmount(insight.leaderChange)}</b></div>
+      <div className="personal-session-driver"><span><small>Largest drag</small><strong>{insight.leader}</strong></span><b className={`story-tone--${direction(insight.leaderChange)}`}>{signedCurrency(insight.leaderChange)}</b></div>
       <Coverage covered={insight.covered} total={insight.total} />
     </div>
   }
@@ -57,10 +56,10 @@ export function PersonalStoryVisual({ insight, from, through }: { insight: Story
         <div className={`personal-driver-name${insight.symbol.length > 24 ? ' personal-driver-name--long' : ''}`}><strong>{insight.symbol}</strong>{insight.name !== insight.symbol && <span>{insight.name}</span>}</div>
         <div className="personal-driver-share"><strong>{numberFormatter({ maximumFractionDigits: 1 }).format(share)}<span>%</span></strong><span>of {negative ? 'negative' : 'positive'} price moves</span></div>
         <div className="personal-driver-rail" aria-hidden="true"><i style={{ width: `${share}%` }} /></div>
-        <p className="personal-driver-amount"><strong>{signedAmount(insight.change)}</strong><span>price contribution</span></p>
+        <p className="personal-driver-amount"><strong>{signedCurrency(insight.change)}</strong><span>price contribution</span></p>
       </div>
       <dl className="personal-story-ledger">
-        {ledger.map((row) => <div key={row.label} className={row.label === 'Net movement' ? 'personal-story-net' : undefined}><dt>{row.label}</dt><dd className={`story-tone--${direction(row.amount)}`}>{signedAmount(row.amount)}</dd></div>)}
+        {ledger.map((row) => <div key={row.label} className={row.label === 'Net movement' ? 'personal-story-net' : undefined}><dt>{row.label}</dt><dd className={`story-tone--${direction(row.amount)}`}>{signedCurrency(row.amount)}</dd></div>)}
       </dl>
       <Coverage covered={insight.covered} total={insight.total} />
     </div>
@@ -84,7 +83,7 @@ export function PersonalStoryVisual({ insight, from, through }: { insight: Story
         <strong>{dateFormatter({ day: 'numeric', timeZone: 'UTC' }).format(selected)}</strong>
         <span><b>{dateFormatter({ month: 'long', timeZone: 'UTC' }).format(selected)}</b><span>{dateFormatter({ weekday: 'long', timeZone: 'UTC' }).format(selected)} · {dateFormatter({ year: 'numeric', timeZone: 'UTC' }).format(selected)}</span></span>
       </div>
-      <div className="personal-session-result"><strong>{signedAmount(insight.change)}</strong><span>{formatPercent(insight.changePct)}</span></div>
+      <div className="personal-session-result"><strong>{signedCurrency(insight.change)}</strong><span>{formatPercent(insight.changePct)}</span></div>
     </div>
     <figure className="personal-session-chart">
       <figcaption>Observed daily moves</figcaption>
@@ -120,10 +119,10 @@ export function PersonalStoryVisual({ insight, from, through }: { insight: Story
         })}
       </svg>
     </figure>
-    <div className="personal-session-driver"><span><small>Largest price impact</small><strong>{insight.leader}</strong></span><b className={`story-tone--${direction(insight.leaderChange)}`}>{signedAmount(insight.leaderChange)}</b></div>
+    <div className="personal-session-driver"><span><small>Largest price impact</small><strong>{insight.leader}</strong></span><b className={`story-tone--${direction(insight.leaderChange)}`}>{signedCurrency(insight.leaderChange)}</b></div>
     {insight.weeklyDrag !== undefined && (insight.weeklyDrag ? <div className="personal-session-driver personal-session-week-drag">
       <span><small>Largest drag · week</small><strong>{insight.weeklyDrag.label}</strong></span>
-      <b className="story-tone--negative">{signedAmount(insight.weeklyDrag.change)} <small>{formatPercent(insight.weeklyDrag.changePct)}</small></b>
+      <b className="story-tone--negative">{signedCurrency(insight.weeklyDrag.change)} <small>{formatPercent(insight.weeklyDrag.changePct)}</small></b>
     </div> : <p className="personal-session-no-drag">No holding finished lower this week.</p>)}
   </div>
 }

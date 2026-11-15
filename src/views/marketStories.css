@@ -98,7 +98,7 @@
 .story-empty-actions { display: grid; gap: 10px; width: 100%; }
 @media (max-width: 768px) {
   .sidebar > .stories-entry { display: none; }
-  .overview-head .overview-title-row { grid-template-columns: max-content 44px; align-items: center; column-gap: 12px; }
+  .overview-head .overview-title-row { grid-template-columns: minmax(0, 1fr) 44px; align-items: center; column-gap: 12px; }
   .overview-title-row > .stories-entry, .portfolio-welcome-topline > .stories-entry { display: flex; width: 44px; min-height: 44px; margin: 0; padding: 3px; }
   .overview-title-row > .overview-notices { grid-column: 1 / -1; }
   .portfolio-welcome--overview .portfolio-welcome-topline { justify-content: flex-start; }

@@ -366,7 +366,7 @@ describe('statement import review', () => {
     expect(view.container.textContent).toContain(PRIVATE_VALUE_MASK)
     expect(view.container.textContent).not.toContain('Quantity 10')
     expect(view.container.textContent).not.toContain('₹1,040')
-    expect(view.container.textContent).not.toContain('External data is off')
+    expect(view.container.textContent).not.toContain('Market data paused')
     expect(view.container.textContent).not.toContain('Imported prices cannot be dated reliably')
     expect(view.container.textContent).not.toContain('Provider observation time is unknown')
     await act(async () => view.button('Cancel').click())

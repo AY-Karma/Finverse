@@ -1,6 +1,7 @@
 import type { LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
 import { createSharedRequest } from './sharedRequest'
+import { delay } from './http'
 import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from './marketCalendar'
 import { hasCompatibleFundScheme } from './fundSchemes'
 import { normalizePosition, pricingProviderSymbol } from './instruments'
@@ -12,11 +13,6 @@ import {
   type MarketQuotePayload,
   type QuotesPayload,
 } from './marketDataProtocol'
-
-// ---------------------------------------------------------------------------
-// Indian market hours + NSE trading holidays (IST). Polling runs only while the
-// market is actually open so we don't hammer the quote APIs off-hours.
-// ---------------------------------------------------------------------------
 
 /** Dev/test override: ?live=1 forces the market to be treated as open. */
 const FORCE_LIVE =
@@ -33,10 +29,6 @@ function istDate(date: Date = new Date()): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quote keys + price resolution (single source of truth for live + sheet price)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Symbol resolution: imported ticker -> Yahoo symbol
 // ---------------------------------------------------------------------------
 
@@ -48,12 +40,6 @@ export function resolveYahooSymbol(p: Position): string | null {
   if (p.type === 'mutual-fund') return null
   const normalized = normalizePosition(p)
   return normalized.identityIssue ? null : pricingProviderSymbol(normalized) ?? null
-}
-
-/** An explicit provider mapping never falls back to a guessed different listing. */
-export function resolveYahooSymbolCandidates(position: Position): string[] {
-  const primary = resolveYahooSymbol(position)
-  return primary ? [primary] : []
 }
 
 // ---------------------------------------------------------------------------
@@ -144,11 +130,6 @@ export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal, 
   }
   await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, recovery.length) }, recover))
   return quotes
-}
-
-export async function fetchYahooPrice(symbol: string, signal?: AbortSignal): Promise<YahooResult | null> {
-  const normalized = symbol.toUpperCase()
-  return (await fetchYahooPrices([normalized], signal)).get(normalized) ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -252,16 +233,15 @@ export async function fetchLiveQuotes(
   const outcomes: Outcome[] = []
 
   const equities = unique.flatMap((position) => {
-    if (position.type === 'mutual-fund') return []
-    const candidates = resolveYahooSymbolCandidates(position)
-    return candidates.length > 0 ? [{ position, candidates }] : []
+    const symbol = position.type === 'mutual-fund' ? null : resolveYahooSymbol(position)
+    return symbol ? [{ position, symbol }] : []
   })
   const refreshEquities = async () => {
-    const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]), signal, (batch) => {
+    const equityQuotes = await fetchYahooPrices(equities.map(({ symbol }) => symbol), signal, (batch) => {
       if (!onProgress) return
       const delivered: Record<string, LiveQuote> = {}
-      for (const { position, candidates } of equities) {
-        const quote = batch.get(candidates[0])
+      for (const { position, symbol } of equities) {
+        const quote = batch.get(symbol)
         const key = quoteKey(position)
         if (!quote || retainNewerQuote(quotes[key], quote, now.getTime())) continue
         delivered[key] = { price: quote.price, at: quote.at, fetchedAt: quote.fetchedAt,
@@ -269,13 +249,9 @@ export async function fetchLiveQuotes(
       }
       if (Object.keys(delivered).length) onProgress({ quotes: delivered, updated: Object.keys(delivered).length, failed: 0, skipped: 0 })
     })
-    const retrySymbols = equities.flatMap(({ candidates }) =>
-      !primaryQuotes.has(candidates[0]) && candidates[1] ? [candidates[1]] : [],
-    )
-    const retryQuotes = await fetchYahooPrices(retrySymbols, signal)
-    for (const { position, candidates } of equities) {
+    for (const { position, symbol } of equities) {
       const key = quoteKey(position)
-      const quote = primaryQuotes.get(candidates[0]) ?? retryQuotes.get(candidates[1])
+      const quote = equityQuotes.get(symbol)
       outcomes.push(quote
         ? {
             key,
@@ -351,15 +327,6 @@ export async function fetchLiveQuotes(
     failed: outcomes.filter((o) => o.status === 'failed').length,
     skipped: outcomes.filter((o) => o.status === 'skipped').length,
   }
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(signal.reason); return }
-    const abort = () => { clearTimeout(timer); reject(signal?.reason) }
-    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve() }, ms)
-    signal?.addEventListener('abort', abort, { once: true })
-  })
 }
 
 // ---------------------------------------------------------------------------

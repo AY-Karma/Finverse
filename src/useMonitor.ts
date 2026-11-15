@@ -30,7 +30,7 @@ export function useMonitor() {
   stateRef.current = state
   const replacedState = useRef<typeof state | null>(null)
   const savedState = useRef<typeof state | null>(null)
-  const [status, setStatus] = useState(() => ({ message: settings.allowExternalData ? '' : 'External market data is off. Enable it in Settings to load quote updates.', revision: 0 }))
+  const [status, setStatus] = useState(() => ({ message: settings.allowExternalData ? '' : 'Market data is paused. Reload this tab to continue.', revision: 0 }))
   const [storageError, setStorageError] = useState(loaded.error)
   const [refreshing, setRefreshing] = useState(false)
   const [now, setNow] = useState(Date.now)
@@ -314,7 +314,7 @@ export function useMonitor() {
         : result.reason === 'scheduled-nav'
           ? 'Mutual-fund NAVs update at scheduled publication checks.'
         : result.reason === 'disabled'
-          ? 'Enable external market data in Settings to refresh prices.'
+          ? 'Market data is paused. Reload this tab to continue.'
           : result.reason === 'cooldown'
             ? `Prices were recently refreshed. Try again in ${Math.ceil(result.retryInMs / 1000)} seconds.`
             : 'Prices could not be refreshed. Your previous observations remain available.')

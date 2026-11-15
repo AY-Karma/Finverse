@@ -1,4 +1,5 @@
 import { eligibleHoldings, matchedTickers, rssItems, type NewsItem } from './marketNews'
+import { fetchText } from './http'
 import { canonicalNewsUrl } from './monitorReading'
 import type { Position } from './types'
 
@@ -204,14 +205,7 @@ export function rankMarketBriefing(items: BriefingCandidate[], options: Briefing
   return scored.filter((story) => selected.has(story.id))
 }
 
-async function requestText(url: string, signal?: AbortSignal): Promise<string> {
-  const timeout = AbortSignal.timeout(12_000)
-  const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.text()
-}
-
-export function createMarketBriefingLoader(fetchText: TextFetcher = requestText) {
+export function createMarketBriefingLoader(requestText: TextFetcher = fetchText) {
   const cache = new Map<string, { at: number; items: BriefingCandidate[]; issues: string[] }>()
   return async ({ from, through, positions, ranking = 'app', cadence, signal, forceRefresh }: BriefingOptions & { signal?: AbortSignal; forceRefresh?: boolean }): Promise<BriefingResult> => {
     signal?.throwIfAborted()
@@ -232,7 +226,7 @@ export function createMarketBriefingLoader(fetchText: TextFetcher = requestText)
         const { topic } = request
         try {
           const params = new URLSearchParams({ source: 'briefing', ...request, v: String(MARKET_BRIEFING_VERSION) })
-          const text = await fetchText(`/api/news?${params}`, signal)
+          const text = await requestText(`/api/news?${params}`, signal)
           if (!/<rss(?:\s|>)/i.test(text)) throw new Error('Invalid news feed.')
           const bounds = periodBounds(request)!
           rssItems(text, 'Market news').forEach((item, providerRank) => {

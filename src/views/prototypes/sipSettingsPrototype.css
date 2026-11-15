@@ -15,7 +15,6 @@
 .sip-monthly > strong { font-size: 20px; font-weight: 550; white-space: nowrap; }
 .sip-monthly > strong > span { font-size: 14px; color: var(--ink-subtle); font-weight: 400; }
 .sip-monthly > span:last-child { margin-left: auto; }
-.sip-intro { color: var(--ink-subtle); font-size: 14px; margin: 16px 0 8px; max-width: 640px; }
 .sip-plan { padding: 20px 0; min-width: 0; }
 .sip-plan + .sip-plan, .sip-inline-fund + .sip-inline-fund { border-top: 1px solid var(--hairline-strong); }
 .sip-plan-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
@@ -82,7 +81,7 @@
 .sip-prototype :is(button,select,input,summary):focus-visible { outline: 2px solid var(--primary-focus); outline-offset: 3px; }
 .sip-money-input:focus-within { outline: 2px solid var(--primary-focus); outline-offset: 3px; }
 .sip-prototype .sip-money-input > input:focus-visible { outline: none; }
-.sip-prototype[data-variant='C'] .sip-inline-fund:has(> .sip-editor) { padding-bottom: 20px; }
+.sip-prototype .sip-inline-fund:has(> .sip-editor) { padding-bottom: 20px; }
 .sip-prototype :is(button, summary) { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .sip-prototype button:active:not(:disabled) { transform: scale(.98); }
 @media (hover: hover) and (pointer: fine) { .sip-actions > button:hover, .sip-icon:hover { color: var(--ink); background: var(--surface-3); } }

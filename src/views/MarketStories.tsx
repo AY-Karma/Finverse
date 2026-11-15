@@ -135,7 +135,7 @@ export function MarketStories({ today = holdingMoveToday(), editions: availableE
   const emptyMessage = privatePortfolio ? 'Turn off privacy masking to view portfolio stories.'
     : loading ? 'Gathering this edition.'
       : edition.id === 'portfolio' ? positions.length ? failed ? 'Try loading the missing prices again.' : 'Stories appear when the period has enough price history.' : 'Import your holdings to see your portfolio and monthly market highlights.'
-        : !settings.allowExternalData ? 'Enable external market data in Settings.'
+        : !settings.allowExternalData ? 'Market data is paused because this workspace changed in another tab. Reload to continue.'
           : failed ? 'Try loading this edition again.' : 'Stories appear when relevant coverage is available.'
   const headerDate = edition.from
   const featuredMetric = story?.kind === 'winners' || story?.kind === 'laggards' || story?.kind === 'market'
@@ -220,8 +220,7 @@ export function MarketStories({ today = holdingMoveToday(), editions: availableE
           {failed && <button className="story-action" type="button" onClick={retry}>Retry</button>}
         </div>
           : failed ? <button className="story-action" type="button" onClick={retry}>Retry</button>
-            : !settings.allowExternalData && positions.length > 0 ? <button className="story-action" type="button" onClick={() => onNavigate('settings')}>Open Settings <span aria-hidden="true">↗</span></button>
-              : edition.id === 'portfolio' && !positions.length ? <button className="story-action" type="button" onClick={() => onNavigate('overview')}>Open portfolio <span aria-hidden="true">↗</span></button> : null)}
+            : edition.id === 'portfolio' && !positions.length ? <button className="story-action" type="button" onClick={() => onNavigate('overview')}>Open portfolio <span aria-hidden="true">↗</span></button> : null)}
       </section>}
     </div>
   </dialog>

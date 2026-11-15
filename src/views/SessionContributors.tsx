@@ -33,7 +33,7 @@ export function SessionContributors({ snapshot, formatValue, compact = false }: 
   if (!reported.length) {
     return <div className="session-contributors-empty" role="status">
       <strong>Change amounts unavailable</strong>
-      <p>Refresh prices on Overview to see what moved your holdings. If external market data is off, enable it in Settings first.</p>
+      <p>Refresh prices on Overview to see what moved your holdings. If market data is paused, reload this tab first.</p>
     </div>
   }
 

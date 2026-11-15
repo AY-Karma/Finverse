@@ -4,11 +4,10 @@ import { instrumentLabel } from './instruments'
 import type { InvestmentSnapshot } from './investmentWorkspace'
 import { getMarketCalendarInfo, isRegularMarketOpen } from './marketCalendar'
 import type { MarketStory, MarketStoryRecap, StoryInsight } from './marketStories'
-import { formatCurrency, quoteKey } from './valuation'
+import { quoteKey, signedCurrency } from './valuation'
 
 const DAY = 86_400_000
 const tone = (value: number) => value > 0 ? 'positive' as const : value < 0 ? 'negative' as const : 'neutral' as const
-const signedCurrency = (value: number) => `${value > 0 ? '+' : ''}${formatCurrency(value)}`
 
 function priceMap(points: HoldingPriceHistories[string], through: string) {
   return new Map(points.filter((point) => {

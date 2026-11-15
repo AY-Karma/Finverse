@@ -168,7 +168,7 @@ it('lets saved balances remain available offline with the cash-flow explanation'
   const history = [100, 200].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: value, pnl: 0, holdingCount: index + 1 }))
   await renderPerformance([], { history, allowExternalData: false })
   expect(state.build).not.toHaveBeenCalled()
-  expect(container.textContent).toContain('External market data is off')
+  expect(container.textContent).toContain('Market data paused')
   await act(async () => button('Tracked').click())
   expect(container.querySelector('[data-chart]')?.getAttribute('data-latest')).toBe('200')
   expect(container.textContent).toContain('Balances include cash flows and account changes.')
@@ -220,7 +220,7 @@ it('cancels a pending history request when external data is disabled and clears 
   state.store.settings.allowExternalData = false
   await rerender()
   expect(signal.aborted).toBe(true)
-  expect(container.textContent).toContain('External market data is off')
+  expect(container.textContent).toContain('Market data paused')
   expect(container.textContent).not.toContain('Building')
 })
 
@@ -340,7 +340,7 @@ it('shows the exact peak, latest value and rupee drop behind the current drawdow
   state.store.settings.hideValues = true
   await act(async () => root!.render(<PortfolioPerformance />))
   expect(calculation.querySelectorAll('strong')).toHaveLength(3)
-  expect([...calculation.querySelectorAll('strong')].every((element) => element.textContent === '••••')).toBe(true)
+  expect([...calculation.querySelectorAll('strong')].every((element) => element.textContent === '••••••')).toBe(true)
   expect(calculation.innerHTML).not.toMatch(/₹|15000|13400|1600/)
   expect(calculation.querySelector('.risk-calculation-result--loss')).toBeNull()
 })
@@ -379,7 +379,7 @@ it('replaces duplicate risk cards with peak duration and exact eligible down-ses
   state.store.settings.hideValues = true
   await act(async () => root!.render(<PortfolioPerformance />))
   for (const card of [duration, sessions]) {
-    expect(card.querySelector('.risk-reading strong')?.textContent).toBe('••••')
+    expect(card.querySelector('.risk-reading strong')?.textContent).toBe('••••••')
     expect(card.innerHTML).not.toMatch(/2 of 4|50\.0%|22 Sept 2026|8 days/)
   }
   expect(sessions.querySelector('.risk-session-split')).toBeNull()

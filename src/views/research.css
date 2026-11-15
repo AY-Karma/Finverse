@@ -6,7 +6,6 @@
 .rd-context > span { display: inline-flex; align-items: center; gap: 7px; }
 .rd-context .rd-context-end { margin-left: auto; }
 .rd-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-subtle); }
-.rd-status-dot.is-on { background: var(--primary-hover); }
 .rd-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(110px, 150px) minmax(120px, 180px) minmax(110px, 150px); align-items: stretch; gap: 12px; }
 .rd-search { display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid var(--hairline-strong); background: var(--surface-1); border-radius: var(--r-md); }
 .rd-search svg { width: 18px; height: 18px; flex: none; color: var(--rd-muted); }

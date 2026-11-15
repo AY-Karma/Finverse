@@ -54,7 +54,7 @@ describe('workspace restore review', () => {
       Object.defineProperty(input, 'files', { value: [file] })
       await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
       expect(container.textContent).toContain('Legacy backup contains holdings only.')
-      expect(container.textContent).toContain('External market data will be off.')
+      expect(container.textContent).toContain('A recovery copy is kept for undo.')
       expect(restoreWorkspaceArchive).not.toHaveBeenCalled()
       const replace = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Replace workspace')!
       await act(async () => replace.click())

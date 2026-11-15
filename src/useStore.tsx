@@ -93,6 +93,22 @@ interface Store {
 
 const StoreContext = createContext<Store | null>(null)
 
+/** Stocks and ETFs with a confirmed provider symbol receive live quotes; funds follow the NAV schedule. */
+function hasLiveListing(position: Position): boolean {
+  return position.type !== 'mutual-fund' && resolveYahooSymbol(position) != null
+}
+
+/** A holding and every position merged into it, or the single position with that id. */
+function holdingMembers(folios: Folio[], holdingId: string): Position[] {
+  const positions = folios.flatMap((folio) => folio.positions)
+  return combinedPositionMembers(positions).get(holdingId) ?? positions.filter((position) => position.id === holdingId)
+}
+
+/** Earlier snapshots were valued under the previous instrument identity. */
+function legacyIdentityHistory() {
+  return loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+}
+
 function readPersistedFolios(): string | null | undefined {
   try { return localStorage.getItem('finverse:folios') } catch { return undefined }
 }
@@ -107,7 +123,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>(() => savedSettings.allowExternalData
     ? loadCachedQuotes(folios.flatMap((folio) => folio.positions)) : {})
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
-  const [marketDataRefreshing, setMarketDataRefreshing] = useState(savedSettings.allowExternalData && folios.some((folio) => folio.positions.length > 0))
+  const [marketDataRefreshing, setMarketDataRefreshing] = useState(() => savedSettings.allowExternalData && folios.some((folio) => folio.positions.some(hasLiveListing)))
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
   const [quoteLastCheckedAt, setQuoteLastCheckedAt] = useState<number | null>(null)
   const [quoteNextRefreshAt, setQuoteNextRefreshAt] = useState<number | null>(null)
@@ -300,20 +316,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const confirmFundScheme = useCallback(async (holdingId: string, candidate: FundSchemeCandidate) => {
     if (!settings.allowExternalData) throw new Error('Enable external market data before confirming a provider scheme.')
-    const before = foliosRef.current.flatMap((folio) => folio.positions)
-    const members = combinedPositionMembers(before).get(holdingId) ?? before.filter((position) => position.id === holdingId)
+    const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length || members.some((position) => position.type !== 'mutual-fund' || !canConfirmFundScheme(position.name || position.ticker, candidate))) throw new Error('Choose a scheme compatible with this fund, plan and option.')
     if (members.some((position) => !hasSupportedValuationCurrency(position))) throw new Error('MFAPI NAV and history support INR mutual-fund holdings only. Original native amounts are retained.')
     const ids = new Set(members.map((position) => position.id))
     const next = foliosRef.current.map((folio) => ({ ...folio, positions: folio.positions.map((position) => ids.has(position.id)
       ? normalizePosition({ ...position, mfScheme: { code: candidate.schemeCode, name: candidate.schemeName, source: 'confirmed' } }) : position) }))
-    const history = loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+    const history = legacyIdentityHistory()
     await persistPortfolioChange(next, history)
   }, [persistPortfolioChange, settings.allowExternalData])
 
   const confirmInstrument = useCallback(async (holdingId: string, correction: InstrumentCorrection) => {
-    const before = foliosRef.current.flatMap((folio) => folio.positions)
-    const members = combinedPositionMembers(before).get(holdingId) ?? before.filter((position) => position.id === holdingId)
+    const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length || members.some((position) => position.type === 'mutual-fund') || correction.type === 'mutual-fund') throw new Error('Choose a current equity or ETF listing to correct.')
     if (members.some((position) => !hasInrDenomination(position))) throw new Error('Import a corrected INR statement before reviewing this listing. Original unsupported amounts are retained.')
     const ids = new Set(members.map((position) => position.id))
@@ -323,20 +337,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (corrected.identityIssue && corrected.identityIssue !== BSE_PRICING_NOTICE) throw new Error(corrected.identityIssue)
       return corrected
     }) }))
-    const history = loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+    const history = legacyIdentityHistory()
     await persistPortfolioChange(next, history)
   }, [persistPortfolioChange])
 
   const confirmNsePricing = useCallback(async (holdingId: string, candidate: NsePricingCandidate) => {
     if (!settings.allowExternalData) throw new Error('Enable external market data before approving NSE pricing.')
-    const before = foliosRef.current.flatMap((folio) => folio.positions)
-    const members = combinedPositionMembers(before).get(holdingId) ?? before.filter((position) => position.id === holdingId)
+    const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length) throw new Error('This holding is no longer available. Reload and try again.')
     if (members.some((position) => !hasSupportedValuationCurrency(position))) throw new Error('NSE pricing supports INR holdings only.')
     const ids = new Set(members.map((position) => position.id))
     const next = foliosRef.current.map((folio) => ({ ...folio, positions: folio.positions.map((position) =>
       ids.has(position.id) ? applyNsePricing(position, candidate) : position) }))
-    const history = loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+    const history = legacyIdentityHistory()
     await persistPortfolioChange(next, history)
   }, [persistPortfolioChange, settings.allowExternalData])
 
@@ -451,7 +464,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     slot.current = controller
     activeRefreshControllers.current.add(controller)
-    const ownsIndicator = group === 'equity' || !positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
+    const ownsIndicator = group === 'equity' || !positionsRef.current.some(hasLiveListing)
     if (ownsIndicator) setMarketDataRefreshing(true)
     if (group === 'equity') setQuoteNextRefreshAt(null)
     const apply = (result: LiveQuotesResult) => {
@@ -497,7 +510,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ok: false, reason: 'disabled', retryInMs: 0 }
     }
     if (!settings.allowExternalData || positionsRef.current.length === 0) return { ok: false, reason: 'disabled', retryInMs: 0 }
-    const hasEquities = positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
+    const hasEquities = positionsRef.current.some(hasLiveListing)
     if (!hasEquities) return { ok: false, reason: positionsRef.current.every((position) => position.type === 'mutual-fund') ? 'scheduled-nav' : 'no-live-listings', retryInMs: 0 }
     const slot = activeQuoteController
     if (slot.current && !slot.current.signal.aborted) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
@@ -526,14 +539,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setQuoteLastCheckedAt(null)
       loadedQuoteKey.current = null
     }
-    if (!positionsRef.current.some((position) => position.type === 'mutual-fund' || resolveYahooSymbol(position))) {
+    if (!positionsRef.current.some(hasLiveListing) && !activeNavController.current) {
       setMarketDataRefreshing(false)
       setQuoteNextRefreshAt(null)
     }
   }, [folioRefreshKey, settings.allowExternalData, positions.length])
 
   useEffect(() => {
-    if (!settings.allowExternalData || !positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))) return
+    if (!settings.allowExternalData || !positionsRef.current.some(hasLiveListing)) return
     let open = isMarketOpen()
     let closeRefreshPending = false
     let active = true

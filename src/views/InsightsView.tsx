@@ -1,5 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { formatCurrency, formatPercent } from '../valuation'
+import { formatCurrency, formatPercent, signedCurrency, signedPercent, signedPoints } from '../valuation'
+import { privateValue } from '../privacy'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
 import { useStore } from '../useStore'
@@ -112,7 +113,9 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   })
 
   const contributionColumns = useMemo(() => buildContributionColumns(snapshot.contributions.map((item) => ({
+    id: item.id,
     label: item.symbol.length > 14 ? `${item.symbol.slice(0, 13)}…` : item.symbol,
+    name: item.symbol,
     dailyPriceChange: item.dailyPriceChange,
     dailyPriceChangePct: item.dailyPriceChangePct,
   })), contributionDisplay), [contributionDisplay, snapshot.contributions])
@@ -214,15 +217,15 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   }
 
   const hide = settings.hideValues
-  const mask = (value: string) => hide ? '••••••' : value
+  const mask = (value: string) => privateValue(value, hide)
   const value = (amount: number) => mask(formatCurrency(amount))
   const hasDailyData = contributionColumns.tailwinds.length > 0 || contributionColumns.headwinds.length > 0
   const comparisonLoading = settings.allowExternalData && (benchmarkLoading || backcastLoading)
   const comparisonTitle = selectedBenchmark.unavailableReason ?? (!settings.allowExternalData
-    ? 'External market data is off'
+    ? 'Market data paused'
     : comparisonLoading ? 'Building your comparison' : 'Historical comparison unavailable')
   const comparisonDescription = selectedBenchmark.unavailableReason ? 'Choose another benchmark to start a comparison.'
-    : !settings.allowExternalData ? 'Enable it in Settings to compare your portfolio with market benchmarks.'
+    : !settings.allowExternalData ? 'Market data is paused because this workspace changed in another tab. Reload to continue.'
       : comparisonLoading ? 'Loading historical closes for your holdings and the selected benchmark.'
         : trackedAvailable ? 'Tracked balances include account changes and cash flows. Investment returns need historical prices or dated transactions.'
           : 'Historical closes could not be loaded for this comparison.'
@@ -250,7 +253,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
 
   return (
     <div className="insights-page">
-      <div className="page-head insights-heading enter d0">
+      <div className="page-head insights-heading enter">
         <div>
           <h1 className="page-title">Insights</h1>
         </div>
@@ -269,7 +272,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <button type="button" id="session-kpi" className={`insights-summary-session${sessionExpanded ? ' is-open' : ''}`} onClick={() => setSessionExpanded((open) => !open)} aria-expanded={sessionExpanded} aria-controls="session-detail">
             <span className="insights-summary-session-label"><span>Session move</span><i className="insights-summary-chevron" aria-hidden="true" /></span>
             <span className="insights-summary-reading">
-              <strong className={sessionDirection}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : `${dataLabels.sessionValue >= 0 ? '+' : ''}${formatCurrency(dataLabels.sessionValue)}`)}</strong>
+              <strong className={sessionDirection}>{mask(dataLabels.sessionValue == null ? 'Unavailable' : signedCurrency(dataLabels.sessionValue))}</strong>
               <span className={`hint${snapshot.dailyChangePct != null && sessionDirection ? ` ${sessionDirection}` : ''}`}>{hide ? 'Values hidden' : snapshot.dailyChangePct != null ? formatPercent(snapshot.dailyChangePct) : dataLabels.sessionValue == null ? 'Awaiting updates' : 'Reported change'}</span>
             </span>
           </button>
@@ -280,7 +283,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <div className="insights-summary-pnl">
             <span className="score-label">{snapshot.valuationComplete ? 'Unrealized P&L' : 'Priced holdings P&L'}</span>
             <div className="insights-summary-reading">
-              <strong className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(`${summaryPnlUp ? '+' : ''}${formatCurrency(snapshot.pnl)}`) : 'Unpriced'}</strong>
+              <strong className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(signedCurrency(snapshot.pnl)) : 'Unpriced'}</strong>
               <small className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(formatPercent(snapshot.pnlPct)) : 'Unavailable'}{!snapshot.valuationComplete && <span> on priced cost</span>}</small>
             </div>
           </div>
@@ -332,17 +335,17 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           {benchmarkSeries.length >= 2 && <div className="insight-chart-readout">
             <div className="insight-chart-metric insight-chart-metric--portfolio">
               <span><i aria-hidden="true" />Portfolio</span>
-              <strong>{benchmarkLatest ? mask(`${benchmarkLatest.portfolio >= 0 ? '+' : ''}${benchmarkLatest.portfolio.toFixed(1)}%`) : '—'}</strong>
+              <strong>{benchmarkLatest ? mask(signedPercent(benchmarkLatest.portfolio, 1)) : '—'}</strong>
               <small>{benchmarkThrough ? `Compared through ${benchmarkThrough}` : 'Current holdings since comparison start'}</small>
             </div>
             <div className="insight-chart-metric insight-chart-metric--benchmark">
               <span><i aria-hidden="true" />{selectedBenchmark.label}</span>
-              <strong>{benchmarkLatest?.benchmark == null ? '—' : mask(`${benchmarkLatest.benchmark >= 0 ? '+' : ''}${benchmarkLatest.benchmark.toFixed(1)}%`)}</strong>
+              <strong>{benchmarkLatest?.benchmark == null ? '—' : mask(signedPercent(benchmarkLatest.benchmark, 1))}</strong>
               <small>Matching observation dates</small>
             </div>
             <div className="insight-chart-metric insight-chart-metric--gap">
               <span>Return gap</span>
-              <strong className={hide || benchmarkGap == null ? '' : benchmarkGap >= 0 ? 'up' : 'down'}>{benchmarkGap == null ? '—' : mask(`${benchmarkGap >= 0 ? '+' : ''}${benchmarkGap.toFixed(1)} pts`)}</strong>
+              <strong className={hide || benchmarkGap == null ? '' : benchmarkGap >= 0 ? 'up' : 'down'}>{benchmarkGap == null ? '—' : mask(signedPoints(benchmarkGap))}</strong>
               <small>{hide ? 'Comparison hidden' : benchmarkGap == null ? 'Waiting for benchmark' : benchmarkGap >= 0 ? 'Portfolio leads' : `${selectedBenchmark.label} leads`}</small>
             </div>
           </div>}
@@ -352,8 +355,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
                 key={benchmarkId}
                 rows={benchmarkSeries.map((item) => ({ at: item.ts, portfolio: item.portfolio, benchmark: item.benchmark }))}
                 lines={[{ key: 'portfolio', label: 'Portfolio', color: 'var(--chart-portfolio)' }, { key: 'benchmark', label: selectedBenchmark.label, color: 'var(--chart-benchmark)', connectGaps: true }]}
-                valueFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)}%`)}
-                differenceFormatter={(amount) => mask(`${amount >= 0 ? '+' : ''}${amount.toFixed(1)} pts`)}
+                valueFormatter={(amount) => mask(signedPercent(amount, 1))}
+                differenceFormatter={(amount) => mask(signedPoints(amount))}
                 differenceLabel="Return gap"
                 yAxisLabel="Return (%)"
                 includeZero
@@ -362,13 +365,13 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
               />
             ) : <div className="chart-empty chart-empty--tracking"><ComparisonBuilding loading={comparisonLoading} /><strong>{comparisonTitle}</strong><span>{comparisonDescription}</span></div>}
           </div>
-          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (!settings.allowExternalData ? 'External market data is off' : comparisonLoading ? 'Building the historical comparison…' : benchmarkError || backcastError ? <>{benchmarkError ? `Could not load ${selectedBenchmark.label} history.` : 'Historical portfolio prices are unavailable.'} <button type="button" className="benchmark-retry" onClick={retryComparison}>Retry</button></> : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
+          <span className="hint insight-chart-footnote">{selectedBenchmark.unavailableReason ?? (!settings.allowExternalData ? 'Market data paused' : comparisonLoading ? 'Building the historical comparison…' : benchmarkError || backcastError ? <>{benchmarkError ? `Could not load ${selectedBenchmark.label} history.` : 'Historical portfolio prices are unavailable.'} <button type="button" className="benchmark-retry" onClick={retryComparison}>Retry</button></> : backcastHistory.length >= 2 && backcast ? `Current-holdings backcast · ${mask(`${backcast.coveragePct.toFixed(0)}%`)} priced INR value coverage · shared dates` : 'Historical market data is unavailable')}</span>
           </>}
           </div>
         </section>
 
         <section className="panel insight-panel insight-panel--allocation">
-          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span><span className="section-index"></span></div></div>
+          <div className="panel-head"><div className="panel-head-titles"><span className="panel-title">Allocation treemap</span></div></div>
           <AllocationMap items={exposure} unmapped={unmappedExposure} formatValue={value} highlight={exposureHighlight} hideValues={hide} />
         </section>
 
@@ -386,7 +389,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
         <section className="panel insight-panel insight-panel--wide">
           <div className="panel-head market-contribution-head"><div className="panel-head-titles"><span className="panel-title">{appliedRange === 'today' ? 'Latest price movers' : 'Market contribution'}</span><span className="section-index">{appliedRange === 'today' ? 'Holding price changes' : 'Current holdings at market prices'}</span></div>{appliedRange === 'today' && <div className="segmented-control" aria-label="Mover display"><button type="button" className={contributionDisplay === 'price' ? 'is-active' : ''} onClick={() => setContributionDisplay('price')} aria-pressed={contributionDisplay === 'price'}>Price Δ</button><button type="button" className={contributionDisplay === 'percent' ? 'is-active' : ''} onClick={() => setContributionDisplay('percent')} aria-pressed={contributionDisplay === 'percent'}>% Δ</button></div>}<div className="performance-controls contribution-period-control"><label><span className="sr-only">Period</span><select aria-label="Return contribution period" value={contributionRange} onChange={(event) => selectContributionRange(event.target.value as ContributionRange)}><option value="today">Today</option><option value="month">This month</option><option value="year">This year</option><option value="custom">Custom</option></select></label>{contributionRange === 'custom' && <label className="contribution-date-control"><span>From</span><input type="date" aria-label="Contribution start date" min="1900-01-01" max={today} value={customFrom} onChange={(event) => changeCustomStart(event.target.value)} /></label>}</div></div>
           {!hide && appliedRange === 'today' && <p className="hint">{dataLabels.sessionLabel} · {dataLabels.coverageLabel}. Bars show each holding's price change.</p>}
-          {hide ? <HiddenValuesState /> : appliedRange !== 'today' ? <HoldingMarketMoves positions={snapshot.positions} quotes={snapshot.quotes} range={appliedRange} customFrom={appliedContribution.from} allowExternalData={settings.allowExternalData} /> : hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty contributor-empty">{settings.allowExternalData ? 'No price changes reported for this measure. Refresh quotes to try again.' : 'Enable external market data in Settings to see holding-level price changes.'}</div>}
+          {hide ? <HiddenValuesState /> : appliedRange !== 'today' ? <HoldingMarketMoves positions={snapshot.positions} quotes={snapshot.quotes} range={appliedRange} customFrom={appliedContribution.from} allowExternalData={settings.allowExternalData} /> : hasDailyData ? <div className="contribution-columns"><ContributionBars title="Tailwinds" data={contributionColumns.tailwinds} positive display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /><ContributionBars title="Headwinds" data={contributionColumns.headwinds} display={contributionDisplay} formatValue={value} formatPercent={(amount) => mask(formatPercent(amount))} /></div> : <div className="chart-empty contributor-empty">{settings.allowExternalData ? 'No price changes reported for this measure. Refresh quotes to try again.' : 'Market data is paused because this workspace changed in another tab. Reload to continue.'}</div>}
         </section>
 
         <PortfolioAllocationMix />
@@ -528,7 +531,7 @@ function ContributionBars({
   formatPercent,
 }: {
   title: string
-  data: { label: string; width: number; metric: number }[]
+  data: { id: string; label: string; name: string; width: number; metric: number }[]
   positive?: boolean
   display: 'price' | 'percent'
   formatValue: (amount: number) => string
@@ -536,8 +539,8 @@ function ContributionBars({
 }) {
   return <div className="contribution-chart"><div className="contribution-title">{title}</div><div className="contribution-bars">{data.length === 0 && <span className="hint">No reported {positive ? 'gains' : 'declines'}.</span>}{data.map((item) => {
     const displayValue = display === 'percent' ? formatPercent(item.metric) : formatValue(item.metric)
-    return <div className="contribution-row" key={item.label} tabIndex={0} role="img" aria-label={`${item.label}: ${displayValue}`}>
-      <div><span title={item.label}>{item.label}</span><strong className={positive ? 'up' : 'down'}>{displayValue}</strong></div>
+    return <div className="contribution-row" key={item.id} tabIndex={0} role="img" aria-label={`${item.name}: ${displayValue}`}>
+      <div><span title={item.name}>{item.label}</span><strong className={positive ? 'up' : 'down'}>{displayValue}</strong></div>
       <DitherBar className="contribution-track" segments={[{ value: item.width, color: positive ? 'green' : 'red' }]} scale={100} />
     </div>
   })}</div></div>

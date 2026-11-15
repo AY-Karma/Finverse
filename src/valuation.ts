@@ -313,3 +313,20 @@ export function formatCurrency(amount: number): string {
 export function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : MINUS_SIGN}${Math.abs(value).toFixed(2)}%`
 }
+
+/** Zero is neither a gain nor a loss, so only positive values carry a plus sign. */
+export function plusSign(value: number): string {
+  return value > 0 ? '+' : ''
+}
+
+export function signedCurrency(value: number): string {
+  return `${plusSign(value)}${formatCurrency(value)}`
+}
+
+export function signedPercent(value: number, digits = 2): string {
+  return `${plusSign(value)}${value.toFixed(digits)}%`
+}
+
+export function signedPoints(value: number, digits = 1): string {
+  return `${plusSign(value)}${value.toFixed(digits)} pts`
+}

@@ -96,7 +96,7 @@ it('gives quote and settings guidance when no change amounts are reported', asyn
   await render(snapshotFor([{ symbol: 'MISSING' }]))
   expect(container.querySelector('[role="status"]')?.textContent).toContain('Change amounts unavailable')
   expect(container.textContent).toContain('Refresh prices on Overview')
-  expect(container.textContent).toContain('enable it in Settings')
+  expect(container.textContent).toContain('reload this tab')
   expect(container.querySelector('.session-contributors-total')).toBeNull()
 })
 

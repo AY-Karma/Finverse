@@ -158,7 +158,7 @@ export function FundSchemeReviewContent({ funds, settings, confirmFundScheme, em
   const candidate = review?.candidates.find((item) => String(item.schemeCode) === code)
   const content = <div className="fund-scheme-content">
     <p className="hint">Unconfirmed funds keep their imported values. Confirm the fund, Direct or Regular plan, and Growth or IDCW option before fetching NAV or history.</p>
-    {!settings.allowExternalData && <p className="hint">Enable external market data in Settings to search scheme names. No search is sent while it is off.</p>}
+    {!settings.allowExternalData && <p className="hint">Market data is paused because this workspace changed in another tab. Reload to continue. No search is sent meanwhile.</p>}
     <div className="import-actions">
       <button type="button" className="btn btn--primary btn--small" disabled={busy || !settings.allowExternalData || !funds.some((fund) => !fund.mfScheme && supportsFundNav(fund))} onClick={() => void approveAll()}>{approvingAll ? 'Approving schemes…' : 'Auto-approve schemes'}</button>
       <span className="hint">Exact fund, plan and option matches only.</span>

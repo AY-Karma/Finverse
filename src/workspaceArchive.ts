@@ -296,7 +296,7 @@ export function parseWorkspaceArchive(content: string): WorkspaceArchivePreview 
   const warnings = validateReferences(archive)
   if (migrated) warnings.unshift('Older instrument identities have been migrated. Unverified listings need review; recorded balances are preserved and flagged, not recalculated.')
   if (legacy) warnings.unshift('This legacy backup restores holdings only. It contains no tracked balances, preferences, watch rules, reminders or alert history; those cannot be recovered from this file.')
-  warnings.push('Restoring replaces the whole workspace. External market data stays off until you enable it again.')
+  warnings.push('Restoring replaces the whole workspace.')
   return { archive, legacy, warnings }
 }
 

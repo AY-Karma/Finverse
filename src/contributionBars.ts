@@ -1,7 +1,9 @@
 export type ContributionDisplay = 'price' | 'percent'
 
 interface ContributionBarInput {
+  id: string
   label: string
+  name: string
   dailyPriceChange: number | null
   dailyPriceChangePct: number | null
 }

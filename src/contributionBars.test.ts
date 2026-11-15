@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { buildContributionColumns } from './contributionBars'
 
 const rows = [
-  { label: 'KRONOX', dailyPriceChange: 3.46, dailyPriceChangePct: 1.1 },
-  { label: 'TMCV', dailyPriceChange: 6.65, dailyPriceChangePct: 0.5 },
-  { label: 'KRN', dailyPriceChange: -20.9, dailyPriceChangePct: -2.2 },
-  { label: 'WAREEENER', dailyPriceChange: -30.1, dailyPriceChangePct: -1.3 },
+  { id: 'kronox', label: 'KRONOX', name: 'KRONOX', dailyPriceChange: 3.46, dailyPriceChangePct: 1.1 },
+  { id: 'tmcv', label: 'TMCV', name: 'TMCV', dailyPriceChange: 6.65, dailyPriceChangePct: 0.5 },
+  { id: 'krn', label: 'KRN', name: 'KRN', dailyPriceChange: -20.9, dailyPriceChangePct: -2.2 },
+  { id: 'wareeener', label: 'WAREEENER', name: 'WAREEENER', dailyPriceChange: -30.1, dailyPriceChangePct: -1.3 },
 ]
 
 describe('buildContributionColumns', () => {

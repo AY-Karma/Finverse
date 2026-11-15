@@ -1,5 +1,5 @@
 import type { LiveQuote, Position } from './types'
-import { hasSupportedValuationCurrency, quoteKey } from './valuation'
+import { hasSupportedValuationCurrency, quoteKey, signedPercent } from './valuation'
 import { workspaceWritesBlocked } from './workspaceStorage'
 import { parseMonitorReadingState, type MonitorReadingState } from './monitorReading'
 import { isIpoDate, isIpoSourceUrl } from './ipoProtocol'
@@ -164,7 +164,7 @@ function label(position: Position): string { return position.name || position.ti
 function quoteMetrics(position: Position, quote: LiveQuote): MonitorMetric[] {
   const metrics: MonitorMetric[] = [{ label: quote.source === 'nav' ? 'Published NAV' : 'Latest price', value: amount(quote.price, position) }]
   const changePct = quote.changePct
-  if (finite(changePct)) metrics.push({ label: 'Day move', value: `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`, trend: changePct > 0 ? 'up' : changePct < 0 ? 'down' : 'neutral' })
+  if (finite(changePct)) metrics.push({ label: 'Day move', value: signedPercent(changePct), trend: changePct > 0 ? 'up' : changePct < 0 ? 'down' : 'neutral' })
   return metrics
 }
 
@@ -258,7 +258,7 @@ export function evaluateMonitorRules(state: MonitorState, positions: Position[],
     const level = rule.condition === 'daily_move' ? `${rule.threshold}%` : amount(rule.threshold, position)
     const changePct = quote.changePct
     const hasMove = finite(changePct)
-    const move = hasMove ? `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%` : ''
+    const move = hasMove ? signedPercent(changePct) : ''
     const title = rule.condition === 'daily_move' && hasMove
       ? `Daily move ${changePct > 0 ? 'up' : 'down'} ${Math.abs(changePct).toFixed(2)}%`
       : condition

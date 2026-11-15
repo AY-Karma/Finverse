@@ -8,7 +8,7 @@ import {
   fetchLiveQuotes,
   fetchHistory,
   fetchNavHistory,
-  fetchYahooPrice,
+  fetchYahooPrices,
   isMarketOpen,
   quoteRefreshIssueText,
   type LiveQuotesResult,
@@ -461,14 +461,14 @@ describe('market data client', () => {
     )
     vi.stubGlobal('fetch', fetcher)
 
-    await expect(fetchYahooPrice('RELIANCE.NS')).resolves.toEqual({
+    await expect(fetchYahooPrices(['RELIANCE.NS'])).resolves.toEqual(new Map([['RELIANCE.NS', {
       price: 1309.8,
       change: -6.2,
       pct: -0.47,
       at: Date.parse(marketTime),
       fetchedAt: Date.parse('2026-08-25T06:00:00.000Z'),
       source: 'yahoo',
-    })
+    }]]))
     expect(fetcher).toHaveBeenCalledWith(
       '/api/quotes?symbols=RELIANCE.NS',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
