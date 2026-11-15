@@ -40,12 +40,10 @@ export function createRequestBudget(now: () => number = Date.now) {
       windowStart = timestamp
       requests = 0
     }
-    requests += 1
     const reject = () => new Response(JSON.stringify({ error: 'Request budget exceeded. Try again shortly.' }), {
       status: 429,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '60' },
     })
-    if (requests > MAX_REQUESTS_PER_WINDOW) return reject()
     for (const [storedKey, entry] of cache) {
       if (entry.expiresAt <= timestamp) remove(storedKey)
     }
@@ -54,6 +52,8 @@ export function createRequestBudget(now: () => number = Date.now) {
     const existing = pending.get(key)
     if (existing) return restore(await existing)
     if (pending.size >= MAX_ACTIVE) return reject()
+    // Only provider calls spend the budget; cached and shared in-flight responses are free.
+    if (++requests > MAX_REQUESTS_PER_WINDOW) return reject()
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(new DOMException('Request deadline exceeded.', 'TimeoutError')), 9_000)
