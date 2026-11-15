@@ -4,14 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode sip-prototype --host 127.0.0.1 --port 5173 --strictPort",
     "dev:monitor": "vite --host 127.0.0.1 --port 5190 --open \"/app/monitor\"",
+    "prototype:sip": "npm run dev",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
+    "@radix-ui/react-select": "^2.4.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

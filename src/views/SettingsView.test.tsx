@@ -9,10 +9,17 @@ import { SettingsView } from './SettingsView'
 const state = vi.hoisted(() => ({ settings: {} as Settings, setSettings: vi.fn(), folios: [] as Folio[], positions: [] as Position[], removeFolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null, exportPortfolio: vi.fn() }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+const scrollDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+const captureDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'hasPointerCapture')
 let container: HTMLDivElement
 let root: ReturnType<typeof createRoot>
+const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
 
 beforeEach(() => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: vi.fn() })
+  Object.defineProperty(HTMLElement.prototype, 'hasPointerCapture', { configurable: true, value: () => false })
   window.history.replaceState({}, '', '/app/settings')
   state.folios = []
   state.positions = []
@@ -23,42 +30,56 @@ beforeEach(() => {
   root = createRoot(container)
 })
 
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
+afterEach(async () => {
+  await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  if (scrollDescriptor) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', scrollDescriptor)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+  if (captureDescriptor) Object.defineProperty(HTMLElement.prototype, 'hasPointerCapture', captureDescriptor)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'hasPointerCapture')
+})
 
 describe('workspace settings', () => {
-  it('selects and swaps market index slots with benchmark-style keyboard and dismissal behavior', async () => {
+  it('selects and swaps grouped market index slots with shared keyboard and dismissal behavior', async () => {
     const render = () => act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     await render()
-    const menus = [...container.querySelectorAll<HTMLDetailsElement>('.settings-index-menu')]
-    expect(menus).toHaveLength(2)
-    expect(menus[0].closest('[aria-label="Preferences"]')).not.toBeNull()
-    expect([...menus[0].querySelectorAll('.benchmark-menu-group > span')].map((node) => node.textContent)).toEqual(['India', 'Global'])
-    const firstTrigger = menus[0].querySelector('summary')!
-    await act(async () => firstTrigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
-    expect(menus[0].open).toBe(true)
-    expect(document.activeElement).toBe(menus[0].querySelector('.is-selected'))
+    const triggers = [...container.querySelectorAll<HTMLButtonElement>('.settings-index-control .select-control-trigger')]
+    expect(triggers).toHaveLength(2)
+    expect(triggers[0].closest('[aria-label="Preferences"]')).not.toBeNull()
+    const firstTrigger = triggers[0]
+    expect(firstTrigger.getAttribute('aria-label')).toBe('First market index NIFTY Bank')
+    await act(async () => { firstTrigger.focus(); firstTrigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    await settle()
+    expect(firstTrigger.getAttribute('aria-expanded')).toBe('true')
+    expect([...document.querySelectorAll('.select-control-group-label')].map((node) => node.textContent)).toEqual(['India', 'Global'])
+    expect(document.activeElement?.getAttribute('aria-selected')).toBe('true')
     await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })))
+    await settle()
     expect(document.activeElement?.textContent).toBe('CAC 40')
-    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-    expect(menus[0].open).toBe(false)
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(firstTrigger.getAttribute('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(firstTrigger)
     await act(async () => firstTrigger.click())
-    const choose = (menu: HTMLDetailsElement, label: string) => act(async () => [...menu.querySelectorAll<HTMLButtonElement>('.benchmark-menu-group button')].find((button) => button.querySelector('span')?.textContent === label)!.click())
-    await choose(menus[0], 'S&P 500')
+    const choose = async (label: string) => {
+      await settle()
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent === label)!
+      await act(async () => { option.focus(); option.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+    }
+    await choose('S&P 500')
     expect(state.setSettings.mock.lastCall![0].marketIndices).toEqual(['sp-500', 'nifty-50'])
-    expect(menus[0].open).toBe(false)
+    expect(firstTrigger.getAttribute('aria-expanded')).toBe('false')
     state.settings = state.setSettings.mock.lastCall![0]
     await render()
-    await act(async () => menus[1].querySelector('summary')!.click())
-    await choose(menus[1], 'S&P 500')
+    await act(async () => triggers[1].click())
+    await choose('S&P 500')
     expect(state.setSettings.mock.lastCall![0].marketIndices).toEqual(['nifty-50', 'sp-500'])
     state.settings = state.setSettings.mock.lastCall![0]
     await render()
-    expect(menus[0].querySelector('summary')?.textContent).toBe('NIFTY 50')
-    expect(menus[1].querySelector('summary')?.textContent).toBe('S&P 500')
-    await act(async () => menus[0].querySelector('summary')!.click())
-    await act(async () => document.body.click())
-    expect(menus[0].open).toBe(false)
+    expect(firstTrigger.textContent).toBe('NIFTY 50')
+    expect(triggers[1].textContent).toBe('S&P 500')
+    await act(async () => firstTrigger.click())
+    await settle()
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); document.body.click() })
+    expect(firstTrigger.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('opens marker help in the imported folio card and dismisses it with Escape or an outside click', async () => {

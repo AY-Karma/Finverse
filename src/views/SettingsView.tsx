@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Mode } from '../types'
 import { MARKET_INDEX_CHOICES, normalizeMarketIndexIds } from '../marketIndexSelection'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
 import { ActionIcon, type ActionIconName } from './ActionIcon'
+import { SelectControl } from './SelectControl'
 import './settings.css'
+
+const marketIndexOptions = MARKET_INDEX_CHOICES.map((index) => ({ value: index.id, label: index.label, group: index.region }))
 
 export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?: string) => void }) {
   const { positions, settings, setSettings, settingsSaved = true } = useStore()
@@ -40,7 +43,7 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
   }
 
   return (
-    <>
+    <div className="settings-layout">
       <div className="page-head settings-page-head">
         <div>
           <h1 className="page-title">Settings</h1>
@@ -94,7 +97,7 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
           </div>
         </section>
       </div>
-    </>
+    </div>
   )
 }
 
@@ -128,98 +131,15 @@ function SettingRow({ label, description, children, className = '' }: {
 }
 
 function MarketIndexPreference({ label, value, onChange }: { label: string; value: string; onChange: (id: string) => void }) {
-  const menu = useRef<HTMLDetailsElement>(null)
-  const selected = MARKET_INDEX_CHOICES.find((index) => index.id === value)!
-  const close = (restoreFocus = false) => {
-    if (!menu.current?.open) return
-    menu.current.open = false
-    if (restoreFocus) menu.current.querySelector('summary')?.focus({ preventScroll: true })
-  }
-  const fit = () => {
-    const detail = menu.current
-    if (!detail?.open) return
-    const popover = detail.querySelector<HTMLElement>('.benchmark-menu-popover')!
-    const box = detail.getBoundingClientRect()
-    const viewport = window.visualViewport
-    const top = viewport?.offsetTop ?? 0
-    const left = viewport?.offsetLeft ?? 0
-    const height = viewport?.height ?? window.innerHeight
-    const viewportWidth = viewport?.width ?? window.innerWidth
-    const navigation = document.querySelector('.sidebar')?.getBoundingClientRect()
-    const visibleTop = navigation && navigation.width >= viewportWidth - 1 && navigation.top <= top
-      ? Math.max(top, navigation.bottom) : top
-    const width = Math.min(280, viewportWidth - 32)
-    const below = Math.max(0, top + height - box.bottom - 24)
-    const above = Math.max(0, box.top - visibleTop - 24)
-    const upwards = below < 240 && above > below
-    popover.style.width = `${width}px`
-    popover.style.left = `${Math.min(Math.max(left + 16, box.right - width), left + viewportWidth - width - 16) - box.left}px`
-    popover.style.right = 'auto'
-    popover.style.top = upwards ? 'auto' : 'calc(100% + 8px)'
-    popover.style.bottom = upwards ? 'calc(100% + 8px)' : 'auto'
-    popover.style.maxHeight = `${Math.min(420, upwards ? above : below)}px`
-  }
-  useEffect(() => {
-    const detail = menu.current
-    const dismiss = (event: MouseEvent) => { if (event.target instanceof Node && !detail?.contains(event.target)) close() }
-    const escape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && detail?.open) { event.preventDefault(); close(true) }
-    }
-    detail?.addEventListener('toggle', fit)
-    document.addEventListener('click', dismiss)
-    document.addEventListener('keydown', escape)
-    window.addEventListener('resize', fit)
-    window.addEventListener('scroll', fit, true)
-    window.visualViewport?.addEventListener('resize', fit)
-    window.visualViewport?.addEventListener('scroll', fit)
-    return () => {
-      detail?.removeEventListener('toggle', fit)
-      document.removeEventListener('click', dismiss)
-      document.removeEventListener('keydown', escape)
-      window.removeEventListener('resize', fit)
-      window.removeEventListener('scroll', fit, true)
-      window.visualViewport?.removeEventListener('resize', fit)
-      window.visualViewport?.removeEventListener('scroll', fit)
-    }
-  }, [])
-  const keyboard = (event: KeyboardEvent<HTMLDetailsElement>) => {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-    event.preventDefault()
-    const detail = menu.current!
-    const options = [...detail.querySelectorAll<HTMLButtonElement>('.benchmark-menu-group button')]
-    const current = options.indexOf(document.activeElement as HTMLButtonElement)
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
-      : current < 0 ? MARKET_INDEX_CHOICES.findIndex((index) => index.id === value)
-        : (current + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length
-    detail.open = true
-    fit()
-    const option = options[next]
-    option.focus({ preventScroll: true })
-    const popover = detail.querySelector<HTMLElement>('.benchmark-menu-popover')!
-    if (option.offsetTop < popover.scrollTop) popover.scrollTop = option.offsetTop
-    else if (option.offsetTop + option.offsetHeight > popover.scrollTop + popover.clientHeight) popover.scrollTop = option.offsetTop + option.offsetHeight - popover.clientHeight
-  }
-  return <details ref={menu} className="benchmark-menu settings-index-menu" onKeyDown={keyboard} onBlur={(event) => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) close() }}>
-    <summary aria-label={`${label}: ${selected.label}`} title={selected.label}><strong>{selected.label}</strong><i aria-hidden="true" /></summary>
-    <div className="benchmark-menu-popover">
-      {(['India', 'Global'] as const).map((region) => <div className="benchmark-menu-group" key={region}>
-        <span>{region}</span>
-        {MARKET_INDEX_CHOICES.filter((index) => index.region === region).map((index) => <button key={index.id} type="button" className={index.id === value ? 'is-selected' : undefined} aria-current={index.id === value ? 'true' : undefined} onClick={() => { onChange(index.id); close(true) }}>
-          <span>{index.label}</span><small>{index.id === value ? 'Selected' : ''}</small>
-        </button>)}
-      </div>)}
-    </div>
-  </details>
+  return <div className="settings-index-control"><SelectControl label={label} value={value} options={marketIndexOptions} onChange={onChange} /></div>
 }
 
 function DataHandlingCard({ icon, label, destination, children }: { icon: ActionIconName; label: string; destination: string; children: ReactNode }) {
   return (
     <article className="data-handling-card">
-      <div className="data-handling-card-head">
-        <span className="data-handling-icon"><ActionIcon name={icon} /></span>
-        <span className="data-destination">{destination}</span>
-      </div>
+      <span className="data-handling-icon"><ActionIcon name={icon} /></span>
       <div className="setting-copy"><h4>{label}</h4><p>{children}</p></div>
+      <span className="data-destination">{destination}</span>
     </article>
   )
 }

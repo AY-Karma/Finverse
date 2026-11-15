@@ -32,6 +32,61 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('keeps the SIP accordion open across outside and repeated option clicks until its summary closes it', async () => {
+    const previousUrl = window.location.href
+    window.history.replaceState(null, '', '/app/settings?prototype=sip&variant=C')
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const option = document.createElement('button')
+    option.textContent = 'Other payment method'
+    document.body.append(option)
+    option.addEventListener('click', () => option.remove())
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      await act(async () => { await vi.dynamicImportSettled() })
+      const schemes = container.querySelector<HTMLDetailsElement>('.sip-schemes')!
+      expect(schemes).not.toBeNull()
+      await act(async () => schemes.querySelector('summary')!.click())
+      await act(async () => option.click())
+      expect(schemes.open).toBe(true)
+      await act(async () => document.body.click())
+      expect(schemes.open).toBe(true)
+      await act(async () => schemes.querySelector('summary')!.click())
+      expect(schemes.open).toBe(false)
+    } finally {
+      await act(async () => root.unmount())
+      container.remove(); option.remove()
+      window.history.replaceState(null, '', previousUrl)
+    }
+  })
+
+  it('keeps scheme details open when an inside action replaces its clicked control', async () => {
+    state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const schemes = container.querySelector<HTMLDetailsElement>('.fund-review')!
+      await act(async () => schemes.querySelector('summary')!.click())
+      for (const label of ['Edit', 'Cancel', 'Save changes']) {
+        const action = document.createElement('button')
+        action.textContent = label
+        schemes.querySelector('.fund-scheme-content')!.append(action)
+        action.addEventListener('click', () => action.replaceWith(document.createElement('span')))
+        await act(async () => action.click())
+        expect(action.isConnected).toBe(false)
+        expect(schemes.open, `${label} must keep scheme details open`).toBe(true)
+      }
+      await act(async () => schemes.querySelector('summary')!.click())
+      expect(schemes.open).toBe(false)
+      await act(async () => schemes.querySelector('summary')!.click())
+      await act(async () => document.body.click())
+      expect(schemes.open).toBe(false)
+    } finally { await act(async () => root.unmount()); container.remove() }
+  })
+
   it('collapses source and scheme boxes only after an outside click, preserving inside actions', async () => {
     state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
     const container = document.createElement('div')

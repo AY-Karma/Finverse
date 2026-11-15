@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react'
 import { useStore } from '../useStore'
 import { ActionIcon } from './ActionIcon'
 import { RemoveFolioButton } from './RemoveFolioButton'
@@ -14,6 +14,10 @@ import { InstrumentReview } from './InstrumentReview'
 import { dateFormatter } from '../formatters'
 import { StatementChanges } from './StatementChanges'
 import { DataHealthGuide } from './DataHealthGuide'
+
+const SipSettingsPrototype = import.meta.env.DEV
+  ? lazy(() => import('./prototypes/SipSettingsPrototype').then((module) => ({ default: module.SipSettingsPrototype })))
+  : null
 
 const statementDate = dateFormatter({ day: 'numeric', month: 'short', year: 'numeric' })
 function displayDate(value: number | string): string {
@@ -58,9 +62,12 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
   useEffect(() => {
     const dismiss = (event: MouseEvent) => {
       if (!(event.target instanceof Node)) return
-      sectionRef.current?.querySelectorAll<HTMLDetailsElement>('.import-source-files[open], .fund-review[open], .data-marker-help[open]').forEach((details) => {
+      const path = event.composedPath()
+      // SIP settings remain expanded until their own summary is closed.
+      sectionRef.current?.querySelectorAll<HTMLDetailsElement>('.import-source-files[open], .fund-review[open]:not(.sip-schemes), .data-marker-help[open]').forEach((details) => {
         const box = details.matches('.data-marker-help') ? details : details.closest('.imported-portfolio') ?? details
-        if (!box.contains(event.target as Node)) details.open = false
+        // An inside action can replace its clicked control before this handler runs.
+        if (!path.includes(box)) details.open = false
       })
     }
     document.addEventListener('click', dismiss)
@@ -181,7 +188,9 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
         {reviewOpen && <InstrumentReview onClose={onReviewListings} autoFocus={window.location.hash === '#instrument-review'} />}
       </div>
     </div>}
-    <FundSchemeReview />
+    {SipSettingsPrototype && (import.meta.env.MODE === 'sip-prototype' || new URLSearchParams(window.location.search).get('prototype') === 'sip')
+      ? <Suspense fallback={<p role="status">Loading SIP prototype…</p>}><SipSettingsPrototype /></Suspense>
+      : <FundSchemeReview />}
     {reviewError && <p className="hint down" role="alert">{reviewError}</p>}
   </section>
 }

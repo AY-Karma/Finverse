@@ -47,8 +47,21 @@ function localMarketDataApi(): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [react(), localMarketDataApi()],
+function localSipEntry(): Plugin {
+  return {
+    name: 'finverse-local-sip-entry',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!['/', '/app', '/app/'].includes(request.url ?? '')) return next()
+        response.writeHead(302, { Location: '/app/settings' })
+        response.end()
+      })
+    },
+  }
+}
+
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), localMarketDataApi(), ...(mode === 'sip-prototype' ? [localSipEntry()] : [])],
   test: {
     exclude: [...configDefaults.exclude, 'docs/**'],
   },
@@ -63,4 +76,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))
