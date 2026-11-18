@@ -8,6 +8,7 @@ import { entryRoute } from './entryRoute'
 import { recoverWorkspaceWrite } from './workspaceArchive'
 import { migrateWorkspaceIdentities } from './identityMigration'
 import { WorkspaceRestorePanel } from './views/WorkspaceRestore'
+import './fonts.css'
 import './design.css'
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)

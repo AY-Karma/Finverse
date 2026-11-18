@@ -1,7 +1,8 @@
 import { Activity, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Position } from './types'
 import type { View } from './useStore'
-import { useStore } from './useStore'
+import { IdleWhenHidden, useStore } from './useStore'
+import { livePace } from './livePace'
 import { applyTheme } from './theme'
 import { entryRoute, pathForView } from './entryRoute'
 import { ActionIcon } from './views/ActionIcon'
@@ -102,6 +103,9 @@ export default function App({ initialView }: { initialView: View }) {
     })
   }, [settings.density, settings.mode])
 
+  // Settings shows no live prices, so equity polling pauses there and catches up on return.
+  useEffect(() => { livePace.setDemand(view !== 'settings') }, [view])
+
   if (notFound) return <NotFound />
 
   return (
@@ -110,6 +114,7 @@ export default function App({ initialView }: { initialView: View }) {
         {researchReturn && view !== 'research' && <button className="btn btn--ghost btn--small" type="button" onClick={() => navigate('research')}><ActionIcon name="research" />Back to Research</button>}
         {NAV.filter((item) => item.id !== 'settings' && visitedViews.has(item.id)).map((item) => (
           <Activity key={item.id} mode={view === item.id ? 'visible' : 'hidden'}>
+            <IdleWhenHidden visible={view === item.id}>
             <div className={item.id === 'overview' ? 'overview-sections' : undefined} hidden={view !== item.id}>
               <Suspense fallback={<div className="view-loading" role="status">Loading {item.label.toLowerCase()}…</div>}>
                 {item.id === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} highlightsEntry={highlightsEntry} />}
@@ -118,6 +123,7 @@ export default function App({ initialView }: { initialView: View }) {
                 {item.id === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
               </Suspense>
             </div>
+            </IdleWhenHidden>
           </Activity>
         ))}
         {view === 'settings' && <Suspense fallback={<div className="view-loading" role="status">Loading settings…</div>}><SettingsView onRequestImport={openPortfolioImport} /></Suspense>}

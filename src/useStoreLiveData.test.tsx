@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StoreProvider, useStore } from './useStore'
+import { livePace } from './livePace'
 import * as storePersistence from './store'
 import { normalizePosition } from './instruments'
 import { quoteKey } from './valuation'
@@ -47,6 +48,7 @@ const navRequests = () => refreshQuotes.mock.calls.filter(([positions]) => posit
 
 beforeEach(() => {
   localStorage.clear()
+  livePace.restartBeat(0)
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-11-09T06:00:00Z'))
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
@@ -135,10 +137,10 @@ describe('independent live stock and NAV updates', () => {
       return result({ [quoteKey(stock)]: equityQuote(150 + requests) })
     })
     await mount([stock])
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
     expect(requests).toBe(2)
     await act(async () => store.confirmInstrument(stock.id, { ticker: stock.ticker, type: 'stock', exchange: 'NSE', currency: 'INR', providerSymbol: stock.providerSymbol }))
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
     expect(requests).toBe(3)
     expect(store.liveQuotes[quoteKey(stock)].price).toBe(153)
   })
@@ -153,7 +155,7 @@ describe('independent live stock and NAV updates', () => {
     expect(store.marketDataRefreshing).toBe(false)
   })
 
-  it('starts the next stock request one second after a non-instant response completes', async () => {
+  it('keeps the next stock request on the 5s beat instead of drifting by the response time', async () => {
     refreshQuotes.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 250))
       return result({ [quoteKey(stock)]: equityQuote(150) })
@@ -161,13 +163,13 @@ describe('independent live stock and NAV updates', () => {
     await mount([stock])
     await act(async () => { await vi.advanceTimersByTimeAsync(250) })
     expect(store.liveQuotes[quoteKey(stock)].price).toBe(150)
-    await act(async () => { await vi.advanceTimersByTimeAsync(999) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_749) })
     expect(stockRequests()).toHaveLength(1)
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(stockRequests()).toHaveLength(2)
   })
 
-  it('applies stocks and continues one-second polling while the first NAV request is pending', async () => {
+  it('applies stocks and continues 5-second polling while the first NAV request is pending', async () => {
     vi.setSystemTime(new Date('2026-11-09T04:36:59.999Z'))
     const pendingNav = deferred<LiveQuotesResult>()
     let price = 149
@@ -180,7 +182,7 @@ describe('independent live stock and NAV updates', () => {
     expect(store.liveQuotes[quoteKey(stock)].price).toBe(150)
     expect(store.snapshot.currentValue).toBe(250)
     expect(store.marketDataRefreshing).toBe(false)
-    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
     expect(stockRequests()).toHaveLength(3)
     expect(navRequests()).toHaveLength(1)
     expect(store.liveQuotes[quoteKey(stock)].price).toBe(152)
@@ -199,7 +201,7 @@ describe('independent live stock and NAV updates', () => {
       ? pendingNav.promise : result({ [quoteKey(stock)]: equityQuote(++price) }))
     await mount()
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
     const latestStock = store.liveQuotes[quoteKey(stock)]
     await act(async () => pendingNav.resolve({ quotes: { [quoteKey(fund)]: navQuote(130), [quoteKey(stock)]: oldStock }, updated: 1, failed: 0, skipped: 0 }))
     expect(store.liveQuotes[quoteKey(stock)]).toEqual(latestStock)
@@ -216,7 +218,6 @@ describe('independent live stock and NAV updates', () => {
     })
     await mount()
     expect(store.snapshot.currentValue).toBe(250)
-    expect(store.quoteNextRefreshAt).toBeNull()
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(navRequests()).toHaveLength(1)
     expect(stockRequests()).toHaveLength(1)
@@ -225,7 +226,6 @@ describe('independent live stock and NAV updates', () => {
     await act(async () => eveningNav.resolve(result({ [quoteKey(fund)]: navQuote(130) })))
     expect(store.snapshot.currentValue).toBe(280)
     expect(stockRequests()).toHaveLength(1)
-    expect(store.quoteNextRefreshAt).toBeNull()
   })
 
   it('refreshes stocks manually without another NAV request between publication checks', async () => {
@@ -263,7 +263,6 @@ describe('independent live stock and NAV updates', () => {
     expect(store.liveQuotes[quoteKey(stock)].price).toBe(150)
     expect(store.snapshot.currentValue).toBe(350)
     expect(store.marketDataRefreshing).toBe(false)
-    expect(store.quoteNextRefreshAt).toBe(Date.now() + 1_000)
   })
 
   it('ignores late partial and final stock responses after external-data permission is revoked', async () => {
@@ -287,7 +286,6 @@ describe('independent live stock and NAV updates', () => {
     expect(store.snapshot.currentValue).toBe(100)
     expect(store.snapshot.quotes).toEqual({})
     expect(store.marketDataRefreshing).toBe(false)
-    expect(store.quoteNextRefreshAt).toBeNull()
   })
 })
 

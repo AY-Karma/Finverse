@@ -183,6 +183,7 @@ describe('GET /api/ipoGmpHistory', () => {
   it('deduplicates requests and caches a bounded historical response', async () => {
     const fetch = fetcher(), handle = createIpoGmpHistoryHandler({ fetcher: fetch, now: () => NOW })
     const responses = await Promise.all([handle(request()), handle(request()), handle(request())])
+    expect(responses[0].headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1800, must-revalidate')
     const body = await responses[0].json()
     expect(isIpoGmpHistoryResponse(body)).toBe(true)
     expect(body).toMatchObject({ slug: SLUG, checkedAt: NOW, gmp: { amount: 80, asOfDate: '2026-10-22' } })

@@ -5,6 +5,7 @@ import { instrumentLabel } from '../instruments'
 import { marketData } from '../marketData'
 import type { Position } from '../types'
 import { useStore } from '../useStore'
+import { numberFormatter } from '../formatters'
 import { quoteKey, signedPercent } from '../valuation'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
 import './historyPanel.css'
@@ -48,9 +49,10 @@ function historyRows(points: HistoryPoint[]): HistoryChartRow[] {
   return rows
 }
 
+const axisFormat = numberFormatter({ maximumFractionDigits: 0 })
 function fmtY(v: number): string {
   return Math.abs(v) >= 1000
-    ? v.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+    ? axisFormat.format(v)
     : v.toFixed(2)
 }
 

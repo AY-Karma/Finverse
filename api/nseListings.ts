@@ -1,5 +1,5 @@
 import { isIsin, isNsePricingCandidate, MAX_NSE_LOOKUP_ISINS, type NsePricingCandidate } from '../src/nsePricingProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
 import { readNseCsv } from './nseReference.js'
 
 const SOURCES = [
@@ -66,7 +66,7 @@ export function createNseListingsHandler(dependencies: { fetcher?: typeof fetch;
         const found = byIsin.get(isin) ?? []
         return found.length === 1 && symbolIsins.get(found[0].providerSymbol)?.size === 1 ? found : []
       })
-      return Response.json({ candidates: matched }, { headers: HEADERS })
+      return Response.json({ candidates: matched }, { headers: { ...HEADERS, ...cdnCache(CACHE_MS / 1000, 86_400) } })
     })
   }
 }

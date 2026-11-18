@@ -683,7 +683,7 @@ describe('market data client', () => {
     const range = [new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z')] as const
     await expect(fetchNavHistory({ ...fund, name: 'Changed alias' }, ...range)).resolves.toEqual([{ date: '2026-09-22', close: 77.5 }])
     expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
-      'https://api.mfapi.in/mf/42',
+      expect.stringMatching(/^https:\/\/api\.mfapi\.in\/mf\/42\?startDate=\d{4}-\d{2}-\d{2}&endDate=\d{4}-\d{2}-\d{2}$/),
       'https://api.mfapi.in/mf/42?startDate=2026-09-01&endDate=2026-09-23',
     ])
     expect(stored.has('finverse:history:v2:mfapi:42')).toBe(true)

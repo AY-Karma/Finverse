@@ -8,6 +8,14 @@ const HEADERS = {
   'Vercel-CDN-Cache-Control': 'public, s-maxage=300, must-revalidate',
 }
 
+// A finished briefing period is a fixed query; only late provider indexing can change it.
+const FINISHED_PERIOD_HEADERS = {
+  ...HEADERS,
+  'Cache-Control': 'public, max-age=3600',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=21600, stale-while-revalidate=86400',
+}
+const FINISHED_PERIOD_CACHE_MS = 21_600_000
+
 interface NewsHandlerDependencies {
   fetcher: typeof fetch
 }
@@ -32,13 +40,22 @@ function calendarDate(value: string): number | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value ? at : null
 }
 
+function istToday(): number {
+  return calendarDate(new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10))!
+}
+
+function finishedPeriod(params: URLSearchParams): boolean {
+  const through = calendarDate(params.get('through') ?? '')
+  return through != null && through < istToday()
+}
+
 function briefingUrl(params: URLSearchParams): string | null {
   const topic = params.get('topic') ?? ''
   const from = params.get('from') ?? ''
   const through = params.get('through') ?? ''
   const start = calendarDate(from)
   const end = calendarDate(through)
-  const today = calendarDate(new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10))!
+  const today = istToday()
   const day = 86_400_000
   if (!Object.prototype.hasOwnProperty.call(BRIEFING_QUERIES, topic) || start == null || end == null || end < start || end - start >= 40 * day || start < today - 90 * day || end > today) return null
   const url = new URL(googleSearch('', topic === 'global' || topic === 'china' ? 'US' : 'IN'))
@@ -123,10 +140,13 @@ export function createNewsHandler(
       return new Response('Invalid news region.', { status: 400 })
     }
     let urls: string[]
+    let headers: Record<string, string> = HEADERS
+    let cacheMs = 300_000
     if (source === 'briefing') {
       const url = briefingUrl(params)
       if (!url) return new Response('Invalid market briefing period or topic.', { status: 400 })
       urls = [url]
+      if (finishedPeriod(params)) { headers = FINISHED_PERIOD_HEADERS; cacheMs = FINISHED_PERIOD_CACHE_MS }
     } else if (source === 'wire-et') {
       urls = ['https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms']
     } else if (source === 'wire-google') {
@@ -143,11 +163,11 @@ export function createNewsHandler(
       return new Response('Invalid news request.', { status: 400 })
     }
 
-    return budget(urls.join('|'), 300_000, async (signal) => {
+    return budget(urls.join('|'), cacheMs, async (signal) => {
       const feed = urls.length === 1
         ? await fetchFeed(urls[0], fetcher, signal)
         : await fetchCompanyFeed(urls, fetcher, signal)
-      if (feed) return new Response(feed, { status: 200, headers: HEADERS })
+      if (feed) return new Response(feed, { status: 200, headers })
       return new Response('News providers are unavailable.', { status: 502, headers: { 'Cache-Control': 'no-store' } })
     })
   }

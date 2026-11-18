@@ -10,6 +10,20 @@ describe('news API', () => {
     const response = await createNewsHandler({ fetcher: vi.fn(async () => new Response(STORY)) })(new Request('http://localhost/api/news?source=wire-et'))
     expect(response.headers.get('Vercel-CDN-Cache-Control')).toBe('public, s-maxage=300, must-revalidate')
   })
+
+  it('caches finished briefing periods for hours but keeps the current period on the five-minute edge cache', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-16T06:00:00Z'))
+    const handler = createNewsHandler({ fetcher: vi.fn(async () => new Response(STORY)) })
+    const briefing = (through: string) => handler(new Request(`http://localhost/api/news?source=briefing&topic=india&from=2026-11-09&through=${through}`))
+    const finished = await briefing('2026-11-15')
+    expect(finished.headers.get('Cache-Control')).toBe('public, max-age=3600')
+    expect(finished.headers.get('Vercel-CDN-Cache-Control')).toBe('public, s-maxage=21600, stale-while-revalidate=86400')
+    const current = await briefing('2026-11-16')
+    expect(current.headers.get('Cache-Control')).toBe('no-store')
+    expect(current.headers.get('Vercel-CDN-Cache-Control')).toBe('public, s-maxage=300, must-revalidate')
+  })
+
   it('hedges a slow company provider after 500ms and cancels the losing request', async () => {
     vi.useFakeTimers()
     const fetcher = vi.fn<typeof fetch>((url, options) => {

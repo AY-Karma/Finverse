@@ -1,7 +1,7 @@
 import { isIpoDate, type IpoGmp, type IpoIssue } from '../src/ipoProtocol.js'
 import { isIpoGmpHistorySlug, type IpoGmpHistoryResponse, type IpoGmpPoint } from '../src/ipoGmpHistoryProtocol.js'
 import { normalizeIpoName, parseIpoDirectory } from './ipos.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
 
 const SITEMAP_URL = 'https://gmptoday.in/sitemap.xml'
 const CACHE_MS = 60 * 60_000
@@ -200,7 +200,8 @@ export function createIpoGmpHistoryHandler(dependencies: Partial<Dependencies> =
       const page = await retrieve(`https://gmptoday.in/ipo/${matches[0]}/`, signal)
       const trend = parseIpoGmpTrend(page, issue, matches[0], checkedAt)
       if (!trend) return missing()
-      return Response.json({ slug, ...trend, gmp: issue.gmp ? null : trend.gmp, checkedAt } satisfies IpoGmpHistoryResponse, { headers: HEADERS })
+      // Half the client lifetime, so a shared response still has time left in the browser cache.
+      return Response.json({ slug, ...trend, gmp: issue.gmp ? null : trend.gmp, checkedAt } satisfies IpoGmpHistoryResponse, { headers: { ...HEADERS, ...cdnCache(CACHE_MS / 2000) } })
     })
   }
 }

@@ -5,6 +5,12 @@ const MAX_CACHE_ENTRIES = 128
 const MAX_CACHE_BYTES = 16 * 1024 * 1024
 const FAILURE_CACHE_MS = 15_000
 
+/** Lets Vercel's CDN share a successful public response; browsers still revalidate through the app's own caches. */
+export function cdnCache(seconds: number, staleSeconds = 0): Record<string, string> {
+  const expiry = staleSeconds > 0 ? `stale-while-revalidate=${staleSeconds}` : 'must-revalidate'
+  return { 'Vercel-CDN-Cache-Control': `public, s-maxage=${Math.max(1, Math.floor(seconds))}, ${expiry}` }
+}
+
 interface CachedResponse {
   body: string
   status: number

@@ -6,9 +6,9 @@ import {
   type QuoteErrorPayload,
   type QuotesPayload,
 } from '../src/marketDataProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
 import { createNseSymbolResolver } from './nseSymbolChanges.js'
-import { getMarketCalendarInfo } from '../src/marketCalendar.js'
+import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from '../src/marketCalendar.js'
 
 const UPSTREAM_TIMEOUT_MS = 4_000
 const YAHOO_SYMBOL_LIMIT = 20
@@ -43,16 +43,25 @@ const RESPONSE_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 }
 
-const CACHE_HEADERS = {
-  ...RESPONSE_HEADERS,
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=1, must-revalidate',
-}
+// Just under the app's 5s beat: each beat reads the provider afresh, while identical requests landing together share one read.
+const LIVE_CACHE_MS = 4_000
+const CLOSED_CACHE_MS = 60_000
 
-function json(data: unknown, status: number, cache = false): Response {
+function json(data: unknown, status: number, cacheMs = 0): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: cache ? CACHE_HEADERS : RESPONSE_HEADERS,
+    headers: cacheMs ? { ...RESPONSE_HEADERS, ...cdnCache(cacheMs / 1000) } : RESPONSE_HEADERS,
   })
+}
+
+function sessionOpen(at: number): boolean {
+  return isRegularMarketOpen(new Date(at)) || isSpecialMarketOpen(new Date(at))
+}
+
+/** Indian listings cannot move while NSE is shut, unless a session opens within the longer cache window. */
+function quoteCacheMs(symbols: string[], at: number): number {
+  const indian = symbols.every((symbol) => symbol.endsWith('.NS') || symbol.endsWith('.BO'))
+  return indian && !sessionOpen(at) && !sessionOpen(at + CLOSED_CACHE_MS) ? CLOSED_CACHE_MS : LIVE_CACHE_MS
 }
 
 function parseSymbols(request: Request): { symbols: string[] } | { error: string } {
@@ -194,7 +203,8 @@ export function createQuoteHandler(
     const parsed = parseSymbols(request)
     if ('error' in parsed) return json({ error: parsed.error }, 400)
 
-    return budget(parsed.symbols.join(','), 1_000, async (signal) => {
+    const cacheMs = quoteCacheMs(parsed.symbols, now())
+    return budget(parsed.symbols.join(','), cacheMs, async (signal) => {
       const started = Date.now()
       const fetchedAt = now()
       const yahoo = await fetchYahooQuotes(parsed.symbols.filter((symbol) => !symbol.endsWith('.BO')), fetcher, signal, fetchedAt)
@@ -260,7 +270,7 @@ export function createQuoteHandler(
         quotes,
         errors,
       }
-      return json(payload, quotes.length > 0 ? 200 : 502, quotes.length > 0)
+      return json(payload, quotes.length > 0 ? 200 : 502, quotes.length > 0 ? cacheMs : 0)
     })
   }
 }

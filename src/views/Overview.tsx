@@ -1,6 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, quoteKey, signedCurrency } from '../valuation'
 import { useStore } from '../useStore'
+import { numberFormatter } from '../formatters'
 import { privateValue } from '../privacy'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { investmentWorkspace } from '../investmentWorkspace'
@@ -825,8 +826,10 @@ function LedgerMembers({
 
 type PositionLike = ReturnType<typeof useStore>['positions'][number]
 
+// Cached: toLocaleString with options builds a new formatter on every call, which ran for every ledger row on every poll.
+const unitsFormat = numberFormatter({ maximumFractionDigits: 2 })
 function fmtUnits(n: number): string {
-  return n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
+  return unitsFormat.format(n)
 }
 
 function dailyPriceMove(position: Position, live: Record<string, LiveQuote>): { delta: number | null; pct: number | null } {

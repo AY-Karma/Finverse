@@ -1,5 +1,5 @@
 import { MAX_EVENT_SYMBOLS, isEventDate, isEventSymbol, isOfficialEventUrl, type MarketEventPayload, type MarketEventIssue } from '../src/marketEventsProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
 import { readNseCsv } from './nseReference.js'
 
 const DAY_MS = 86_400_000
@@ -144,7 +144,8 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
       const unique = new Map(verifiedEvents.map((event) => [event.id, event]))
       const events = [...unique.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
       if (issues.length) cacheTtl = PARTIAL_CACHE_MS
-      return Response.json({ events, issues, fetchedAt: now() }, { status: feeds.every((feed) => feed.issue) ? 502 : 200, headers: HEADERS })
+      const status = feeds.every((feed) => feed.issue) ? 502 : 200
+      return Response.json({ events, issues, fetchedAt: now() }, { status, headers: status === 200 && !issues.length ? { ...HEADERS, ...cdnCache(CACHE_MS / 1000) } : HEADERS })
     })
   }
 }

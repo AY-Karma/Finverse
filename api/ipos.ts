@@ -1,5 +1,5 @@
 import { isIpoDate, type IpoBoard, type IpoFeed, type IpoGmp, type IpoIssue, type IpoStatus } from '../src/ipoProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
 
 const CORE_URL = 'https://www.xflot.com/api/public/market/ipos?limit=200'
 const GMP_URL = 'https://gmptoday.in/'
@@ -216,7 +216,8 @@ export function createIpoHandler(dependencies: Partial<Dependencies> = {}) {
         warnings, stale: coreFailed || board.status === 'rejected' || Boolean(gmp?.updatedAt && at - gmp.updatedAt > DAY_MS),
         ...(core.disclaimer ? { disclaimer: core.disclaimer } : {}),
       }
-      return Response.json(payload, { headers: HEADERS })
+      // Share only fully refreshed feeds, and only for the remainder of their source lifetime.
+      return Response.json(payload, { headers: ttl === CACHE_MS ? { ...HEADERS, ...cdnCache((core.at + CACHE_MS - at) / 1000) } : HEADERS })
     })
   }
 }

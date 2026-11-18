@@ -77,7 +77,22 @@ function listingKey(position: Position): string {
     .map((part, index) => index === 0 ? part : encodeURIComponent(part)).join(':')
 }
 
+/**
+ * Identity and normalization depend only on the position object, never on prices, so they are cached per object.
+ * Live polling used to rebuild them for every holding on every poll. Positions are replaced, never mutated, after creation.
+ */
+const identityCache = new WeakMap<Position, string>()
+const normalizedCache = new WeakMap<Position, Position>()
+
 export function listingIdentity(position: Position): string {
+  const cached = identityCache.get(position)
+  if (cached !== undefined) return cached
+  const identity = computeListingIdentity(position)
+  identityCache.set(position, identity)
+  return identity
+}
+
+function computeListingIdentity(position: Position): string {
   if (position.type === 'mutual-fund') {
     if (unsupportedCurrency(position) || hasForeignExchange(position)) return `MF:unresolved:${position.id}`
     return hasCompatibleFundScheme(position) ? `MF:mfapi:${position.mfScheme!.code}` : `MF:${clean(position.name || position.ticker).toLowerCase()}`
@@ -122,6 +137,14 @@ function unsupportedCurrency(position: Position): string | undefined {
 }
 
 export function normalizePosition(position: Position): Position {
+  const cached = normalizedCache.get(position)
+  if (cached) return cached
+  const normalized = computeNormalizedPosition(position)
+  normalizedCache.set(position, normalized)
+  return normalized
+}
+
+function computeNormalizedPosition(position: Position): Position {
   const reportedCurrency = unsupportedCurrency(position)
   position = { ...position, currency: reportedCurrency ? undefined : 'INR', reportedCurrency }
   if (position.type !== 'mutual-fund') {

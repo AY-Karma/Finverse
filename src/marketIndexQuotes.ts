@@ -2,6 +2,7 @@ import { marketData, type PublicMarketQuote } from './marketData'
 import { createSharedRequest } from './sharedRequest'
 import { MARKET_INDEX_CHOICES, selectedMarketIndices } from './marketIndexSelection'
 
+/** Market-clock tick and the shortest gap between index checks; the polling pace itself comes from livePace's beat. */
 export const INDEX_REFRESH_MS = 1_000
 const FAILED_INDEX_REFRESH_MS = 30_000
 

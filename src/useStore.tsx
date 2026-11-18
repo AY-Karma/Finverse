@@ -1,3 +1,4 @@
+import { livePace, PACE_STEPS } from './livePace'
 import {
   createContext,
   useCallback,
@@ -43,7 +44,8 @@ type RefreshResult =
   | { ok: true; retryInMs: number }
   | { ok: false; reason: 'disabled' | 'no-live-listings' | 'scheduled-nav' | 'cooldown' | 'failed'; retryInMs: number }
 
-const EQUITY_REFRESH_MS = 1_000
+// Market open/close is a clock check with no network use, so it stays at 1s; polling follows livePace's beat.
+const MARKET_CLOCK_MS = 1_000
 const FAILED_QUOTE_REFRESH_MS = 30_000
 const MAX_REFRESH_BACKOFF_MS = 5 * 60_000
 const NAV_SLOT_WINDOW_MS = 60_000
@@ -71,8 +73,6 @@ interface Store {
   portfolioHistory: PortfolioSnapshot[]
   marketDataRefreshing: boolean
   marketDataResult: LiveQuotesResult | null
-  quoteLastCheckedAt: number | null
-  quoteNextRefreshAt: number | null
   removeFolio: (id: string) => Promise<boolean>
   confirmFolioUnchanged: (id: string) => Promise<void>
   setSettings: (s: Settings) => void
@@ -125,8 +125,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
   const [marketDataRefreshing, setMarketDataRefreshing] = useState(() => savedSettings.allowExternalData && folios.some((folio) => folio.positions.some(hasLiveListing)))
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
-  const [quoteLastCheckedAt, setQuoteLastCheckedAt] = useState<number | null>(null)
-  const [quoteNextRefreshAt, setQuoteNextRefreshAt] = useState<number | null>(null)
   const [folioSaveFailed, setFolioSaveFailed] = useState(false)
   const [settingsSaveFailed, setSettingsSaveFailed] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
@@ -464,9 +462,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     slot.current = controller
     activeRefreshControllers.current.add(controller)
-    const ownsIndicator = group === 'equity' || !positionsRef.current.some(hasLiveListing)
+    // Only the first load of a group shows progress; background polls would flicker the indicator every second.
+    const ownsIndicator = !quoteResults.current[group] && (group === 'equity' || !positionsRef.current.some(hasLiveListing))
     if (ownsIndicator) setMarketDataRefreshing(true)
-    if (group === 'equity') setQuoteNextRefreshAt(null)
     const apply = (result: LiveQuotesResult) => {
       const activeKeys = new Set(positionsRef.current.map(quoteKey))
       const requestedKeys = new Set(requested.map(quoteKey))
@@ -478,13 +476,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const applied = setLiveQuotes(merged)
       quoteResults.current[group] = result
       const results = Object.values(quoteResults.current)
-      setMarketDataResult({ quotes: applied, updated: results.reduce((sum, item) => sum + item.updated, 0),
-        failed: results.reduce((sum, item) => sum + item.failed, 0), skipped: results.reduce((sum, item) => sum + item.skipped, 0) })
+      const next = { quotes: applied, updated: results.reduce((sum, item) => sum + item.updated, 0),
+        failed: results.reduce((sum, item) => sum + item.failed, 0), skipped: results.reduce((sum, item) => sum + item.skipped, 0) }
+      setMarketDataResult((current) => current && current.quotes === next.quotes && current.updated === next.updated
+        && current.failed === next.failed && current.skipped === next.skipped ? current : next)
     }
     try {
-      const result = await marketData.refreshQuotes(requested, liveQuotesRef.current, controller.signal, (partial) => {
+      // The first load shows each 25-symbol batch as it lands; background polls commit once, so a
+      // 100-holding portfolio re-renders once per poll instead of once per batch.
+      const firstLoad = !quoteResults.current[group]
+      const result = await marketData.refreshQuotes(requested, liveQuotesRef.current, controller.signal, firstLoad ? (partial) => {
         if (!controller.signal.aborted && !workspaceChangedRef.current) apply(partial)
-      })
+      } : undefined)
       controller.signal.throwIfAborted()
       assertCurrentWorkspace()
       apply(result)
@@ -516,6 +519,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (slot.current && !slot.current.signal.aborted) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
     const check = manualRefreshCheck()
     if (!check.allowed) return { ok: false, reason: 'cooldown', retryInMs: check.retryInMs ?? 0 }
+    // Restarting the beat refreshes the index ticker alongside holdings, and the next automatic poll follows one interval later.
+    livePace.restartBeat()
     try {
       const result = await refreshQuoteGroup('equity')
       if (!result) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
@@ -535,14 +540,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!settings.allowExternalData || positions.length === 0) {
       setMarketDataRefreshing(false)
       setMarketDataResult(null)
-      setQuoteNextRefreshAt(null)
-      setQuoteLastCheckedAt(null)
       loadedQuoteKey.current = null
     }
-    if (!positionsRef.current.some(hasLiveListing) && !activeNavController.current) {
-      setMarketDataRefreshing(false)
-      setQuoteNextRefreshAt(null)
-    }
+    if (!positionsRef.current.some(hasLiveListing) && !activeNavController.current) setMarketDataRefreshing(false)
   }, [folioRefreshKey, settings.allowExternalData, positions.length])
 
   useEffect(() => {
@@ -554,28 +554,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const queue = () => {
       clearTimeout(refreshTimer)
-      if (open && !document.hidden) refreshTimer = setTimeout(() => {
+      if (open && !document.hidden && livePace.interval() != null) refreshTimer = setTimeout(() => {
         updateMarket()
         if (open) void refresh()
       }, Math.max(0, nextAt - Date.now()))
     }
     const schedule = (failed: boolean, checked = true) => {
       if (!active) return
-      if (checked) {
-        lastQuoteCheck.current = Date.now()
-        setQuoteLastCheckedAt(lastQuoteCheck.current)
-      }
+      if (checked) lastQuoteCheck.current = Date.now()
       failedQuoteChecks.current = failed ? Math.min(failedQuoteChecks.current + 1, 4) : 0
-      nextAt = Date.now() + (failed ? Math.min(FAILED_QUOTE_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS) : EQUITY_REFRESH_MS)
-      setQuoteNextRefreshAt(open && !document.hidden ? nextAt : null)
+      nextAt = failed ? Date.now() + Math.min(FAILED_QUOTE_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS) : livePace.nextBeatAt() ?? Date.now() + PACE_STEPS[0]
       queue()
     }
     scheduleQuotes.current = schedule
     const refresh = async () => {
       if (!active || document.hidden || (activeQuoteController.current && !activeQuoteController.current.signal.aborted)) return
+      // Screens without prices pause polling; the first load still runs so the workspace has prices.
+      if (livePace.interval() == null && loadedQuoteKey.current === folioRefreshKey) return
       loadedQuoteKey.current = folioRefreshKey
+      const started = performance.now()
       try {
         const result = await refreshQuoteGroup('equity')
+        if (result && result.updated > 0) livePace.recordResponse(performance.now() - started)
         if (active && result) schedule(result.failed > 0 && result.updated === 0 && result.skipped === 0)
       } catch {
         if (active && !workspaceChangedRef.current) schedule(false, false)
@@ -588,25 +588,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (open && !nowOpen) closeRefreshPending = true
       const marketOpened = !open && nowOpen
       open = nowOpen
+      livePace.watchMainThread(open)
       if (marketOpened) { closeRefreshPending = false; void refresh() }
       else if (closeRefreshPending && !document.hidden && !activeQuoteController.current) {
         closeRefreshPending = false
         void refresh()
       }
-      if (!open) setQuoteNextRefreshAt(null)
     }
-    const timer = window.setInterval(updateMarket, EQUITY_REFRESH_MS)
+    const timer = window.setInterval(updateMarket, MARKET_CLOCK_MS)
     const visibility = () => {
       clearTimeout(refreshTimer)
-      if (document.hidden) { setQuoteNextRefreshAt(null); return }
+      if (document.hidden) return
       updateMarket()
       if ((open && Date.now() >= nextAt) || loadedQuoteKey.current !== folioRefreshKey
         || (!open && Date.now() - lastQuoteCheck.current >= CLOSED_QUOTE_RECHECK_MS)) void refresh()
-      else { setQuoteNextRefreshAt(open ? nextAt : null); queue() }
+      else queue()
     }
     document.addEventListener('visibilitychange', visibility)
+    // A pace change (or returning to a screen with prices) re-times the next poll to the first beat after the last check.
+    livePace.watchMainThread(open)
+    const unsubscribePace = livePace.subscribe(() => {
+      const beat = livePace.nextBeatAt(lastQuoteCheck.current)
+      if (beat == null) { clearTimeout(refreshTimer); return }
+      if (failedQuoteChecks.current) return
+      nextAt = beat
+      if (open && !document.hidden && Date.now() >= nextAt) void refresh()
+      else queue()
+    })
     return () => {
       active = false
+      unsubscribePace()
+      livePace.watchMainThread(false)
       activeQuoteController.current?.abort()
       if (scheduleQuotes.current === schedule) scheduleQuotes.current = null
       window.clearInterval(timer)
@@ -683,14 +695,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     confirmFundScheme,
     confirmInstrument,
     confirmNsePricing,
-    quoteLastCheckedAt,
-    quoteNextRefreshAt,
     workspaceReadOnly: workspaceChanged,
     settingsSaved: !settingsSaveFailed && !workspaceChanged,
     refreshNow,
   }), [folios, positions, rawPositions, liveQuotes, snapshot, portfolioHistory, marketDataRefreshing,
     marketDataResult, removeFolio, confirmFolioUnchanged, settings, setSettings, previewFile, commitImport, commitImports,
-    undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, confirmNsePricing, quoteLastCheckedAt, quoteNextRefreshAt, workspaceChanged, settingsSaveFailed, refreshNow])
+    undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, confirmNsePricing, workspaceChanged, settingsSaveFailed, refreshNow])
 
   return <StoreContext.Provider value={value}>
     {!!snapshot.unsupportedCurrencyCount && <div className="folio-save-warning" role="status"><span>Partial INR totals. {snapshot.unsupportedCurrencyCount} holding{snapshot.unsupportedCurrencyCount === 1 ? '' : 's'} in unsupported native currencies excluded. Original amounts remain in exports.</span></div>}
@@ -715,6 +725,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     </div>}
     {children}
   </StoreContext.Provider>
+}
+
+/**
+ * Keeps a hidden screen idle. While hidden (React <Activity mode="hidden">) it holds the store value and the screen
+ * element it last rendered, so live prices and parent re-renders skip the subtree entirely. Shown again, it renders
+ * once with current data. Effects are already torn down while hidden, so nothing goes stale that could act.
+ */
+export function IdleWhenHidden({ visible, children }: { visible: boolean; children: ReactNode }) {
+  const value = useStore()
+  const held = useRef({ value, children })
+  if (visible) held.current = { value, children }
+  return <StoreContext.Provider value={held.current.value}>{held.current.children}</StoreContext.Provider>
 }
 
 export function useStore(): Store {

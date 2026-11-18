@@ -27,6 +27,7 @@ describe('company events API', () => {
     const response = await createEventsHandler({ fetcher, now: () => NOW })(request())
     const feed = await response.json()
     expect(response.status).toBe(200)
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=900, must-revalidate')
     expect(feed.issues).toEqual([])
     expect(feed.events).toHaveLength(3)
     expect(feed.events.find((event: { kind: string }) => event.kind === 'results')).toMatchObject({ date: '2026-10-28', dateLabel: 'Meeting date' })
@@ -76,6 +77,7 @@ describe('company events API', () => {
     expect(firstResponse.status).toBe(200)
     expect(first.events).toHaveLength(2)
     expect(first.issues).toEqual([expect.objectContaining({ source: 'NSE corporate actions' })])
+    expect(firstResponse.headers.get('vercel-cdn-cache-control')).toBeNull()
     await handler(request())
     expect(fetcher).toHaveBeenCalledTimes(4)
 

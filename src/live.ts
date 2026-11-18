@@ -146,6 +146,8 @@ function navDate(value: unknown): string | null {
 }
 
 const sharedNav = createSharedRequest<LiveQuote | null>()
+// Covers the longest Indian market closures while avoiding a scheme's full NAV history.
+const LATEST_NAV_WINDOW_DAYS = 14
 
 function fetchNavByCode(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
   return sharedNav(String(code), (requestSignal) => fetchNavUncached(code, requestSignal), signal)
@@ -154,7 +156,8 @@ function fetchNavByCode(code: number, signal?: AbortSignal): Promise<LiveQuote |
 async function fetchNavUncached(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
   try {
     const requestSignal = signal ?? AbortSignal.timeout(12000)
-    const history = await fetchNavHistoryUncached(code, undefined, undefined, requestSignal) ?? []
+    const today = istDate()
+    const history = await fetchNavHistoryUncached(code, adjacentDay(today, -LATEST_NAV_WINDOW_DAYS), today, requestSignal) ?? []
     requestSignal.throwIfAborted()
     let latest = history.at(-1)
     if (!latest) {
@@ -582,7 +585,7 @@ async function fetchNavHistoryUncached(code: number, from: string | undefined, t
 // Manual refresh cooldown. Persisted so a reload cannot bypass the short gap.
 // ---------------------------------------------------------------------------
 
-export const MANUAL_REFRESH_COOLDOWN_MS = 30_000
+export const MANUAL_REFRESH_COOLDOWN_MS = 5_000
 const MANUAL_KEY = 'finverse:manualRefresh'
 
 interface ManualRefreshResult {

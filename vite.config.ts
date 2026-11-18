@@ -60,8 +60,33 @@ function localSipEntry(): Plugin {
   }
 }
 
+/** `/` and `/app` open Overview, so fetch its lazy chunk alongside the entry instead of after the entry runs. Low priority keeps the entry first on slow links. */
+function preloadOverview(): Plugin {
+  return {
+    name: 'finverse-preload-overview',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, { bundle }) {
+        const chunks = new Map(Object.values(bundle ?? {}).flatMap((output) => output.type === 'chunk' ? [[output.fileName, output] as const] : []))
+        const overview = [...chunks.values()].find((chunk) => chunk.facadeModuleId?.endsWith('/src/views/Overview.tsx'))
+        if (!overview) throw new Error('Overview chunk not found for preloading.')
+        const graph = new Set([overview.fileName])
+        for (const file of graph) for (const dependency of chunks.get(file)?.imports ?? []) graph.add(dependency)
+        const pending = (file: string) => !html.includes(`/${file}"`)
+        const styles = [...graph].flatMap((file) => [...(chunks.get(file)?.viteMetadata?.importedCss ?? [])])
+        const link = (attrs: Record<string, string | true>) => ({ tag: 'link', attrs: { ...attrs, crossorigin: true, fetchpriority: 'low' }, injectTo: 'head' as const })
+        return [
+          ...[...graph].filter(pending).map((file) => link({ rel: 'modulepreload', href: `/${file}` })),
+          ...[...new Set(styles)].filter(pending).map((file) => link({ rel: 'preload', as: 'style', href: `/${file}` })),
+        ]
+      },
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), localMarketDataApi(), ...(mode === 'sip-prototype' ? [localSipEntry()] : [])],
+  plugins: [react(), localMarketDataApi(), preloadOverview(), ...(mode === 'sip-prototype' ? [localSipEntry()] : [])],
   test: {
     exclude: [...configDefaults.exclude, 'docs/**'],
   },

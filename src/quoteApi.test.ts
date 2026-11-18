@@ -112,18 +112,33 @@ describe('GET /api/quotes', () => {
     expect(body.errors[0].message).toContain('HTTP 503')
   })
 
-  it('reuses a recent batch but fetches a new provider response after one second', async () => {
+  it('reuses a recent batch but fetches a new provider response after four seconds, just under the 5s polling beat', async () => {
     let now = NOW
     const fetcher = vi.fn<typeof fetch>(async () => yahooResponse())
     const handler = createQuoteHandler({ fetcher, now: () => now })
     const request = () => handler(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS'))
     await request()
-    now += 999
+    now += 3_999
     await request()
     expect(fetcher).toHaveBeenCalledTimes(1)
     now += 1
     await request()
     expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('shares NSE quotes for a minute while the market is shut, but not into the next open', async () => {
+    const closedAt = Date.parse('2026-08-25T10:00:00Z') / 1000
+    const fetcher = vi.fn<typeof fetch>(async (url) => yahooResponse(new URL(String(url)).searchParams.get('symbols')!, 1309.8, closedAt))
+    let now = Date.parse('2026-08-25T11:00:00Z')
+    const handler = createQuoteHandler({ fetcher, now: () => now })
+    const request = (symbols = 'RELIANCE.NS') => handler(new Request(`http://localhost/api/quotes?symbols=${symbols}`))
+    expect((await request()).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=60, must-revalidate')
+    now += 59_999
+    await request()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect((await request('AAPL')).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=4, must-revalidate')
+    now = Date.parse('2026-08-26T03:44:30Z')
+    expect((await request('TCS.NS')).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=4, must-revalidate')
   })
 
   it('returns normalized quotes with the provider market timestamp', async () => {
@@ -136,7 +151,7 @@ describe('GET /api/quotes', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1, must-revalidate')
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=4, must-revalidate')
     expect(fetcher).toHaveBeenCalledTimes(1)
     expect(String(fetcher.mock.calls[0]?.[0])).toContain('symbols=RELIANCE.NS')
     expect(state.resolveSymbol).not.toHaveBeenCalled()
