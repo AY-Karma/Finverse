@@ -22,6 +22,17 @@ describe('company events API', () => {
     expect(feed.issues).toEqual([])
   })
 
+  it('reads a week of market-wide filings above 6 MB and accepts NSE archive links on nseindia.in', async () => {
+    const padding = 'x'.repeat(1_500)
+    const bulk = Array.from({ length: 4_600 }, (_, index) => ({ ...filings[0], symbol: 'OTHER', seq_id: String(index), attchmntText: padding }))
+    const current = { ...filings[0], attchmntFile: 'https://nsearchives.nseindia.in/corporate/INFY_26102026.pdf' }
+    expect(JSON.stringify(bulk).length).toBeGreaterThan(6 * 1024 * 1024)
+    const fetcher = provider({ calendar: [], actions: [], filings: [...bulk, current] })
+    const feed = await (await createEventsHandler({ fetcher, now: () => NOW })(request())).json()
+    expect(feed.issues).toEqual([])
+    expect(feed.events).toEqual([expect.objectContaining({ kind: 'filing', sourceUrl: current.attchmntFile })])
+  })
+
   it('keeps meeting dates, ex-dates and publication times distinct and filters symbols', async () => {
     const fetcher = provider()
     const response = await createEventsHandler({ fetcher, now: () => NOW })(request())
@@ -220,7 +231,7 @@ describe('company events API', () => {
   })
 
   it('rejects oversized upstream bodies before parsing them', async () => {
-    const response = await createEventsHandler({ fetcher: vi.fn(async () => new Response('[]', { headers: { 'content-length': String(7 * 1024 * 1024) } })), now: () => NOW })(request())
+    const response = await createEventsHandler({ fetcher: vi.fn(async () => new Response('[]', { headers: { 'content-length': String(25 * 1024 * 1024) } })), now: () => NOW })(request())
     expect(response.status).toBe(502)
   })
 

@@ -12,6 +12,7 @@ const EQUITY_MASTER_URL = 'https://nsearchives.nseindia.com/content/equities/EQU
 const HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 type Row = Record<string, unknown>
+const USED_FIELDS = ['symbol', 'date', 'purpose', 'exDate', 'subject', 'series', 'isin', 'an_dt', 'desc', 'sm_isin', 'attchmntFile', 'seq_id']
 type FeedKind = 'calendar' | 'actions' | 'filings'
 interface Dependencies { fetcher: typeof fetch; now: () => number }
 
@@ -116,10 +117,12 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
             const deadline = AbortSignal.any([signal, AbortSignal.timeout(4_000)])
             const upstream = await fetcher(`https://www.nseindia.com${source.path}`, { signal: deadline })
             if (!upstream.ok) throw new Error('Source unavailable')
-            const body = await readBoundedText(upstream, 6 * 1024 * 1024, deadline)
+            // A week of market-wide filings is already ~6.5 MB, so filings get a larger read limit.
+            const body = await readBoundedText(upstream, (source.kind === 'filings' ? 24 : 6) * 1024 * 1024, deadline)
             const rows: unknown = JSON.parse(body)
-            if (!Array.isArray(rows) || rows.length > 10_000 || rows.some((row) => row === null || typeof row !== 'object' || Array.isArray(row))) throw new Error('Source format changed')
-            return Response.json(rows)
+            if (!Array.isArray(rows) || rows.length > 30_000 || rows.some((row) => row === null || typeof row !== 'object' || Array.isArray(row))) throw new Error('Source format changed')
+            // Cache only the fields parseRow reads; full filing rows would crowd the shared response cache.
+            return Response.json(rows.map((row: Row) => Object.fromEntries(USED_FIELDS.flatMap((field) => field in row ? [[field, row[field]]] : []))))
           } catch { return Response.json({ error: 'Source unavailable.' }, { status: 502 }) }
         })
         if (!response.ok) return { events: [], issue: { source: source.label, message: 'Source unavailable. Open NSE to verify its latest updates.' } }
