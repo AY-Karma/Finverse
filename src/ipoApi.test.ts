@@ -133,7 +133,7 @@ describe('GET /api/ipos', () => {
     const response = await handler(request())
     const body = await response.json()
     expect(response.status).toBe(200)
-    expect(response.headers.get('vercel-cdn-cache-control')).toBeNull()
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=60, must-revalidate')
     expect(body.issues).toHaveLength(1)
     expect(body.fetchedAt).toBe(NOW)
     expect(body.stale).toBe(true)

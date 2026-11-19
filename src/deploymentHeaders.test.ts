@@ -55,6 +55,10 @@ describe('deployment security headers', () => {
     expect(meta.content).toBe(themeColor)
   })
 
+  it('runs API functions in Mumbai, next to Indian users and India-only sources', () => {
+    expect((JSON.parse(readFileSync('vercel.json', 'utf8')) as { regions?: string[] }).regions).toEqual(['bom1'])
+  })
+
   it('lets browsers keep content-hashed build files without revalidating', () => {
     const config = JSON.parse(readFileSync('vercel.json', 'utf8')) as {
       headers: { source: string; headers: { key: string; value: string }[] }[]

@@ -216,8 +216,9 @@ export function createIpoHandler(dependencies: Partial<Dependencies> = {}) {
         warnings, stale: coreFailed || board.status === 'rejected' || Boolean(gmp?.updatedAt && at - gmp.updatedAt > DAY_MS),
         ...(core.disclaimer ? { disclaimer: core.disclaimer } : {}),
       }
-      // Share only fully refreshed feeds, and only for the remainder of their source lifetime.
-      return Response.json(payload, { headers: ttl === CACHE_MS ? { ...HEADERS, ...cdnCache((core.at + CACHE_MS - at) / 1000) } : HEADERS })
+      // Share fully refreshed feeds for the rest of their source lifetime, and partial ones (with their warnings)
+      // only until the next retry, so a source outage doesn't send every visitor to the function.
+      return Response.json(payload, { headers: { ...HEADERS, ...cdnCache(ttl === CACHE_MS ? (core.at + CACHE_MS - at) / 1000 : RETRY_MS / 1000) } })
     })
   }
 }
