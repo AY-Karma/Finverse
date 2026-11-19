@@ -158,6 +158,7 @@ function parseSettings(value: unknown): Settings {
     density: choice(row.density, ['comfortable', 'compact'], 'density'), accent: 'cobalt',
     mode: choice(row.mode, ['dark', 'light'], 'theme'), hideValues: boolean(row.hideValues, 'hidden-values preference'),
     ...(row.marketIndices !== undefined ? { marketIndices: normalizeMarketIndexIds(row.marketIndices) } : {}),
+    focusRings: row.focusRings === undefined ? true : boolean(row.focusRings, 'focus outline preference'),
   }
   return settings
 }

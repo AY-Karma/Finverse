@@ -6,7 +6,7 @@ import { loadSettings } from '../store'
 import type { Folio, Position, Settings } from '../types'
 import { SettingsView } from './SettingsView'
 
-const state = vi.hoisted(() => ({ settings: {} as Settings, setSettings: vi.fn(), folios: [] as Folio[], positions: [] as Position[], removeFolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null, exportPortfolio: vi.fn() }))
+const state = vi.hoisted(() => ({ settings: {} as Settings, setSettings: vi.fn(), folios: [] as Folio[], positions: [] as Position[], removeFolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null, exportPortfolio: vi.fn(), settingsSaved: true }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const scrollDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
@@ -23,6 +23,7 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/app/settings')
   state.folios = []
   state.positions = []
+  state.settingsSaved = true
   state.settings = loadSettings()
   state.setSettings.mockClear()
   container = document.createElement('div')
@@ -193,11 +194,36 @@ describe('workspace settings', () => {
     await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     expect(container.querySelector('[aria-label="Manage holdings"]')).not.toBeNull()
     expect([...container.querySelectorAll('.data-handling-card h4')].map((item) => item.textContent)).toEqual(['Portfolio & history', 'Market data'])
-    expect(container.textContent).toContain('Holdings and tracked history use local storage.')
+    expect(container.textContent).toContain('Stored only in this browser.')
     expect(state.settings.allowExternalData).toBe(true)
-    expect(container.querySelector('#external-data, [role="switch"]')).toBeNull()
+    expect(container.querySelector('#external-data')).toBeNull()
+    expect([...container.querySelectorAll('[role="switch"]')].map((item) => item.getAttribute('aria-label'))).toEqual(['Keyboard focus outlines'])
     expect(container.querySelector('[aria-label="Data & privacy"]')).toBeNull()
     expect(state.setSettings).not.toHaveBeenCalled()
-    expect(container.querySelector('.data-handling-card:last-child .data-destination')?.textContent).toBe('Identifiers only')
+    expect(container.querySelector('.data-handling-card:last-child p')?.textContent).toBe('Quote providers see instrument identifiers only, never quantities or costs.')
+  })
+
+  it('keeps keyboard focus outlines on by default and saves the opt-out', async () => {
+    const render = () => act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
+    await render()
+    const toggle = container.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    await act(async () => toggle.click())
+    expect(state.setSettings).toHaveBeenLastCalledWith({ ...state.settings, focusRings: false })
+    state.settings = state.setSettings.mock.lastCall![0]
+    await render()
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('keeps Preferences to one row per decision and reports saving only on failure', async () => {
+    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
+    expect([...container.querySelectorAll('.setting-row strong')].map((item) => item.textContent)).toEqual(['Appearance', 'Overview indices', 'Keyboard focus outlines'])
+    expect(container.querySelectorAll('.setting-row--indices .settings-index-control')).toHaveLength(2)
+    expect(container.querySelector('.settings-save-status')).toBeNull()
+    expect(container.textContent).not.toContain('Saved automatically')
+
+    state.settingsSaved = false
+    await act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
+    expect(container.querySelector('.settings-save-status')?.textContent).toBe('Preferences not saved')
   })
 })

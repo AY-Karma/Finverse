@@ -106,6 +106,11 @@ export default function App({ initialView }: { initialView: View }) {
   // Settings shows no live prices, so equity polling pauses there and catches up on return.
   useEffect(() => { livePace.setDemand(view !== 'settings') }, [view])
 
+  // Focus outlines are opt-in; CSS hides every focus ring while this is off.
+  useEffect(() => {
+    document.documentElement.dataset.focusRings = settings.focusRings !== false ? 'on' : 'off'
+  }, [settings.focusRings])
+
   if (notFound) return <NotFound />
 
   return (

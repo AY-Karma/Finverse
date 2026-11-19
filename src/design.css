@@ -2780,7 +2780,7 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
 }
 .import-source-card small {
   color: var(--ink-subtle);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.45;
 }
 .import-source-action {
@@ -2788,9 +2788,12 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   align-items: center;
   gap: 6px;
   color: var(--ink-muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
+a.import-source-card .import-source-action { color: var(--primary-hover); }
+[data-mode='light'] a.import-source-card .import-source-action { color: var(--primary-action); }
+.import-source-action .action-icon { width: 15px; height: 15px; flex: none; }
 .portfolio-import-dialog .import-preview {
   margin-top: 4px;
 }
@@ -3253,3 +3256,7 @@ details.fund-review > summary::-webkit-details-marker { display: none; }
   color: var(--ink);
   cursor: pointer;
 }
+
+/* Focus rings are opt-in (Settings → Keyboard focus outlines). Field borders still change colour on focus. */
+:root[data-focus-rings='off'] :is(:focus, :focus-visible, :focus-within) { outline: none !important; }
+:root[data-focus-rings='off'] :is(.input:focus, .select:focus, .insights-summary-session:focus-visible, .mn-search:focus-within) { box-shadow: none !important; }

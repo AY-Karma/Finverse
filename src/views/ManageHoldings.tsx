@@ -112,9 +112,9 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
       </div>
       <div id={actionsId} className="manage-actions-reveal" data-open={actionsOpen} aria-hidden={!actionsOpen} inert={!actionsOpen}>
       <div className="manage-actions-clip"><div className="manage-actions-list">
-      <button className="btn btn--secondary btn--small" type="button" title="Download all holdings as a CSV file." disabled={!hasPositions} onClick={() => exportPortfolio('csv')}>Export CSV</button>
-      <button className="btn btn--secondary btn--small" type="button" title="Download a complete workspace backup." onClick={() => exportPortfolio('json')}>Backup JSON</button>
-      <UndoImportButton targetId={undoImportFolioId} targetName={privateValue(folios.find((folio) => folio.id === undoImportFolioId)?.name ?? '', hideValues)} onConfirm={undoLastImport} />
+      {hasPositions && <button className="btn btn--secondary btn--small" type="button" title="Download all holdings as a CSV file." onClick={() => exportPortfolio('csv')}>Export CSV</button>}
+      <button className="btn btn--secondary btn--small" type="button" title="Download a complete workspace backup." onClick={() => exportPortfolio('json')}>Download backup</button>
+      {undoImportFolioId && <UndoImportButton targetId={undoImportFolioId} targetName={privateValue(folios.find((folio) => folio.id === undoImportFolioId)?.name ?? '', hideValues)} onConfirm={undoLastImport} />}
       <div className="manage-restore-actions" ref={setRestoreActionsTarget} />
       </div></div></div>
     </div>
@@ -123,7 +123,7 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
       <div className="imported-portfolio-head">
         <ActionIcon name="holdings" />
         <div className="imported-portfolio-copy"><h3>Imported portfolio</h3>
-          <span>{hideValues ? 'Import details hidden' : `${positions.length} holding${positions.length === 1 ? '' : 's'} · ${folios.length} source file${folios.length === 1 ? '' : 's'}`}</span>
+          <span>{hideValues ? 'Import details hidden' : <><strong>{positions.length}</strong> holding{positions.length === 1 ? '' : 's'}</>}</span>
         </div>
         {!hideValues && <p className="imported-portfolio-date">Last imported <span>{displayDate(latestImport)}</span></p>}
         {!hideValues && oldestFolio && <ImportHealthIndicator importedAt={oldestFolio.importedAt} reviewedAt={oldestFolio.reviewedAt} showLabel />}
@@ -151,7 +151,7 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
         </div>
       </details>
       <details className="import-source-files">
-        <summary><span>Source files</span><span className="import-source-action">Manage imports</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary>
+        <summary><span>Source files{!hideValues && <span className="import-source-count"><span aria-hidden="true"> (×{folios.length})</span><span className="sr-only">, {folios.length} file{folios.length === 1 ? '' : 's'}</span></span>}</span><span className="import-source-action">Manage imports</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary>
       <div className="folio-list">{folios.map((folio) => <div className="folio-row" key={folio.id}>
       <span className="folio-document" aria-hidden="true"><ActionIcon name="sources" /></span>
       <div className="folio-copy">
@@ -176,7 +176,7 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
       <button id="listing-review-trigger" type="button" className="listing-review-trigger" aria-expanded={reviewOpen} aria-controls="instrument-review-content" onClick={onReviewListings}>
         <ActionIcon name="review" />
         <span className="listing-review-copy"><strong>Instrument listings</strong><span>{hideValues ? 'Listing details are hidden.' : pendingListings > 0 ? `${pendingListings} listing${pendingListings === 1 ? ' needs' : 's need'} your confirmation.` : 'No listings need review. View or edit them here.'}</span></span>
-        <span className="listing-review-action">{reviewOpen ? 'Close listings' : !hideValues && pendingListings > 0 ? 'Review listings' : 'View listings'}</span>
+        {!hideValues && pendingListings > 0 && !reviewOpen && <span className="listing-review-action">Review listings</span>}
         <svg className="listing-review-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
       </button>
       <div id="instrument-review-content" hidden={!reviewOpen}>

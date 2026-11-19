@@ -95,6 +95,8 @@ export interface Settings {
   accent: Accent
   mode: Mode
   hideValues: boolean
+  /** Keyboard focus outlines; enabled by default for accessibility. */
+  focusRings?: boolean
 }
 
 export interface LiveQuote {

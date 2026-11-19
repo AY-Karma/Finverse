@@ -12,7 +12,7 @@ export const BENCHMARKS: BenchmarkDefinition[] = [
   { id: 'nifty-100', label: 'NIFTY 100', symbol: '^CNX100', region: 'India' },
   { id: 'nifty-200', label: 'NIFTY 200', symbol: '^CNX200', region: 'India' },
   { id: 'nifty-midcap-50', label: 'NIFTY Midcap 50', symbol: '^NSEMDCP50', region: 'India' },
-  { id: 'sensex', label: 'S&P BSE Sensex', symbol: '^BSESN', region: 'India' },
+  { id: 'sensex', label: 'BSE Sensex', symbol: '^BSESN', region: 'India' },
   { id: 'nifty-bank', label: 'NIFTY Bank', symbol: '^NSEBANK', region: 'India' },
   { id: 'sp-500', label: 'S&P 500', symbol: '^GSPC', region: 'Global' },
   { id: 'nasdaq-composite', label: 'NASDAQ Composite', symbol: '^IXIC', region: 'Global' },

@@ -3,7 +3,7 @@ import type { Mode } from '../types'
 import { MARKET_INDEX_CHOICES, normalizeMarketIndexIds } from '../marketIndexSelection'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
-import { ActionIcon, type ActionIconName } from './ActionIcon'
+import { ActionIcon } from './ActionIcon'
 import { SelectControl } from './SelectControl'
 import './settings.css'
 
@@ -48,18 +48,15 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
         <div>
           <h1 className="page-title">Settings</h1>
         </div>
-        <span className="settings-save-status" role="status">{settingsSaved ? 'Saved automatically' : 'Preferences not saved'}</span>
+        {!settingsSaved && <span className="settings-save-status" role="alert">Preferences not saved</span>}
       </div>
 
       <div className="settings-page">
         <ManageHoldings onRequestImport={onRequestImport} reviewOpen={showListingReview} onReviewListings={showListingReview ? closeListingReview : () => setReviewOpen(true)} />
         <section className="settings-section" aria-label="Preferences">
-          <SettingsSectionHeader
-            icon="preferences"
-            title="Preferences"
-          />
+          <h2 className="settings-detail-head">Preferences</h2>
           <div className="settings-group">
-            <SettingRow label="Appearance" description="Choose a light or dark workspace." className="setting-row--appearance">
+            <SettingRow label="Appearance" className="setting-row--appearance">
               <div className="settings-control mode-toggle" role="group" aria-label="Appearance mode" data-selected-mode={settings.mode}>
                 <span className="mode-toggle-thumb" aria-hidden="true" />
                 {(['dark', 'light'] as Mode[]).map((modeOption) => (
@@ -76,55 +73,41 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
                 ))}
               </div>
             </SettingRow>
-            {marketIndices.map((id, slot) => <SettingRow key={slot} label={slot === 0 ? 'First market index' : 'Second market index'} description={slot === 0 ? 'Left index on Overview.' : 'Right index on Overview.'} className="setting-row--index">
-              <MarketIndexPreference label={slot === 0 ? 'First market index' : 'Second market index'} value={id} onChange={(next) => updateMarketIndex(slot, next)} />
-            </SettingRow>)}
+            <SettingRow label="Overview indices" className="setting-row--indices">
+              {marketIndices.map((id, slot) => {
+                const label = slot === 0 ? 'First market index' : 'Second market index'
+                return <MarketIndexPreference key={slot} label={label} value={id} onChange={(next) => updateMarketIndex(slot, next)} />
+              })}
+            </SettingRow>
+            <SettingRow label="Keyboard focus outlines" description="Outline the selected control when moving with Tab." className="setting-row--switch">
+              <button type="button" role="switch" className="settings-switch" aria-label="Keyboard focus outlines" aria-checked={settings.focusRings !== false}
+                onClick={() => update({ focusRings: settings.focusRings === false })}><span className="settings-switch-thumb" aria-hidden="true" /></button>
+            </SettingRow>
           </div>
         </section>
         <section className="settings-data" aria-labelledby="data-handling-title">
-          <div className="settings-subhead">
-            <div>
-              <h2 id="data-handling-title">How data is handled</h2>
-            </div>
-          </div>
+          <h2 id="data-handling-title" className="settings-detail-head">How data is handled</h2>
           <div className="data-handling-grid">
-            <DataHandlingCard icon="device" label="Portfolio & history" destination="This browser">
-              Holdings and tracked history use local storage.
-            </DataHandlingCard>
-            <DataHandlingCard icon="market" label="Market data" destination={settings.allowExternalData ? 'Identifiers only' : 'Blocked'}>
-              Quote providers receive instrument identifiers, never quantities or cost basis.
+            <DataHandlingCard label="Portfolio & history">Stored only in this browser.</DataHandlingCard>
+            <DataHandlingCard label="Market data">
+              {settings.allowExternalData ? 'Quote providers see instrument identifiers only, never quantities or costs.' : 'Quote providers are blocked.'}
             </DataHandlingCard>
           </div>
         </section>
       </div>
-    </div>
-  )
-}
-
-function SettingsSectionHeader({ icon, title }: {
-  icon: ActionIconName
-  title: string
-}) {
-  return (
-    <div className="settings-detail-head">
-      <ActionIcon name={icon} />
-      <h2>{title}</h2>
     </div>
   )
 }
 
 function SettingRow({ label, description, children, className = '' }: {
   label: string
-  description: string
+  description?: string
   children: ReactNode
   className?: string
 }) {
   return (
     <div className={`setting-row ${className}`}>
-      <div className="setting-copy">
-        <strong>{label}</strong>
-        <span>{description}</span>
-      </div>
+      <div className="setting-copy"><strong>{label}</strong>{description && <span>{description}</span>}</div>
       <div className="setting-control-wrap">{children}</div>
     </div>
   )
@@ -134,12 +117,10 @@ function MarketIndexPreference({ label, value, onChange }: { label: string; valu
   return <div className="settings-index-control"><SelectControl label={label} value={value} options={marketIndexOptions} onChange={onChange} /></div>
 }
 
-function DataHandlingCard({ icon, label, destination, children }: { icon: ActionIconName; label: string; destination: string; children: ReactNode }) {
+function DataHandlingCard({ label, children }: { label: string; children: ReactNode }) {
   return (
     <article className="data-handling-card">
-      <span className="data-handling-icon"><ActionIcon name={icon} /></span>
       <div className="setting-copy"><h4>{label}</h4><p>{children}</p></div>
-      <span className="data-destination">{destination}</span>
     </article>
   )
 }

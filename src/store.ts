@@ -170,9 +170,9 @@ export function loadFolios(): Folio[] {
 
 export function saveSettings(settings: Settings): boolean {
   if (workspaceWritesBlocked()) return false
-  const { allowExternalData, density, mode, hideValues } = settings
+  const { allowExternalData, density, mode, hideValues, focusRings = true } = settings
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency: 'INR', allowExternalData, density, accent: 'cobalt', mode, hideValues, marketIndices: normalizeMarketIndexIds(settings.marketIndices) }))
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ currency: 'INR', allowExternalData, density, accent: 'cobalt', mode, hideValues, focusRings, marketIndices: normalizeMarketIndexIds(settings.marketIndices) }))
     return true
   } catch {
     return false
@@ -215,6 +215,7 @@ export function loadSettings(): Settings {
     accent: defaults.accent,
     mode: parsed.mode === 'light' ? 'light' : defaults.mode,
     hideValues: parsed.hideValues === true,
+    focusRings: parsed.focusRings !== false,
     marketIndices: normalizeMarketIndexIds(parsed.marketIndices),
   }
   saveSettings(settings)

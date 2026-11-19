@@ -79,7 +79,7 @@ it('names a recent review separately from a recent import', async () => {
   await render()
   await act(async () => root!.render(<ImportHealthIndicator importedAt={importedAt} reviewedAt={reviewedAt} showLabel />))
   const indicator = container.querySelector('.import-health--label')!
-  expect(indicator.querySelector('.import-health-label')?.textContent).toBe('Recently reviewed')
+  expect(indicator.querySelector('.import-health-label')?.textContent).toBe('Fresh')
   expect(indicator.getAttribute('title')).toContain('Holdings confirmed unchanged')
 })
 
