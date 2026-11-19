@@ -46,19 +46,6 @@ function localMarketDataApi(): Plugin {
   }
 }
 
-function localSipEntry(): Plugin {
-  return {
-    name: 'finverse-local-sip-entry',
-    configureServer(server) {
-      server.middlewares.use((request, response, next) => {
-        if (!['/', '/app', '/app/'].includes(request.url ?? '')) return next()
-        response.writeHead(302, { Location: '/app/settings' })
-        response.end()
-      })
-    },
-  }
-}
-
 /** `/` and `/app` open Overview, so fetch its lazy chunk alongside the entry instead of after the entry runs. Low priority keeps the entry first on slow links. */
 function preloadOverview(): Plugin {
   return {
@@ -84,8 +71,8 @@ function preloadOverview(): Plugin {
   }
 }
 
-export default defineConfig(({ mode }) => ({
-  plugins: [react(), localMarketDataApi(), preloadOverview(), ...(mode === 'sip-prototype' ? [localSipEntry()] : [])],
+export default defineConfig({
+  plugins: [react(), localMarketDataApi(), preloadOverview()],
   test: {
     exclude: [...configDefaults.exclude, 'docs/**'],
   },
@@ -101,4 +88,4 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}))
+})

@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { Position } from '../types'
-import { FundSchemeReview, FundSchemeReviewContent } from './FundSchemeReview'
+import { FundSchemeReview } from './FundSchemeReview'
 
 const state = vi.hoisted(() => ({
   positions: [] as Position[],
@@ -215,28 +215,5 @@ it('aborts bulk approval without saving when external data is disabled during lo
     await act(async () => resolveSearch({ status: 'matched', candidates: [exact], match: exact }))
     expect(state.confirmFundScheme).not.toHaveBeenCalled()
     expect(state.search).toHaveBeenCalledTimes(1)
-  } finally { await act(async () => root.unmount()) }
-})
-
-it('embeds the existing approval flow without a second disclosure and saves through its supplied callback', async () => {
-  const scheme = { schemeCode: 2, schemeName: 'Example Equity Fund Direct Plan IDCW Option' }
-  const fund = { ...state.positions[0], id: 'embedded-fund' }
-  const confirm = vi.fn().mockResolvedValue(undefined)
-  state.search.mockResolvedValue({ status: 'matched', match: scheme, candidates: [scheme], reason: 'One complete scheme matches.' })
-  const container = document.createElement('div')
-  const root = createRoot(container)
-  const button = (label: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === label)!
-  try {
-    await act(async () => root.render(<FundSchemeReviewContent embedded funds={[fund]} settings={state.settings} confirmFundScheme={confirm} />))
-    expect(container.querySelector('details')).toBeNull()
-    expect(container.querySelector('.fund-scheme-content')).not.toBeNull()
-    expect(button('Auto-approve schemes').disabled).toBe(false)
-    await act(async () => container.querySelector<HTMLButtonElement>('.fund-scheme-trigger')!.click())
-    expect(container.querySelector('.fund-scheme-row [role="listbox"]')).not.toBeNull()
-    expect(confirm).not.toHaveBeenCalled()
-    await act(async () => button('Confirm scheme').click())
-    expect(confirm).toHaveBeenCalledExactlyOnceWith(fund.id, scheme)
-    expect(state.confirmFundScheme).not.toHaveBeenCalled()
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('Scheme saved')
   } finally { await act(async () => root.unmount()) }
 })

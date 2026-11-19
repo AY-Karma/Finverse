@@ -32,35 +32,6 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
-  it('keeps the SIP accordion open across outside and repeated option clicks until its summary closes it', async () => {
-    const previousUrl = window.location.href
-    window.history.replaceState(null, '', '/app/settings?prototype=sip&variant=C')
-    const container = document.createElement('div')
-    document.body.append(container)
-    const root = createRoot(container)
-    const option = document.createElement('button')
-    option.textContent = 'Other payment method'
-    document.body.append(option)
-    option.addEventListener('click', () => option.remove())
-    try {
-      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
-      await act(async () => { await vi.dynamicImportSettled() })
-      const schemes = container.querySelector<HTMLDetailsElement>('.sip-schemes')!
-      expect(schemes).not.toBeNull()
-      await act(async () => schemes.querySelector('summary')!.click())
-      await act(async () => option.click())
-      expect(schemes.open).toBe(true)
-      await act(async () => document.body.click())
-      expect(schemes.open).toBe(true)
-      await act(async () => schemes.querySelector('summary')!.click())
-      expect(schemes.open).toBe(false)
-    } finally {
-      await act(async () => root.unmount())
-      container.remove(); option.remove()
-      window.history.replaceState(null, '', previousUrl)
-    }
-  })
-
   it('keeps scheme details open when an inside action replaces its clicked control', async () => {
     state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
     const container = document.createElement('div')

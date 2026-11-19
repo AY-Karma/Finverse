@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useStore } from '../useStore'
 import { marketData } from '../marketData'
-import { canConfirmFundScheme, matchFundScheme, type FundSchemeCandidate, type FundSchemeReview as SchemeReview } from '../fundSchemes'
+import { canConfirmFundScheme, matchFundScheme, type FundSchemeReview as SchemeReview } from '../fundSchemes'
 import { hasSupportedValuationCurrency } from '../valuation'
-import type { Position, Settings } from '../types'
+import type { Position } from '../types'
 import { HiddenValuesState } from './HiddenValuesState'
 import { ActionIcon } from './ActionIcon'
 import { FundSchemePicker } from './FundSchemePicker'
@@ -12,19 +12,9 @@ function supportsFundNav(fund: Position): boolean {
   return hasSupportedValuationCurrency({ ...fund, currency: fund.currency ?? 'INR' })
 }
 
-export function FundSchemeReview({ embedded = false }: { embedded?: boolean } = {}) {
+export function FundSchemeReview() {
   const { positions, settings, confirmFundScheme } = useStore()
-  return <FundSchemeReviewContent funds={positions.filter((position) => position.type === 'mutual-fund')} settings={settings} confirmFundScheme={confirmFundScheme} embedded={embedded} />
-}
-
-type FundSchemeReviewContentProps = {
-  funds: Position[]
-  settings: Pick<Settings, 'hideValues' | 'allowExternalData'>
-  confirmFundScheme: (holdingId: string, candidate: FundSchemeCandidate) => Promise<void>
-  embedded?: boolean
-}
-
-export function FundSchemeReviewContent({ funds, settings, confirmFundScheme, embedded = false }: FundSchemeReviewContentProps) {
+  const funds = positions.filter((position) => position.type === 'mutual-fund')
   const reviewCount = funds.filter((fund) => !fund.mfScheme).length
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const id = useId()
@@ -36,8 +26,8 @@ export function FundSchemeReviewContent({ funds, settings, confirmFundScheme, em
   const [expanded, setExpanded] = useState(false)
   const [message, setMessage] = useState('')
   const controllerRef = useRef<AbortController | null>(null)
-  const fundsRef = useRef(funds)
-  fundsRef.current = funds
+  const positionsRef = useRef(positions)
+  positionsRef.current = positions
   const selected = funds.find((fund) => fund.id === selectedId)
 
   useEffect(() => {
@@ -75,7 +65,7 @@ export function FundSchemeReviewContent({ funds, settings, confirmFundScheme, em
         try {
           const result = await marketData.reviewFundScheme(fund.name || fund.ticker, controller.signal)
           if (controller.signal.aborted) return
-          const current = fundsRef.current.find((position) => position.id === fund.id)
+          const current = positionsRef.current.find((position) => position.id === fund.id)
           if (!current || current.type !== 'mutual-fund' || current.mfScheme) continue
           const match = matchFundScheme(current.name || current.ticker, result.candidates).match
           if (result.status === 'unavailable' || !match || !supportsFundNav(current)) {
@@ -156,9 +146,16 @@ export function FundSchemeReviewContent({ funds, settings, confirmFundScheme, em
   if (!funds.length) return null
   if (settings.hideValues) return <section className="workspace-recovery fund-review" aria-label="Review mutual-fund schemes"><HiddenValuesState /></section>
   const candidate = review?.candidates.find((item) => String(item.schemeCode) === code)
-  const content = <div className="fund-scheme-content">
+  return <details className={`listing-review fund-review${reviewCount > 0 ? ' listing-review--pending' : ''}`} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+    <summary className="listing-review-trigger">
+      <ActionIcon name="review" />
+      <span className="listing-review-copy"><strong>Mutual-fund schemes</strong><span>{reviewCount > 0 ? `${reviewCount} scheme${reviewCount === 1 ? ' needs' : 's need'} your confirmation.` : 'No schemes need review. View or edit them here.'}</span></span>
+      {reviewCount > 0 && !expanded && <span className="listing-review-action">Review schemes</span>}
+      <svg className="listing-review-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
+    </summary>
+    <div className="fund-scheme-content">
     <p className="hint">Unconfirmed funds keep their imported values. Confirm the fund, Direct or Regular plan, and Growth or IDCW option before fetching NAV or history.</p>
-    {!settings.allowExternalData && <p className="hint">Market data is paused because this workspace changed in another tab. Reload to continue. No search is sent meanwhile.</p>}
+    {!settings.allowExternalData && <p className="hint">Enable external market data in Settings to search scheme names. No search is sent while it is off.</p>}
     <div className="import-actions">
       <button type="button" className="btn btn--primary btn--small" disabled={busy || !settings.allowExternalData || !funds.some((fund) => !fund.mfScheme && supportsFundNav(fund))} onClick={() => void approveAll()}>{approvingAll ? 'Approving schemes…' : 'Auto-approve schemes'}</button>
       <span className="hint">Exact fund, plan and option matches only.</span>
@@ -185,14 +182,5 @@ export function FundSchemeReviewContent({ funds, settings, confirmFundScheme, em
     </div>)}
     {!selected && message && <p className="hint" role="status">{message}</p>}
     </div>
-  if (embedded) return content
-  return <details className={`listing-review fund-review${reviewCount > 0 ? ' listing-review--pending' : ''}`} onToggle={(event) => setExpanded(event.currentTarget.open)}>
-    <summary className="listing-review-trigger">
-      <ActionIcon name="review" />
-      <span className="listing-review-copy"><strong>Mutual-fund schemes</strong><span>{reviewCount > 0 ? `${reviewCount} scheme${reviewCount === 1 ? ' needs' : 's need'} your confirmation.` : 'No schemes need review. View or edit them here.'}</span></span>
-      <span className="listing-review-action">{expanded ? 'Close schemes' : reviewCount > 0 ? 'Review schemes' : 'View schemes'}</span>
-      <svg className="listing-review-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
-    </summary>
-    {content}
   </details>
 }
