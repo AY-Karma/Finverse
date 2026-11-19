@@ -1,4 +1,4 @@
-import { fetchLatestNseClose, type NseCloseState } from './nseClosingPrices.js'
+import { fetchLatestNseClose, type NseCloseState } from './_nseClosingPrices.js'
 import {
   MAX_MARKET_SYMBOLS,
   isMarketSymbol,
@@ -7,7 +7,7 @@ import {
   type QuotesPayload,
 } from '../src/marketDataProtocol.js'
 import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
-import { createNseSymbolResolver } from './nseSymbolChanges.js'
+import { createNseSymbolResolver } from './_nseSymbolChanges.js'
 import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from '../src/marketCalendar.js'
 
 const UPSTREAM_TIMEOUT_MS = 4_000

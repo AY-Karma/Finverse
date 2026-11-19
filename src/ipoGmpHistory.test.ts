@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createIpoGmpHistoryHandler, parseIpoGmpTrend } from '../api/ipoGmpHistory'
+import ipoApi, { createIpoGmpHistoryHandler, parseIpoGmpTrend } from '../api/ipos'
 import { isIpoGmpHistoryResponse } from './ipoGmpHistoryProtocol'
 import type { IpoIssue } from './ipoProtocol'
 
@@ -79,6 +79,15 @@ describe('GET /api/ipoGmpHistory', () => {
     expect((await handler(new Request('http://localhost/api/ipoGmpHistory?slug=a&slug=b'))).status).toBe(400)
     expect((await handler(request('Bad Slug'))).status).toBe(400)
     expect(source).not.toHaveBeenCalled()
+  })
+})
+
+describe('single IPO function', () => {
+  it('routes the list and one issue trend through the same entry point, before any provider access', async () => {
+    const error = async (url: string) => (await (await ipoApi.fetch(new Request(url))).json()).error
+    expect(await error('http://localhost/api/ipos?holdings=TCS')).toBe('IPO discovery does not accept portfolio data or query parameters.')
+    expect(await error('http://localhost/api/ipos?slug=Bad%20Slug')).toBe('Choose one valid IPO issue.')
+    expect(await error(`http://localhost/api/ipos?slug=${SLUG}&holdings=TCS`)).toBe('Choose one valid IPO issue.')
   })
 })
 

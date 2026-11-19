@@ -7,8 +7,7 @@ import { handleNewsRequest } from './api/news'
 import { handleEventsRequest } from './api/events'
 import { handleNseListingsRequest } from './api/nseListings'
 import { handleMarketCapRequest } from './api/marketCap'
-import { handleIpoRequest } from './api/ipos'
-import { handleIpoGmpHistoryRequest } from './api/ipoGmpHistory'
+import { handleIpoApiRequest } from './api/ipos'
 
 function localMarketDataApi(): Plugin {
   const handlers = new Map([
@@ -18,8 +17,8 @@ function localMarketDataApi(): Plugin {
     ['/api/events', handleEventsRequest],
     ['/api/nseListings', handleNseListingsRequest],
     ['/api/marketCap', handleMarketCapRequest],
-    ['/api/ipos', handleIpoRequest],
-    ['/api/ipoGmpHistory', handleIpoGmpHistoryRequest],
+    ['/api/ipos', handleIpoApiRequest],
+    ['/api/ipoGmpHistory', handleIpoApiRequest],
   ])
   return {
     name: 'finverse-local-market-data-api',

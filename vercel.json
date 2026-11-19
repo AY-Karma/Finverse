@@ -3,6 +3,10 @@
   "regions": ["bom1"],
   "rewrites": [
     {
+      "source": "/api/ipoGmpHistory",
+      "destination": "/api/ipos"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

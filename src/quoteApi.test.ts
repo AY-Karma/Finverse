@@ -3,7 +3,7 @@ import { createQuoteHandler } from '../api/quotes'
 
 const NOW = Date.parse('2026-08-25T06:00:00Z')
 const state = vi.hoisted(() => ({ resolveSymbol: vi.fn<(symbol: string) => Promise<string | null>>() }))
-vi.mock('../api/nseSymbolChanges', () => ({ createNseSymbolResolver: () => state.resolveSymbol }))
+vi.mock('../api/_nseSymbolChanges', () => ({ createNseSymbolResolver: () => state.resolveSymbol }))
 
 beforeEach(() => { state.resolveSymbol.mockReset().mockResolvedValue(null) })
 

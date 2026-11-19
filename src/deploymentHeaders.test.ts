@@ -61,6 +61,12 @@ describe('deployment security headers', () => {
     expect(functions.length).toBeLessThanOrEqual(12)
   })
 
+  it('keeps the retired GMP trend address working ahead of the app fallback', () => {
+    const rewrites = (JSON.parse(readFileSync('vercel.json', 'utf8')) as { rewrites: { source: string; destination: string }[] }).rewrites
+    expect(rewrites[0]).toEqual({ source: '/api/ipoGmpHistory', destination: '/api/ipos' })
+    expect(rewrites.at(-1)).toEqual({ source: '/(.*)', destination: '/index.html' })
+  })
+
   it('runs API functions in Mumbai, next to Indian users and India-only sources', () => {
     expect((JSON.parse(readFileSync('vercel.json', 'utf8')) as { regions?: string[] }).regions).toEqual(['bom1'])
   })
