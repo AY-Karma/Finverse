@@ -1,7 +1,7 @@
 import { isMarketSymbol } from '../src/marketDataProtocol.js'
 import { isIsin } from '../src/nsePricingProtocol.js'
-import { readNseCsv } from './nseReference.js'
-import { readBoundedText } from './requestBudget.js'
+import { readNseCsv } from './_nseReference.js'
+import { readBoundedText } from './_requestBudget.js'
 
 const EQUITY_URL = 'https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv'
 const SME_URL = 'https://nsearchives.nseindia.com/emerge/corporates/content/SME_EQUITY_L.csv'

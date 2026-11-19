@@ -13,7 +13,7 @@ it('loads compiled API entrypoints in Node ESM and handles requests without a bu
     mkdirSync(join(directory, 'src'))
     for (const file of [
       'api/news', 'api/history', 'api/quotes', 'api/events', 'api/nseListings',
-      'api/nseReference', 'api/requestBudget', 'api/nseSymbolChanges', 'api/nseClosingPrices',
+      'api/_nseReference', 'api/_requestBudget', 'api/nseSymbolChanges', 'api/nseClosingPrices',
       'api/ipos', 'api/ipoGmpHistory', 'src/marketCalendar', 'src/ipoProtocol',
       'src/ipoGmpHistoryProtocol', 'src/marketDataProtocol', 'src/marketEventsProtocol', 'src/nsePricingProtocol',
     ]) {

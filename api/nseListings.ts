@@ -1,6 +1,6 @@
 import { isIsin, isNsePricingCandidate, MAX_NSE_LOOKUP_ISINS, type NsePricingCandidate } from '../src/nsePricingProtocol.js'
-import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
-import { readNseCsv } from './nseReference.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
+import { readNseCsv } from './_nseReference.js'
 
 const SOURCES = [
   { type: 'stock', url: 'https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv' },

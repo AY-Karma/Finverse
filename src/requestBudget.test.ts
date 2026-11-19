@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRequestBudget, readBoundedText } from '../api/requestBudget'
+import { createRequestBudget, readBoundedText } from '../api/_requestBudget'
 
 afterEach(() => vi.useRealTimers())
 

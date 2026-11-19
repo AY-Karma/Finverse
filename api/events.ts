@@ -1,6 +1,6 @@
 import { MAX_EVENT_SYMBOLS, isEventDate, isEventSymbol, isOfficialEventUrl, type MarketEventPayload, type MarketEventIssue } from '../src/marketEventsProtocol.js'
-import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
-import { readNseCsv } from './nseReference.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
+import { readNseCsv } from './_nseReference.js'
 
 const DAY_MS = 86_400_000
 const IST_OFFSET_MS = 19_800_000

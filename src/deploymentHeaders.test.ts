@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('deployment security headers', () => {
@@ -53,6 +53,12 @@ describe('deployment security headers', () => {
     new Function('document', 'localStorage', script)(document, localStorage)
     expect(documentElement.dataset.mode).toBe(mode)
     expect(meta.content).toBe(themeColor)
+  })
+
+  it('stays within the Hobby plan limit of 12 serverless functions', () => {
+    // Vercel deploys every api/ file as a function unless its name starts with "_"; shared helpers must use that prefix.
+    const functions = readdirSync('api').filter((file) => file.endsWith('.ts') && !file.startsWith('_'))
+    expect(functions.length).toBeLessThanOrEqual(12)
   })
 
   it('runs API functions in Mumbai, next to Indian users and India-only sources', () => {

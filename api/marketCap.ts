@@ -1,7 +1,7 @@
 import * as XLSX from '@e965/xlsx'
 import { AMFI_CLASSIFICATION_PAGE, MARKET_CAP_REFERENCE_TTL, isAmfiClassificationUrl, type MarketCapReference } from '../src/marketCapProtocol.js'
 import type { MarketCapRecord } from '../src/marketCapExposure.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { createRequestBudget, readBoundedText } from './_requestBudget.js'
 
 const HEADERS = { 'Cache-Control': 'public, max-age=21600, stale-while-revalidate=3600', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }
 const MAX_FILE_BYTES = 5 * 1024 * 1024

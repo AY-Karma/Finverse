@@ -1,4 +1,4 @@
-import { readBoundedText } from './requestBudget.js'
+import { readBoundedText } from './_requestBudget.js'
 
 const NSE_CLOSE_CACHE_MS = 60 * 60 * 1000
 const IST_OFFSET_MS = 330 * 60 * 1000

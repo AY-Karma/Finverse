@@ -1,4 +1,4 @@
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { createRequestBudget, readBoundedText } from './_requestBudget.js'
 
 const HEADERS = {
   'Cache-Control': 'no-store',

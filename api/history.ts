@@ -1,5 +1,5 @@
 import { isMarketSymbol, type HistoryPayload } from '../src/marketDataProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { createRequestBudget, readBoundedText } from './_requestBudget.js'
 import { createNseSymbolResolver } from './nseSymbolChanges.js'
 import { fetchLatestNseClose, type NseCloseState } from './nseClosingPrices.js'
 import { getMarketCalendarInfo } from '../src/marketCalendar.js'

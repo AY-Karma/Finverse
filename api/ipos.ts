@@ -1,5 +1,5 @@
 import { isIpoDate, type IpoBoard, type IpoFeed, type IpoGmp, type IpoIssue, type IpoStatus } from '../src/ipoProtocol.js'
-import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
 
 const CORE_URL = 'https://www.xflot.com/api/public/market/ipos?limit=200'
 const GMP_URL = 'https://gmptoday.in/'

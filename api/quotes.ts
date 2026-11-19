@@ -6,7 +6,7 @@ import {
   type QuoteErrorPayload,
   type QuotesPayload,
 } from '../src/marketDataProtocol.js'
-import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
 import { createNseSymbolResolver } from './nseSymbolChanges.js'
 import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from '../src/marketCalendar.js'
 

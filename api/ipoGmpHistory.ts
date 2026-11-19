@@ -1,7 +1,7 @@
 import { isIpoDate, type IpoGmp, type IpoIssue } from '../src/ipoProtocol.js'
 import { isIpoGmpHistorySlug, type IpoGmpHistoryResponse, type IpoGmpPoint } from '../src/ipoGmpHistoryProtocol.js'
 import { normalizeIpoName, parseIpoDirectory } from './ipos.js'
-import { cdnCache, createRequestBudget, readBoundedText } from './requestBudget.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
 
 const SITEMAP_URL = 'https://gmptoday.in/sitemap.xml'
 const CACHE_MS = 60 * 60_000
