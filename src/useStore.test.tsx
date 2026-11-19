@@ -463,6 +463,34 @@ describe('automatic equity refresh', () => {
     } finally { await view.close() }
   })
 
+  it('keeps retrying after a failed poll when the user visits Settings and comes back', async () => {
+    refreshQuotes.mockResolvedValueOnce({ quotes: {}, updated: 0, failed: 1, skipped: 0 })
+      .mockImplementation(async () => ({ quotes: { [quoteKey(stock)]: stockQuote() }, updated: 1, failed: 0, skipped: 0 }))
+    const view = await mount()
+    try {
+      expect(refreshQuotes).toHaveBeenCalledOnce()
+      await act(async () => { livePace.setDemand(false) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+      await act(async () => { livePace.setDemand(true) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(39_999) })
+      expect(refreshQuotes).toHaveBeenCalledOnce()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+    } finally { livePace.setDemand(true); await view.close() }
+  })
+
+  it('still fetches the closing prices when the market closes while the user is on Settings', async () => {
+    refreshQuotes.mockResolvedValue({ quotes: { [quoteKey(stock)]: stockQuote() }, updated: 1, failed: 0, skipped: 0 })
+    const view = await mount()
+    try {
+      expect(refreshQuotes).toHaveBeenCalledOnce()
+      await act(async () => { livePace.setDemand(false) })
+      vi.mocked(live.isMarketOpen).mockReturnValue(false)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+    } finally { livePace.setDemand(true); await view.close() }
+  })
+
   it('does not retry a rejected initial request on offhours tab returns', async () => {
     refreshQuotes.mockRejectedValue(new Error('Provider unreachable'))
     const view = await mount([stock], undefined, '2026-10-13T18:00:00Z')

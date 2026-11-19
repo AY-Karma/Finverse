@@ -572,10 +572,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       queue()
     }
     scheduleQuotes.current = schedule
-    const refresh = async () => {
+    const refresh = async (force = false) => {
       if (!active || document.hidden || (activeQuoteController.current && !activeQuoteController.current.signal.aborted)) return
-      // Screens without prices pause polling; the first load still runs so the workspace has prices.
-      if (livePace.interval() == null && loadedQuoteKey.current === folioRefreshKey) return
+      // Screens without prices pause polling; the first load and the market-close fetch still run.
+      if (!force && livePace.interval() == null && loadedQuoteKey.current === folioRefreshKey) return
       loadedQuoteKey.current = folioRefreshKey
       const started = performance.now()
       try {
@@ -597,7 +597,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (marketOpened) { closeRefreshPending = false; void refresh() }
       else if (closeRefreshPending && !document.hidden && !activeQuoteController.current) {
         closeRefreshPending = false
-        void refresh()
+        void refresh(true)
       }
     }
     const timer = window.setInterval(updateMarket, MARKET_CLOCK_MS)
@@ -615,7 +615,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const unsubscribePace = livePace.subscribe(() => {
       const beat = livePace.nextBeatAt(lastQuoteCheck.current)
       if (beat == null) { clearTimeout(refreshTimer); return }
-      if (failedQuoteChecks.current) return
+      // After a failed poll the backoff deadline stands; only its timer, cleared while paused, needs re-arming.
+      if (failedQuoteChecks.current) { queue(); return }
       nextAt = Math.max(beat, providerNextUpdateAt.current)
       if (open && !document.hidden && Date.now() >= nextAt) void refresh()
       else queue()
