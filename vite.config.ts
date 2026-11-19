@@ -95,7 +95,8 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules/react')) return 'react-vendor'
+          // Exact package match: react-remove-scroll and other react-* helpers belong with the lazy views that use them.
+          if (/\/node_modules\/(react|react-dom)\//.test(id)) return 'react-vendor'
           if (id.includes('node_modules/@e965/xlsx')) return 'xlsx-vendor'
         },
       },
