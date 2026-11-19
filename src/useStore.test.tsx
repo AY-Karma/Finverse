@@ -442,6 +442,27 @@ describe('automatic equity refresh', () => {
     } finally { await view.close() }
   })
 
+  it('waits for the provider snapshot to expire instead of re-reading it every beat', async () => {
+    refreshQuotes.mockImplementation(async () => ({ quotes: { [quoteKey(stock)]: stockQuote() }, updated: 1, failed: 0, skipped: 0, nextUpdateAt: Date.now() + 120_000 }))
+    const view = await mount()
+    try {
+      expect(refreshQuotes).toHaveBeenCalledOnce()
+      await act(async () => { await vi.advanceTimersByTimeAsync(119_999) })
+      expect(refreshQuotes).toHaveBeenCalledOnce()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+    } finally { await view.close() }
+  })
+
+  it('falls back to the beat when the provider gives no snapshot time', async () => {
+    refreshQuotes.mockResolvedValue({ quotes: { [quoteKey(stock)]: stockQuote() }, updated: 1, failed: 0, skipped: 0 })
+    const view = await mount()
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+      expect(refreshQuotes).toHaveBeenCalledTimes(2)
+    } finally { await view.close() }
+  })
+
   it('does not retry a rejected initial request on offhours tab returns', async () => {
     refreshQuotes.mockRejectedValue(new Error('Provider unreachable'))
     const view = await mount([stock], undefined, '2026-10-13T18:00:00Z')

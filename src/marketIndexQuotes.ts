@@ -5,6 +5,7 @@ import { MARKET_INDEX_CHOICES, selectedMarketIndices } from './marketIndexSelect
 /** Market-clock tick and the shortest gap between index checks; the polling pace itself comes from livePace's beat. */
 export const INDEX_REFRESH_MS = 1_000
 const FAILED_INDEX_REFRESH_MS = 30_000
+const MAX_SNAPSHOT_WAIT_MS = 10 * 60_000
 
 export interface MarketIndexSnapshot {
   quotes: Record<string, PublicMarketQuote>
@@ -97,7 +98,10 @@ export function loadMarketIndexQuotes(signal?: AbortSignal, force = false, selec
     savedSnapshot = { quotes: { ...savedSnapshot.quotes, ...quotes }, checkedAt: now,
       unavailable: [...savedSnapshot.unavailable.filter((symbol) => !indices.some((index) => index.symbol === symbol)), ...unavailable] }
     if (!lastSavedAt || now - lastSavedAt >= 10_000) persistMarketIndexQuotes()
-    state.nextCheckAt = now + (unavailable.length === indices.length ? FAILED_INDEX_REFRESH_MS : INDEX_REFRESH_MS)
+    // Yahoo's snapshot cannot change before its expiry, so the next check waits for it when every index reported one.
+    const hints = indices.map(({ symbol }) => fetched.get(symbol)?.nextUpdateAt ?? null)
+    const snapshotExpiry = hints.every((hint) => hint !== null) ? Math.min(Math.min(...hints as number[]), now + MAX_SNAPSHOT_WAIT_MS) : 0
+    state.nextCheckAt = unavailable.length === indices.length ? now + FAILED_INDEX_REFRESH_MS : Math.max(now + INDEX_REFRESH_MS, snapshotExpiry)
     return state.snapshot
   }, signal)
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createQuoteHandler } from '../api/quotes'
+import { createQuoteHandler, yahooSnapshotExpiry } from '../api/quotes'
 
 const NOW = Date.parse('2026-08-25T06:00:00Z')
 const state = vi.hoisted(() => ({ resolveSymbol: vi.fn<(symbol: string) => Promise<string | null>>() }))
@@ -406,5 +406,34 @@ describe('GET /api/quotes', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Request at most 25 symbols.',
     })
+  })
+})
+
+describe('Yahoo snapshot timing', () => {
+  const headers = (cacheControl: string | null, age: string | null) => new Headers({ ...(cacheControl ? { 'cache-control': cacheControl } : {}), ...(age ? { age } : {}) })
+
+  it('derives when the shared snapshot can next change from its lifetime and age', () => {
+    expect(yahooSnapshotExpiry(headers('public, max-age=300, stale-while-revalidate=120', '118'), 1_000)).toBe(1_000 + 182_000)
+    expect(yahooSnapshotExpiry(headers('public, max-age=300', null), 1_000)).toBe(301_000)
+  })
+
+  it('gives no time for expired, unbounded or missing lifetimes', () => {
+    expect(yahooSnapshotExpiry(headers('public, max-age=300', '305'), 1_000)).toBeNull()
+    expect(yahooSnapshotExpiry(headers('public, max-age=86400', '0'), 1_000)).toBeNull()
+    expect(yahooSnapshotExpiry(headers('no-store', null), 1_000)).toBeNull()
+    expect(yahooSnapshotExpiry(headers(null, '10'), 1_000)).toBeNull()
+  })
+
+  it('passes the expiry to the app only for a complete Yahoo answer', async () => {
+    const at = Date.parse('2026-11-19T05:00:00Z')
+    const withAge = async (input: string | URL | Request) => {
+      const response = yahooResponse(new URL(String(input)).searchParams.get('symbols')!.split(',')[0], 1309.8, Math.floor(at / 1000) - 60)
+      return new Response(response.body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300', age: '100' } })
+    }
+    const complete = await (await createQuoteHandler({ fetcher: vi.fn<typeof fetch>(withAge), now: () => at })(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS'))).json()
+    expect(complete.nextUpdateAt).toBe(new Date(at + 200_000).toISOString())
+    const partial = await (await createQuoteHandler({ fetcher: vi.fn<typeof fetch>(withAge), now: () => at })(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS,TCS.NS'))).json()
+    expect(partial.errors).toHaveLength(1)
+    expect(partial.nextUpdateAt).toBeUndefined()
   })
 })

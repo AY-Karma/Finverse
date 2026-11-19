@@ -67,8 +67,10 @@ describe('deployment security headers', () => {
     expect(rewrites.at(-1)).toEqual({ source: '/(.*)', destination: '/index.html' })
   })
 
-  it('runs API functions in Mumbai, next to Indian users and India-only sources', () => {
-    expect((JSON.parse(readFileSync('vercel.json', 'utf8')) as { regions?: string[] }).regions).toEqual(['bom1'])
+  it('runs API functions in Mumbai on Fluid compute (1M invocations on Hobby instead of the legacy 100K)', () => {
+    const config = JSON.parse(readFileSync('vercel.json', 'utf8')) as { regions?: string[]; fluid?: boolean }
+    expect(config.regions).toEqual(['bom1'])
+    expect(config.fluid).toBe(true)
   })
 
   it('lets browsers keep content-hashed build files without revalidating', () => {

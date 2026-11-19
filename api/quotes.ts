@@ -12,6 +12,8 @@ import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from 
 
 const UPSTREAM_TIMEOUT_MS = 4_000
 const YAHOO_SYMBOL_LIMIT = 20
+// Yahoo's spark snapshots last 300s; anything far beyond that is not a snapshot lifetime we understand.
+const MAX_SNAPSHOT_SECONDS = 600
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000
 const BSE_QUOTES_DISABLED = 'Delayed BSE quotes are disabled. Use a verified NSE pricing mapping.'
 
@@ -92,12 +94,26 @@ function movement(price: number, previousClose: number | null) {
   return { change, changePct: rounded((change / previousClose) * 100) }
 }
 
+/**
+ * When Yahoo's shared snapshot for this request can next change: its max-age minus its current age.
+ * Null when the copy is already past its lifetime (Yahoo is revalidating) or the headers are missing.
+ */
+export function yahooSnapshotExpiry(headers: Headers, now: number): number | null {
+  const maxAge = /(?:^|,)\s*max-age=(\d+)/i.exec(headers.get('cache-control') ?? '')
+  const age = Number(headers.get('age') ?? 0)
+  if (!maxAge || !Number.isFinite(age) || age < 0) return null
+  const remaining = Number(maxAge[1]) - age
+  return remaining > 0 && remaining <= MAX_SNAPSHOT_SECONDS ? now + remaining * 1000 : null
+}
+
+interface YahooChunkResult { quotes: MarketQuotePayload[]; error?: string; freshUntil?: number | null }
+
 async function fetchYahooQuoteChunk(
   symbols: string[],
   fetcher: typeof fetch,
   signal: AbortSignal,
   now: number,
-): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
+): Promise<YahooChunkResult> {
   const url = new URL('https://query1.finance.yahoo.com/v7/finance/spark')
   url.searchParams.set('symbols', symbols.join(','))
   url.searchParams.set('range', '1d')
@@ -138,17 +154,17 @@ async function fetchYahooQuoteChunk(
       })
     }
     return quotes.length > 0
-      ? { quotes }
+      ? { quotes, freshUntil: yahooSnapshotExpiry(response.headers, now) }
       : { quotes, error: 'Quote provider returned no usable prices.' }
   } catch {
     return { quotes: [], error: 'Quote provider could not be reached.' }
   }
 }
 
-async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal: AbortSignal, now: number): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
+async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal: AbortSignal, now: number): Promise<YahooChunkResult> {
   const chunks: string[][] = []
   for (let start = 0; start < symbols.length; start += YAHOO_SYMBOL_LIMIT) chunks.push(symbols.slice(start, start + YAHOO_SYMBOL_LIMIT))
-  const results: Awaited<ReturnType<typeof fetchYahooQuoteChunk>>[] = []
+  const results: YahooChunkResult[] = []
   let cursor = 0
   await Promise.all(Array.from({ length: Math.min(2, chunks.length) }, async () => {
     while (cursor < chunks.length && !signal.aborted) {
@@ -157,7 +173,10 @@ async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal
     }
   }))
   const errors = [...new Set(results.flatMap((result) => result.error ? [result.error] : []))]
-  return { quotes: results.flatMap((result) => result.quotes), ...(errors.length ? { error: errors.join(' ') } : {}) }
+  // The whole response can only change once every chunk's snapshot can, so the earliest expiry wins; any unknown makes it unknown.
+  const expiries = results.map((result) => result?.freshUntil ?? null)
+  const freshUntil = expiries.length && expiries.every((value) => value !== null) ? Math.min(...expiries as number[]) : null
+  return { quotes: results.flatMap((result) => result.quotes), freshUntil, ...(errors.length ? { error: errors.join(' ') } : {}) }
 }
 
 async function nseFallbackQuotes(
@@ -264,11 +283,14 @@ export function createQuoteHandler(
           symbol,
           message: symbol.endsWith('.BO') ? BSE_QUOTES_DISABLED : stale.has(symbol) ? `The provider quote is older than the last completed NSE session (${completedDate}).` : yahoo.error ?? 'No quote returned by the provider.',
         }))
+      // Only a complete, straight-from-Yahoo answer can say when Yahoo will next have something new.
+      const nextUpdateAt = !errors.length && quotes.every((quote) => quote.source === 'yahoo' && !('resolvedSymbol' in quote)) ? yahoo.freshUntil : null
       const payload: QuotesPayload = {
         provider: providerFor(quotes),
         fetchedAt: new Date(fetchedAt).toISOString(),
         quotes,
         errors,
+        ...(nextUpdateAt ? { nextUpdateAt: new Date(nextUpdateAt).toISOString() } : {}),
       }
       return json(payload, quotes.length > 0 ? 200 : 502, quotes.length > 0 ? cacheMs : 0)
     })

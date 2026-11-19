@@ -24,6 +24,8 @@ export interface PublicMarketQuote {
   change: number | null
   pct: number | null
   at: number
+  /** Earliest time the provider can have a newer price; null or absent when unknown. */
+  nextUpdateAt?: number | null
 }
 
 export { BENCHMARKS } from './marketIndexSelection'

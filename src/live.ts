@@ -54,9 +54,11 @@ interface YahooResult {
   at: number
   fetchedAt: number
   source: EquityQuoteSource
+  /** Earliest time the provider can have a newer price for this symbol's request; null when unknown. */
+  nextUpdateAt: number | null
 }
 
-function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number): YahooResult | null {
+function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number, nextUpdateAt: number | null): YahooResult | null {
   const at = Date.parse(payload.marketTime)
   if (
     !Number.isFinite(payload.price) ||
@@ -71,6 +73,7 @@ function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number): Yahoo
     at,
     fetchedAt,
     source: payload.source,
+    nextUpdateAt,
   }
 }
 
@@ -88,8 +91,10 @@ async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Ma
     const payload = (await response.json()) as QuotesPayload
     const fetchedAt = Date.parse(payload.fetchedAt)
     if (!Number.isFinite(fetchedAt)) return quotes
+    const hinted = Date.parse(payload.nextUpdateAt ?? '')
+    const nextUpdateAt = Number.isFinite(hinted) && hinted > fetchedAt ? hinted : null
     for (const item of payload.quotes ?? []) {
-      const quote = quoteFromPayload(item, fetchedAt)
+      const quote = quoteFromPayload(item, fetchedAt, nextUpdateAt)
       if (quote && batch.includes(item.symbol)) quotes.set(item.symbol, quote)
     }
   } catch {
@@ -98,24 +103,54 @@ async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Ma
   return quotes
 }
 
+/** Symbols requested within this window share one set of batches; 0 sends each request on its own. */
+export const quoteCoalescing = { windowMs: 25 }
+let coalescing: { symbols: Set<string>; batches: Promise<string[][]> } | null = null
+
+/**
+ * Holdings and the index ticker poll on the same beat, so their symbols go out together: one call where there were two.
+ * Each caller still receives only the symbols it asked for.
+ */
+function batchesOf(symbols: string[]): string[][] {
+  const all = [...symbols].sort()
+  return Array.from({ length: Math.ceil(all.length / MAX_MARKET_SYMBOLS) }, (_, index) => all.slice(index * MAX_MARKET_SYMBOLS, (index + 1) * MAX_MARKET_SYMBOLS))
+}
+
+function sharedBatches(symbols: string[]): Promise<string[][]> {
+  if (quoteCoalescing.windowMs <= 0) return Promise.resolve(batchesOf(symbols))
+  if (!coalescing) {
+    const group: { symbols: Set<string>; batches: Promise<string[][]> } = { symbols: new Set(), batches: Promise.resolve([]) }
+    group.batches = new Promise((resolve) => setTimeout(() => {
+      if (coalescing === group) coalescing = null
+      resolve(batchesOf([...group.symbols]))
+    }, quoteCoalescing.windowMs))
+    coalescing = group
+  }
+  for (const symbol of symbols) coalescing.symbols.add(symbol)
+  return coalescing.batches
+}
+
 export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal, onBatch?: (quotes: Map<string, YahooResult>) => void): Promise<Map<string, YahooResult>> {
   const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
+  const wanted = new Set(unique)
   const quotes = new Map<string, YahooResult>()
   const missing = new Set<string>()
+  if (!unique.length) return quotes
+  const batches = (await sharedBatches(unique)).filter((batch) => batch.some((symbol) => wanted.has(symbol)))
+  signal?.throwIfAborted()
   let next = 0
   const worker = async () => {
-    while (next < unique.length) {
+    while (next < batches.length) {
       signal?.throwIfAborted()
-      const start = next
-      next += MAX_MARKET_SYMBOLS
-      const batch = unique.slice(start, start + MAX_MARKET_SYMBOLS)
+      const batch = batches[next++]
       const results = await sharedQuoteBatch(batch.join(','), (requestSignal) => fetchQuoteBatch(batch, requestSignal), signal)
-      for (const [symbol, quote] of results) quotes.set(symbol, quote)
-      if (results.size) onBatch?.(results)
-      if (results.size) for (const symbol of batch) if (symbol.endsWith('.NS') && !results.has(symbol)) missing.add(symbol)
+      const own = new Map([...results].filter(([symbol]) => wanted.has(symbol)))
+      for (const [symbol, quote] of own) quotes.set(symbol, quote)
+      if (own.size) onBatch?.(own)
+      if (results.size) for (const symbol of batch) if (wanted.has(symbol) && symbol.endsWith('.NS') && !results.has(symbol)) missing.add(symbol)
     }
   }
-  await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, Math.ceil(unique.length / MAX_MARKET_SYMBOLS)) }, worker))
+  await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, batches.length) }, worker))
   // Healthy batches reach callers before single-symbol requests enable server recovery.
   const recovery = [...missing]
   let nextRecovery = 0
@@ -197,6 +232,8 @@ export interface LiveQuotesResult {
   updated: number
   failed: number
   skipped: number
+  /** Earliest time any refreshed stock can have a newer provider price; absent when unknown or no stocks were refreshed. */
+  nextUpdateAt?: number
 }
 
 export function quoteRefreshIssueText(result: LiveQuotesResult | null): string | null {
@@ -239,6 +276,7 @@ export async function fetchLiveQuotes(
     const symbol = position.type === 'mutual-fund' ? null : resolveYahooSymbol(position)
     return symbol ? [{ position, symbol }] : []
   })
+  let equityNextUpdateAt: number | undefined
   const refreshEquities = async () => {
     const equityQuotes = await fetchYahooPrices(equities.map(({ symbol }) => symbol), signal, (batch) => {
       if (!onProgress) return
@@ -270,6 +308,8 @@ export async function fetchLiveQuotes(
           }
         : { key, status: 'failed' })
     }
+    const hints = equities.map(({ symbol }) => equityQuotes.get(symbol)?.nextUpdateAt ?? null)
+    if (hints.length && hints.every((hint) => hint !== null)) equityNextUpdateAt = Math.min(...hints as number[])
   }
   for (const position of unique) {
     if (position.type !== 'mutual-fund' && !resolveYahooSymbol(position)) {
@@ -329,6 +369,7 @@ export async function fetchLiveQuotes(
     updated: outcomes.filter((o) => o.status === 'updated').length,
     failed: outcomes.filter((o) => o.status === 'failed').length,
     skipped: outcomes.filter((o) => o.status === 'skipped').length,
+    ...(equityNextUpdateAt ? { nextUpdateAt: equityNextUpdateAt } : {}),
   }
 }
 

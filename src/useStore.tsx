@@ -47,6 +47,7 @@ type RefreshResult =
 // Market open/close is a clock check with no network use, so it stays at 1s; polling follows livePace's beat.
 const MARKET_CLOCK_MS = 1_000
 const FAILED_QUOTE_REFRESH_MS = 30_000
+const MAX_SNAPSHOT_WAIT_MS = 10 * 60_000
 const MAX_REFRESH_BACKOFF_MS = 5 * 60_000
 const NAV_SLOT_WINDOW_MS = 60_000
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
@@ -147,7 +148,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const loadedQuoteKey = useRef<string | null>(null)
   const failedQuoteChecks = useRef(0)
   const lastQuoteCheck = useRef(0)
-  const scheduleQuotes = useRef<((failed: boolean, checked?: boolean) => void) | null>(null)
+  const scheduleQuotes = useRef<((failed: boolean, checked?: boolean, nextUpdateAt?: number) => void) | null>(null)
+  // Yahoo cannot have newer stock prices before this time, so polls wait for it instead of re-reading the same snapshot.
+  const providerNextUpdateAt = useRef(0)
 
   const assertCurrentWorkspace = useCallback(() => {
     if (workspaceChangedRef.current
@@ -525,7 +528,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const result = await refreshQuoteGroup('equity')
       if (!result) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
       const failed = result.failed > 0 && result.updated === 0 && result.skipped === 0
-      scheduleQuotes.current?.(failed)
+      scheduleQuotes.current?.(failed, true, result.nextUpdateAt)
       if (failed) return { ok: false, reason: 'failed', retryInMs: 0 }
       recordManualRefresh()
       return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
@@ -559,11 +562,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (open) void refresh()
       }, Math.max(0, nextAt - Date.now()))
     }
-    const schedule = (failed: boolean, checked = true) => {
+    const schedule = (failed: boolean, checked = true, nextUpdateAt?: number) => {
       if (!active) return
       if (checked) lastQuoteCheck.current = Date.now()
       failedQuoteChecks.current = failed ? Math.min(failedQuoteChecks.current + 1, 4) : 0
-      nextAt = failed ? Date.now() + Math.min(FAILED_QUOTE_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS) : livePace.nextBeatAt() ?? Date.now() + PACE_STEPS[0]
+      providerNextUpdateAt.current = !failed && nextUpdateAt ? Math.min(nextUpdateAt, Date.now() + MAX_SNAPSHOT_WAIT_MS) : 0
+      nextAt = failed ? Date.now() + Math.min(FAILED_QUOTE_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS)
+        : Math.max(livePace.nextBeatAt() ?? Date.now() + PACE_STEPS[0], providerNextUpdateAt.current)
       queue()
     }
     scheduleQuotes.current = schedule
@@ -576,7 +581,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const result = await refreshQuoteGroup('equity')
         if (result && result.updated > 0) livePace.recordResponse(performance.now() - started)
-        if (active && result) schedule(result.failed > 0 && result.updated === 0 && result.skipped === 0)
+        if (active && result) schedule(result.failed > 0 && result.updated === 0 && result.skipped === 0, true, result.nextUpdateAt)
       } catch {
         if (active && !workspaceChangedRef.current) schedule(false, false)
       }
@@ -611,7 +616,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const beat = livePace.nextBeatAt(lastQuoteCheck.current)
       if (beat == null) { clearTimeout(refreshTimer); return }
       if (failedQuoteChecks.current) return
-      nextAt = beat
+      nextAt = Math.max(beat, providerNextUpdateAt.current)
       if (open && !document.hidden && Date.now() >= nextAt) void refresh()
       else queue()
     })
