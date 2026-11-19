@@ -30,7 +30,7 @@ export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly strin
       lastRefreshAt = Date.now()
       const request = new AbortController()
       controller = request
-      // Background polls keep showing the last quotes instead of toggling "Loading" every second.
+      // Background polls keep showing the last quotes instead of toggling "Loading" on every poll.
       if (!cachedMarketIndexQuotes(selection).checkedAt) setLoading(true)
       void loadMarketIndexQuotes(request.signal, force, selection)
         .then((next) => { if (active && !request.signal.aborted) setCurrent({ key, snapshot: next }) })

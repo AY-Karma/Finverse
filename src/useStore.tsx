@@ -462,7 +462,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     slot.current = controller
     activeRefreshControllers.current.add(controller)
-    // Only the first load of a group shows progress; background polls would flicker the indicator every second.
+    // Only the first load of a group shows progress; background polls would flicker the indicator on every poll.
     const ownsIndicator = !quoteResults.current[group] && (group === 'equity' || !positionsRef.current.some(hasLiveListing))
     if (ownsIndicator) setMarketDataRefreshing(true)
     const apply = (result: LiveQuotesResult) => {

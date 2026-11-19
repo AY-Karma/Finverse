@@ -4,9 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --mode sip-prototype --host 127.0.0.1 --port 5173 --strictPort",
+    "dev": "vite",
     "dev:monitor": "vite --host 127.0.0.1 --port 5190 --open \"/app/monitor\"",
-    "prototype:sip": "npm run dev",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "preview": "vite preview"
