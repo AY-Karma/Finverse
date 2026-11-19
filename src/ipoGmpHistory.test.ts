@@ -72,6 +72,11 @@ describe('GET /api/ipoGmpHistory', () => {
     expect((await createIpoGmpHistoryHandler({ fetcher: fetcher(coreRow({ slug: 'another-ipo' })), now: () => NOW })(request())).status).toBe(502)
   })
 
+  it('answers with no history, not an error, when the issue row cannot be used', async () => {
+    const body = await (await createIpoGmpHistoryHandler({ fetcher: fetcher(coreRow({ board: 'UNKNOWN' })), now: () => NOW })(request())).json()
+    expect(body).toEqual({ slug: SLUG, gmp: null, points: [], checkedAt: NOW })
+  })
+
   it('rejects unsupported requests before any provider access', async () => {
     const source = fetcher()
     const handler = createIpoGmpHistoryHandler({ fetcher: source, now: () => NOW })

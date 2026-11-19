@@ -32,8 +32,15 @@ export function createRequestBudget(now: () => number = Date.now) {
     cache.delete(key)
   }
 
+  /**
+   * A replayed entry keeps its original headers, so its edge lifetime must shrink to what is left of this cache's own:
+   * otherwise the CDN could hold a copy for a whole extra window beyond the lifetime the response was built for.
+   */
   function restore(entry: CachedResponse): Response {
-    return new Response(entry.body, { status: entry.status, headers: entry.headers })
+    const remaining = Math.max(1, Math.ceil((entry.expiresAt - now()) / 1000))
+    const headers = entry.headers.map(([name, value]): [string, string] => name.toLowerCase() === 'vercel-cdn-cache-control'
+      ? [name, value.replace(/s-maxage=(\d+)/, (_match, seconds) => `s-maxage=${Math.min(Number(seconds), remaining)}`)] : [name, value])
+    return new Response(entry.body, { status: entry.status, headers })
   }
 
   return async (

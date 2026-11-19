@@ -224,7 +224,8 @@ export function createIpoGmpHistoryHandler(dependencies: Partial<Dependencies> =
       const missing = () => Response.json({ slug, gmp: null, points: [], checkedAt } satisfies IpoGmpHistoryResponse, { headers: HEADERS })
       const raw: unknown = JSON.parse(await retrieve(`https://www.xflot.com/api/public/market/ipos/${slug}`, signal))
       if (!record(raw) || raw.ok !== true || !record(raw.ipo) || raw.ipo.slug !== slug) throw new Error('Historical IPO identity changed.')
-      const issue = parseIpoDirectory({ ok: true, ipos: [raw.ipo] }, checkedAt)[0]
+      let issue: IpoIssue | undefined
+      try { issue = parseIpoDirectory({ ok: true, ipos: [raw.ipo] }, checkedAt)[0] } catch { return missing() }
       if (!issue) return missing()
       const trend = parseIpoGmpTrend(raw.ipo.gmp ?? [], issue, slug, checkedAt)
       if (!trend) return missing()

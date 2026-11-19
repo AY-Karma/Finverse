@@ -25,6 +25,21 @@ describe('public API budgets', () => {
     expect(lifetime).toHaveBeenCalledTimes(2)
   })
 
+  it('shrinks the edge lifetime of a replayed response to what is left of the local cache', async () => {
+    let at = 1_000_000
+    const budget = createRequestBudget(() => at)
+    const load = vi.fn(async () => new Response('ok', { headers: { 'Vercel-CDN-Cache-Control': 'public, s-maxage=1800, must-revalidate', 'Cache-Control': 'no-store' } }))
+    const first = await budget('trend', 3_600_000, load)
+    expect(first.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1800, must-revalidate')
+    at += 2_700_000 // 45 minutes later: the edge copy has expired but the local cache still has 15 minutes
+    const replay = await budget('trend', 3_600_000, load)
+    expect(load).toHaveBeenCalledOnce()
+    expect(replay.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=900, must-revalidate')
+    expect(replay.headers.get('cache-control')).toBe('no-store')
+    at += 899_000
+    expect((await budget('trend', 3_600_000, load)).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1, must-revalidate')
+  })
+
   it('returns a bounded deadline response even if a provider ignores cancellation', async () => {
     vi.useFakeTimers()
     const budget = createRequestBudget()
