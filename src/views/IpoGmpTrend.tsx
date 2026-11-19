@@ -76,7 +76,7 @@ export function IpoGmpTrend({ name, points, sourceUrl, status, onRetry, onClose,
       </div>
       <div className="mi-trend-dates"><time dateTime={points[0].date}>{dateLabel(points[0].date)}</time>{points.length > 1 && <time dateTime={points.at(-1)!.date}>{dateLabel(points.at(-1)!.date)}</time>}</div>
       </div></div>
-      <p className="mi-trend-source">{points.length === 1 ? 'One reported day' : 'Reported days only'}{sourceUrl && <> · <a href={sourceUrl} target="_blank" rel="noopener noreferrer">GMP Today <ActionIcon name="external" /></a></>}</p>
+      <p className="mi-trend-source">{points.length === 1 ? 'One reported day' : 'Reported days only'}{sourceUrl && <> · <a href={sourceUrl} target="_blank" rel="noopener noreferrer">Xflot <ActionIcon name="external" /></a></>}</p>
       {status === 'error' && <div className="mi-trend-message" role="status"><span>Showing saved history.</span><button className="mp-text-button" type="button" onClick={onRetry}>Retry</button></div>}
     </> : <div className="mi-trend-message" role="status"><p>{status === 'loading' ? 'Loading daily GMP…' : status === 'error' ? 'Daily GMP could not be loaded.' : 'Daily GMP history is unavailable for this IPO.'}</p>{status === 'error' && <button type="button" className="mp-text-button" onClick={onRetry}>Try again</button>}</div>}
   </section>

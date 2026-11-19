@@ -170,7 +170,6 @@ function IssueRow({ issue, expanded, trendExpanded, onToggle, onToggleTrend, his
 }
 
 function FeedContext({ feed }: { feed: IpoFeed }) {
-  const gmpSource = feed.sources.find((source) => source.name === 'GMP Today' && source.updatedAt)
   const notesId = useId()
   return <footer className="mi-footer">
     <details className="mi-disclaimer" aria-labelledby={notesId}>
@@ -178,9 +177,8 @@ function FeedContext({ feed }: { feed: IpoFeed }) {
       <div className="mi-disclaimer-body">
       <p>{feed.disclaimer ?? 'GMP is reported by public trackers and does not guarantee listing gains.'}</p>
       <div className="mi-disclaimer-groups">
-        <div><h4>Data sources</h4><p className="mi-source-line"><a href="https://www.xflot.com/" target="_blank" rel="noopener noreferrer">Xflot</a> supplies issue details. <a href="https://gmptoday.in/" target="_blank" rel="noopener noreferrer">GMP Today</a> supplies reported premiums.</p></div>
+        <div><h4>Data sources</h4><p className="mi-source-line"><a href="https://www.xflot.com/" target="_blank" rel="noopener noreferrer">Xflot</a> supplies issue details and reported premiums, gathered from public GMP trackers.</p></div>
         <div><h4>Updates</h4><dl className="mi-update-times">
-          {gmpSource?.updatedAt && <div className="mi-source-time"><dt>GMP page updated</dt><dd><time dateTime={new Date(gmpSource.updatedAt).toISOString()}>{updated.format(gmpSource.updatedAt)} IST</time></dd></div>}
           <div><dt>IPO list checked</dt><dd>{feed.fetchedAt ? <time dateTime={new Date(feed.fetchedAt).toISOString()}>{updated.format(feed.fetchedAt)} IST</time> : 'Update time unavailable'}</dd></div>
         </dl><p>Source-page updates are not dealer quote times.</p></div>
         {(feed.warnings.length > 0 || feed.stale) && <div className="mi-coverage"><h4>Coverage</h4>

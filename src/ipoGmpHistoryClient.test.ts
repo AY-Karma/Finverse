@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 const NOW = Date.parse('2026-11-08T06:00:00Z')
 const reply = (overrides = {}) => ({ slug: 'example-ipo', checkedAt: NOW, gmp: {
-  source: 'GMP Today', sourceUrl: 'https://gmptoday.in/ipo/example/', amount: 0, percent: 0,
+  source: 'Xflot', sourceUrl: 'https://www.xflot.com/ipo/example', amount: 0, percent: 0,
   observedAt: null, sourceUpdatedAt: null, asOfDate: '2026-10-22', sources: 2, rangeLow: 0, rangeHigh: 0,
 }, ...overrides })
 
@@ -52,7 +52,7 @@ it('expires old snapshots without altering the historical observation date', asy
 
 it('restores a real daily series including zero and losses without adding the current quote', async () => {
   const points = [{ date: '2026-10-20', amount: -5 }, { date: '2026-10-21', amount: 0 }, { date: '2026-10-22', amount: 0 }]
-  const value = reply({ points, sourceUrl: 'https://gmptoday.in/ipo/example/', sourceUpdatedAt: null })
+  const value = reply({ points, sourceUrl: 'https://www.xflot.com/ipo/example', sourceUpdatedAt: null })
   const fetcher = vi.fn().mockResolvedValue(Response.json(value))
   vi.stubGlobal('fetch', fetcher)
   let client = await import('./ipoGmpHistory')

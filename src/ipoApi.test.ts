@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createIpoHandler, enrichIpoGmp, parseGmpBoard, parseIpoDirectory } from '../api/ipos'
+import { createIpoHandler, parseIpoDirectory } from '../api/ipos'
 import { isIpoFeed, isIpoSourceUrl, type IpoFeed } from './ipoProtocol'
 
 const NOW = Date.parse('2026-11-07T14:00:00Z')
@@ -7,9 +7,6 @@ const sourceRow = (overrides = {}) => ({ slug: 'antala-industries-ipo', name: 'A
   openDate: '2026-10-29T00:00:00Z', closeDate: '2026-11-05T00:00:00Z', listingDate: '2026-11-11T00:00:00Z',
   priceMin: 62, priceMax: 66, lotSize: 2000, lastGmp: null, ...overrides })
 const directory = (rows = [sourceRow()]) => ({ ok: true, ipos: rows })
-const gmpHtml = (amount = '0', extra = '') => `<meta name="gmp-built" content="2026-11-07T17:46:00+05:30">
-  <a class="row" href="/ipo/antala-industries/" data-group="sme" data-slug="antala-industries" data-med="${amount}" data-name="Antala Industries" data-est="0">
-  <span class="c-range num">₹0–5.36</span><span class="c-conf">medium<small>6 sources</small></span></a>${extra}`
 const request = () => new Request('http://localhost/api/ipos')
 
 describe('IPO directory and reported GMP', () => {
@@ -31,33 +28,9 @@ describe('IPO directory and reported GMP', () => {
     expect(issues.map((issue) => issue.status)).toEqual(['LISTED', 'UPCOMING', 'CLOSED'])
   })
 
-  it('parses the public board with source-build time distinct from quote time', () => {
-    const board = parseGmpBoard(gmpHtml(), NOW)
-    expect(board.rows[0].gmp).toMatchObject({ amount: 0, percent: 0, sources: 6, rangeLow: 0, rangeHigh: 5.36,
-      sourceUpdatedAt: Date.parse('2026-11-07T17:46:00+05:30'), observedAt: null })
-    expect(board.rows[0].gmp.sourceUrl).toBe('https://gmptoday.in/ipo/antala-industries/')
-  })
-
-  it('fails closed on missing update times, changed structure and invalid numbers', () => {
-    expect(() => parseGmpBoard(gmpHtml().replace('name="gmp-built"', 'name="new"'), NOW)).toThrow()
-    expect(() => parseGmpBoard(gmpHtml('--'), NOW)).toThrow()
-    expect(() => parseGmpBoard(gmpHtml().replace('data-group="sme"', 'data-group="unknown"'), NOW)).toThrow()
+  it('fails closed when the directory format changes', () => {
     expect(() => parseIpoDirectory({ ok: true, ipos: [{ name: 'Unrecognized format' }] }, NOW)).toThrow()
-  })
-
-  it('joins legal-name equivalents with the same board, but refuses ambiguous issues', () => {
-    const board = parseGmpBoard(gmpHtml(), NOW)
-    const issues = parseIpoDirectory(directory(), NOW)
-    expect(enrichIpoGmp(issues, board, NOW)[0].gmp?.amount).toBe(0)
-    expect(enrichIpoGmp([{ ...issues[0], board: 'MAINBOARD' }], board, NOW)[0].gmp).toBeNull()
-    expect(enrichIpoGmp([issues[0], { ...issues[0], id: 'other-offer' }], board, NOW).every((issue) => issue.gmp === null)).toBe(true)
-    const duplicate = { ...board, rows: [...board.rows, { ...board.rows[0], slug: 'another' }] }
-    expect(enrichIpoGmp(issues, duplicate, NOW)[0].gmp).toBeNull()
-  })
-
-  it('does not attach a current board quote to an older issue with the same name', () => {
-    const issues = parseIpoDirectory(directory([sourceRow({ closeDate: '2026-01-01' })]), NOW)
-    expect(enrichIpoGmp(issues, parseGmpBoard(gmpHtml(), NOW), NOW)[0].gmp).toBeNull()
+    expect(() => parseIpoDirectory({ ok: false, ipos: [] }, NOW)).toThrow()
   })
 
   it('collapses identical records and omits only conflicting duplicate identities', () => {
@@ -110,22 +83,22 @@ describe('IPO directory and reported GMP', () => {
 
 describe('GET /api/ipos', () => {
   it('deduplicates concurrent requests and caches a shared public snapshot', async () => {
-    const fetcher = vi.fn<typeof fetch>(async (input) => String(input).includes('xflot.com') ? Response.json(directory()) : new Response(gmpHtml()))
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(directory()))
     const handler = createIpoHandler({ fetcher, now: () => NOW })
     const responses = await Promise.all([handler(request()), handler(request()), handler(request())])
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher).toHaveBeenCalledTimes(1)
     expect(responses[0].headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=3600, must-revalidate')
     const body = await responses[0].json()
     expect(isIpoFeed(body)).toBe(true)
-    expect(body.issues[0].gmp.amount).toBe(0)
+    expect(body.issues).toHaveLength(1)
     expect((await handler(request())).ok).toBe(true)
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
   it('retains a successful snapshot through later source failures without freshening it', async () => {
     let at = NOW, failed = false
-    const fetcher = vi.fn<typeof fetch>(async (input) => failed ? new Response('', { status: 503 })
-      : String(input).includes('xflot.com') ? Response.json({ ...directory(), disclaimer: 'Aggregated public information. GMP is unofficial.' }) : new Response(gmpHtml()))
+    const fetcher = vi.fn<typeof fetch>(async () => failed ? new Response('', { status: 503 })
+      : Response.json({ ...directory(), disclaimer: 'Aggregated public information. GMP is unofficial.' }))
     const handler = createIpoHandler({ fetcher, now: () => at })
     await handler(request())
     failed = true
@@ -137,15 +110,15 @@ describe('GET /api/ipos', () => {
     expect(body.issues).toHaveLength(1)
     expect(body.fetchedAt).toBe(NOW)
     expect(body.stale).toBe(true)
-    expect(body.warnings).toHaveLength(2)
+    expect(body.warnings).toEqual(['IPO details could not be refreshed. Showing the last available data when possible.'])
     expect(body.disclaimer).toBe('Aggregated public information. GMP is unofficial.')
   })
 
   it('serves healthy issues and a warning when upstream duplicates conflict', async () => {
-    const fetcher = vi.fn<typeof fetch>(async (input) => String(input).includes('xflot.com') ? Response.json({
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({
       ...directory([sourceRow(), sourceRow({ slug: 'duplicate', priceMax: 90 }), sourceRow({ slug: 'duplicate', priceMax: 91 })]),
       disclaimer: 'Source disclaimer retained.',
-    }) : new Response(gmpHtml()))
+    }))
     const response = await createIpoHandler({ fetcher, now: () => NOW })(request())
     const body = await response.json()
     expect(response.status).toBe(200)
@@ -155,23 +128,18 @@ describe('GET /api/ipos', () => {
     expect(body.disclaimer).toBe('Source disclaimer retained.')
   })
 
-  it('keeps core details when GMP is unavailable and only retries the failed source', async () => {
-    let at = NOW
-    const fetcher = vi.fn<typeof fetch>(async (input) => String(input).includes('xflot.com') ? Response.json(directory()) : new Response('', { status: 503 }))
-    const handler = createIpoHandler({ fetcher, now: () => at })
-    const body = await (await handler(request())).json()
-    expect(body.issues).toHaveLength(1)
-    expect(body.issues[0].gmp).toBeNull()
-    expect(body.stale).toBe(true)
-    at += 60_001
-    const next = await (await handler(request())).json()
-    expect(fetcher).toHaveBeenCalledTimes(3)
-    expect(next.fetchedAt).toBe(NOW)
+  it('takes GMP and its source count from Xflot alone, without contacting GMP Today', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(directory([sourceRow({ lastGmp: 12, lastGmpPct: 18.2, gmpSources: 3 })])))
+    const body = await (await createIpoHandler({ fetcher, now: () => NOW })(request())).json()
+    expect(fetcher.mock.calls.map(([input]) => new URL(String(input)).hostname)).toEqual(['www.xflot.com'])
+    expect(body.issues[0].gmp).toMatchObject({ amount: 12, percent: 18.2, source: 'Xflot', sources: 3 })
+    expect(body.sources.map((source: { name: string }) => source.name)).toEqual(['Xflot'])
+    expect(body).toMatchObject({ warnings: [], stale: false })
   })
 
   it('does not replace an existing directory with an unexpected empty refresh', async () => {
     let at = NOW
-    const fetcher = vi.fn<typeof fetch>(async (input) => String(input).includes('xflot.com') ? Response.json(directory(at === NOW ? [sourceRow()] : [])) : new Response(gmpHtml()))
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(directory(at === NOW ? [sourceRow()] : [])))
     const handler = createIpoHandler({ fetcher, now: () => at })
     await handler(request())
     at += 3_600_001
