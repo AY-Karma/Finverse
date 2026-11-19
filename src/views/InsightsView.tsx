@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { formatCurrency, formatPercent, signedCurrency, signedPercent, signedPoints } from '../valuation'
+import { formatCurrency, formatPercent, gainTone, signedCurrency, signedPercent, signedPoints } from '../valuation'
 import { privateValue } from '../privacy'
 import { BENCHMARKS, marketData } from '../marketData'
 import type { SectorAllocation } from '../investmentWorkspace'
@@ -248,7 +248,7 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
   const sessionDate = snapshot.dailyChangeDate
     ? dateFormatter({ day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(new Date(`${snapshot.dailyChangeDate}T00:00:00+05:30`))
     : null
-  const summaryPnlUp = snapshot.pnl >= 0
+  const summaryPnlTone = gainTone(snapshot.pnl)
   const sessionDirection = hide || dataLabels.sessionValue == null || dataLabels.sessionValue === 0 ? '' : dataLabels.sessionValue > 0 ? 'up' : 'down'
 
   return (
@@ -283,8 +283,8 @@ export function InsightsView({ onRequestImport }: { onRequestImport: () => void 
           <div className="insights-summary-pnl">
             <span className="score-label">{snapshot.valuationComplete ? 'Unrealized P&L' : 'Priced holdings P&L'}</span>
             <div className="insights-summary-reading">
-              <strong className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(signedCurrency(snapshot.pnl)) : 'Unpriced'}</strong>
-              <small className={!hide && snapshot.pricedCount ? summaryPnlUp ? 'up' : 'down' : ''}>{snapshot.pricedCount ? mask(formatPercent(snapshot.pnlPct)) : 'Unavailable'}{!snapshot.valuationComplete && <span> on priced cost</span>}</small>
+              <strong className={!hide && snapshot.pricedCount ? summaryPnlTone : ''}>{snapshot.pricedCount ? mask(signedCurrency(snapshot.pnl)) : 'Unpriced'}</strong>
+              <small className={!hide && snapshot.pricedCount ? summaryPnlTone : ''}>{snapshot.pricedCount ? mask(formatPercent(snapshot.pnlPct)) : 'Unavailable'}{!snapshot.valuationComplete && <span> on priced cost</span>}</small>
             </div>
           </div>
           </div>

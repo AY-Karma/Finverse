@@ -107,10 +107,12 @@ describe('research desk', () => {
     expect(container.querySelector('.rd-avatar img')).toBeNull()
     expect(container.querySelector('a[href*="TCS"], a[href*="Tata"]')).toBeNull()
     expect(container.querySelector<HTMLInputElement>('[aria-label="Search research holdings"]')?.disabled).toBe(true)
+    expect(container.querySelector('.history-panel')).toBeNull()
     state.settings.hideValues = false
     await render()
     expect(container.textContent).toContain(position.name)
     expect(container.querySelector('.rd-avatar img')).not.toBeNull()
+    expect(container.querySelector('.history-panel')).not.toBeNull()
   })
 
   it('hides an open Sources dossier when masking changes', async () => {

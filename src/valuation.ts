@@ -319,6 +319,11 @@ export function plusSign(value: number): string {
   return value > 0 ? '+' : ''
 }
 
+/** Gain/loss class for a signed amount; zero and unknown stay neutral, matching plusSign. */
+export function gainTone(value: number | null): '' | 'up' | 'down' {
+  return value == null || value === 0 ? '' : value > 0 ? 'up' : 'down'
+}
+
 export function signedCurrency(value: number): string {
   return `${plusSign(value)}${formatCurrency(value)}`
 }

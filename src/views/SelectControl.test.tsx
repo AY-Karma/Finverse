@@ -99,6 +99,20 @@ describe('shared dropdown gestures', () => {
     expect(document.activeElement).toBe(trigger())
   })
 
+  it('keeps the menu closed after Enter selects an option', async () => {
+    await act(async () => { trigger().focus(); trigger().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    await settle()
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent === 'INDmoney')!
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    await act(async () => { option.focus(); option.dispatchEvent(enter) })
+    // Browsers turn an uncancelled Enter into a click on whatever holds focus, which is the trigger by now.
+    if (!enter.defaultPrevented) await act(async () => document.activeElement!.dispatchEvent(mouse('click', 0)))
+    await settle()
+    expect(trigger().textContent).toContain('INDmoney')
+    expect(trigger().getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger())
+  })
+
   it('restores trigger focus in the close update before the next keyboard action', async () => {
     await act(async () => trigger().click())
     await settle()

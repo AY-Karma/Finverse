@@ -1,5 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, quoteKey, signedCurrency } from '../valuation'
+import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, gainTone, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, quoteKey, signedCurrency } from '../valuation'
 import { useStore } from '../useStore'
 import { numberFormatter } from '../formatters'
 import { privateValue } from '../privacy'
@@ -848,10 +848,6 @@ function moveTrend(move: number | null): string {
 }
 
 /** Zero is neither a gain nor a loss. */
-function gainTone(value: number | null): string {
-  return value == null || value === 0 ? '' : value > 0 ? 'up' : 'down'
-}
-
 function LastTrade({ price, dayMove, hideValues, imported = false }: { price: number | null; dayMove: number | null; hideValues: boolean; imported?: boolean }) {
   const trend = moveTrend(dayMove)
   return (

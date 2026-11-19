@@ -313,7 +313,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [assertCurrentWorkspace])
 
   const confirmFundScheme = useCallback(async (holdingId: string, candidate: FundSchemeCandidate) => {
-    if (!settings.allowExternalData) throw new Error('Enable external market data before confirming a provider scheme.')
+    if (!settings.allowExternalData) throw new Error('Market data is paused. Reload this tab before confirming a provider scheme.')
     const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length || members.some((position) => position.type !== 'mutual-fund' || !canConfirmFundScheme(position.name || position.ticker, candidate))) throw new Error('Choose a scheme compatible with this fund, plan and option.')
     if (members.some((position) => !hasSupportedValuationCurrency(position))) throw new Error('MFAPI NAV and history support INR mutual-fund holdings only. Original native amounts are retained.')
@@ -340,7 +340,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [persistPortfolioChange])
 
   const confirmNsePricing = useCallback(async (holdingId: string, candidate: NsePricingCandidate) => {
-    if (!settings.allowExternalData) throw new Error('Enable external market data before approving NSE pricing.')
+    if (!settings.allowExternalData) throw new Error('Market data is paused. Reload this tab before approving NSE pricing.')
     const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length) throw new Error('This holding is no longer available. Reload and try again.')
     if (members.some((position) => !hasSupportedValuationCurrency(position))) throw new Error('NSE pricing supports INR holdings only.')

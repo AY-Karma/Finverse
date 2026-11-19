@@ -88,6 +88,13 @@ export function SelectControl({ label, value, options, onChange, id: suppliedId,
             {group.options.map((option) => <Fragment key={option.value}>
               {option.separatorBefore && <Select.Separator className="select-control-separator" />}
               <Select.Item value={option.value} className="select-control-option"
+                onKeyDown={(event) => {
+                  // Select here and cancel Enter: closing moves focus to the trigger, and the browser
+                  // would otherwise turn this Enter into a click on it and reopen the menu.
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  onChange(option.value); setOpen(false)
+                }}
                 onPointerUp={(event) => { if (event.pointerType === 'mouse') event.preventDefault() }}
                 onClick={(event) => {
                   event.preventDefault(); event.stopPropagation()
