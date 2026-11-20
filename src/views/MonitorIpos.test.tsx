@@ -335,11 +335,10 @@ describe('Monitor IPOs', () => {
     const sources = container.querySelector('.mi-source-line')!
     expect(sources.textContent).toContain('Xflot')
     expect(sources.querySelectorAll('a')).toHaveLength(1)
-    expect(container.querySelector('.mi-update-times time')?.getAttribute('datetime')).toBe('2026-11-07T12:00:00.000Z')
+    expect(container.querySelector('.mi-feed-facts time')?.getAttribute('datetime')).toBe('2026-11-07T12:00:00.000Z')
     const disclaimer = container.querySelector<HTMLElement>('.mi-disclaimer')!
     expect(disclaimer.tagName).toBe('DETAILS')
     expect(disclaimer.hidden).toBe(false)
-    expect(disclaimer.textContent).toContain('Source-page updates are not dealer quote times.')
     expect(container.querySelector('.mi-data-notes-toggle')).toBeNull()
   })
 
@@ -361,7 +360,7 @@ describe('Monitor IPOs', () => {
     expect(upcomingRows()[0].textContent).toBe('Company unannouncedMainboard')
   })
 
-  it('discloses the grouped publisher disclaimer with an alert triangle and closes on repeat click', async () => {
+  it('discloses the publisher disclaimer with its source and check time, without internal feed warnings', async () => {
     const disclaimerText = 'Aggregated public information. GMP is unofficial and not published by any exchange or regulator. Nothing here is investment advice.'
     const warnings = ['Omitted 45 issues with conflicting source records.', 'Reported GMP could not be refreshed.']
     setFeed([issue('one')], { disclaimer: disclaimerText, warnings, stale: true })
@@ -378,17 +377,15 @@ describe('Monitor IPOs', () => {
     await act(async () => summary.click())
     expect(disclaimer.hasAttribute('open')).toBe(false)
     expect([...disclaimer.querySelectorAll('p')].some((paragraph) => paragraph.textContent === disclaimerText)).toBe(true)
-    expect([...disclaimer.querySelectorAll('h4')].map((element) => element.textContent)).toEqual(['Data sources', 'Updates', 'Coverage'])
+    expect([...disclaimer.querySelectorAll('dt')].map((element) => element.textContent)).toEqual(['Source', 'IPO list checked'])
     const links = [...disclaimer.querySelectorAll<HTMLAnchorElement>('a')]
     expect(links.map((link) => link.href)).toEqual(['https://www.xflot.com/'])
     expect(links.every((link) => link.target === '_blank' && link.rel.includes('noopener'))).toBe(true)
-    expect(disclaimer.textContent).toContain('Xflot supplies issue details and reported premiums, gathered from public GMP trackers.')
+    expect(disclaimer.textContent).toContain('Xflot, which collects GMP from public trackers')
     expect(disclaimer.textContent).not.toContain('GMP Today')
     expect(disclaimer.textContent).toContain('IPO list checked')
     expect(disclaimer.querySelectorAll('time')).toHaveLength(1)
-    expect(disclaimer.textContent).toContain('Source-page updates are not dealer quote times.')
-    for (const warning of warnings) expect(disclaimer.textContent).toContain(warning)
-    expect(disclaimer.textContent).toContain('Some sources are dated or could not be refreshed.')
+    for (const warning of warnings) expect(disclaimer.textContent).not.toContain(warning)
     expect(disclaimer.closest('[role="alert"]')).toBeNull()
     expect(disclaimer.querySelector('[role="alert"]')).toBeNull()
   })
@@ -464,20 +461,18 @@ describe('Monitor IPOs', () => {
     await render()
     expect(rowButtons()).toHaveLength(1)
     const notice = container.querySelector('[role="status"]')!
-    expect(notice.textContent).toContain('Saved data may be out of date')
+    expect(notice.textContent).toBe('Showing saved IPOs. The latest refresh failed.')
     expect(notice.closest('details')).toBeNull()
     expect(container.querySelector('.mi-loading')).toBeNull()
     await click('Refresh IPOs')
     expect(refresh).toHaveBeenCalledOnce()
   })
 
-  it('makes partial coverage visible before the user opens source details', async () => {
+  it('does not surface internal feed warnings above the list', async () => {
     setFeed([issue('partial')], { warnings: ['Omitted conflicting issue records.'] })
     await render()
-    const notice = container.querySelector('[role="status"]')!
-    expect(notice.textContent).toContain('Limited coverage')
-    expect(notice.textContent).toContain('Unofficial GMP')
-    expect(notice.closest('details')).toBeNull()
+    expect(container.querySelector('.mi-availability')).toBeNull()
+    expect(container.textContent).not.toContain('Omitted conflicting issue records.')
     expect(container.textContent).toContain('IPO list checked')
   })
 

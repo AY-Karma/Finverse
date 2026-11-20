@@ -175,17 +175,11 @@ function FeedContext({ feed }: { feed: IpoFeed }) {
     <details className="mi-disclaimer" aria-labelledby={notesId}>
       <summary><ActionIcon name="warning" /><h3 id={notesId}>Disclaimer</h3><svg className="mi-disclaimer-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary>
       <div className="mi-disclaimer-body">
-      <p>{feed.disclaimer ?? 'GMP is reported by public trackers and does not guarantee listing gains.'}</p>
-      <div className="mi-disclaimer-groups">
-        <div><h4>Data sources</h4><p className="mi-source-line"><a href="https://www.xflot.com/" target="_blank" rel="noopener noreferrer">Xflot</a> supplies issue details and reported premiums, gathered from public GMP trackers.</p></div>
-        <div><h4>Updates</h4><dl className="mi-update-times">
-          <div><dt>IPO list checked</dt><dd>{feed.fetchedAt ? <time dateTime={new Date(feed.fetchedAt).toISOString()}>{updated.format(feed.fetchedAt)} IST</time> : 'Update time unavailable'}</dd></div>
-        </dl><p>Source-page updates are not dealer quote times.</p></div>
-        {(feed.warnings.length > 0 || feed.stale) && <div className="mi-coverage"><h4>Coverage</h4>
-          {feed.warnings.length > 0 && <ul>{feed.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-          {feed.stale && <p>Some sources are dated or could not be refreshed. Showing the last available data.</p>}
-        </div>}
-      </div>
+      <p>{feed.disclaimer ?? 'GMP is unofficial, collected from public trackers, and does not guarantee listing gains.'}</p>
+      <dl className="mi-feed-facts">
+        <div><dt>Source</dt><dd className="mi-source-line"><a href="https://www.xflot.com/" target="_blank" rel="noopener noreferrer">Xflot</a>, which collects GMP from public trackers</dd></div>
+        <div><dt>IPO list checked</dt><dd>{feed.fetchedAt ? <time dateTime={new Date(feed.fetchedAt).toISOString()}>{updated.format(feed.fetchedAt)} IST</time> : 'Time unavailable'}</dd></div>
+      </dl>
       </div>
     </details>
   </footer>
@@ -230,7 +224,7 @@ export function MonitorIpos({ allowed, ...watchActions }: { allowed: boolean } &
       {loading && !feed && <div className="mi-loading" role="status"><p>Loading IPOs…</p><span /><span /><span /></div>}
       {error && !feed && <div className="mi-failure" role="status"><span className="mi-failure-icon" aria-hidden="true"><ActionIcon name="warning" /></span><div><strong>IPOs are unavailable</strong><p>{error}</p></div><button type="button" className="mi-retry" onClick={refresh} disabled={loading}>Try again<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 0 0-11-2L3 7m0-4v4h4m-3 6a6.5 6.5 0 0 0 11 2l2-2m0 4v-4h-4" /></svg></button></div>}
       {feed && <>
-        <p className="mi-availability" data-limited={feed.stale || feed.warnings.length > 0} role={feed.stale || feed.warnings.length ? 'status' : undefined}>{feed.stale ? 'Saved data may be out of date · Unofficial GMP' : feed.warnings.length ? 'Limited coverage · Unofficial GMP' : 'Unofficial GMP'}</p>
+        {feed.stale && <p className="mi-availability" role="status">Showing saved IPOs. The latest refresh failed.</p>}
         {sortingHistory && <p className="mi-sort-status" role="status">Loading historical GMP for sorting…</p>}
         {displayed.length > 0 ? <div className="mi-list">
           {period !== 'UPCOMING' && <div className="mi-columns" aria-hidden="true"><span>Company</span><span>Price band</span><span>Reported GMP</span></div>}
