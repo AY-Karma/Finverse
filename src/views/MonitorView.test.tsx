@@ -271,7 +271,7 @@ describe('single-page Monitor', () => {
     await renderWatch()
     state.store.settings = { ...state.store.settings, allowExternalData: false }
     await rerender()
-    expect(container.querySelector('.mp-hero')?.textContent).toContain('External data off')
+    expect(container.querySelector('.mp-hero')?.textContent).toContain('Market data paused')
     expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh prices')?.disabled).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Add reminder"]')?.disabled).toBe(false)
     expect(container.querySelector('.mp-rule-list')?.textContent).toContain('UP')

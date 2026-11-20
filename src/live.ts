@@ -1,6 +1,7 @@
 import type { LiveQuote, Position } from './types'
 import { quoteKey } from './valuation'
 import { createSharedRequest } from './sharedRequest'
+import { delay } from './http'
 import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from './marketCalendar'
 import { hasCompatibleFundScheme } from './fundSchemes'
 import { normalizePosition, pricingProviderSymbol } from './instruments'
@@ -12,11 +13,6 @@ import {
   type MarketQuotePayload,
   type QuotesPayload,
 } from './marketDataProtocol'
-
-// ---------------------------------------------------------------------------
-// Indian market hours + NSE trading holidays (IST). Polling runs only while the
-// market is actually open so we don't hammer the quote APIs off-hours.
-// ---------------------------------------------------------------------------
 
 /** Dev/test override: ?live=1 forces the market to be treated as open. */
 const FORCE_LIVE =
@@ -33,10 +29,6 @@ function istDate(date: Date = new Date()): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quote keys + price resolution (single source of truth for live + sheet price)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Symbol resolution: imported ticker -> Yahoo symbol
 // ---------------------------------------------------------------------------
 
@@ -48,12 +40,6 @@ export function resolveYahooSymbol(p: Position): string | null {
   if (p.type === 'mutual-fund') return null
   const normalized = normalizePosition(p)
   return normalized.identityIssue ? null : pricingProviderSymbol(normalized) ?? null
-}
-
-/** An explicit provider mapping never falls back to a guessed different listing. */
-export function resolveYahooSymbolCandidates(position: Position): string[] {
-  const primary = resolveYahooSymbol(position)
-  return primary ? [primary] : []
 }
 
 // ---------------------------------------------------------------------------
@@ -68,9 +54,11 @@ interface YahooResult {
   at: number
   fetchedAt: number
   source: EquityQuoteSource
+  /** Earliest time the provider can have a newer price for this symbol's request; null when unknown. */
+  nextUpdateAt: number | null
 }
 
-function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number): YahooResult | null {
+function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number, nextUpdateAt: number | null): YahooResult | null {
   const at = Date.parse(payload.marketTime)
   if (
     !Number.isFinite(payload.price) ||
@@ -85,6 +73,7 @@ function quoteFromPayload(payload: MarketQuotePayload, fetchedAt: number): Yahoo
     at,
     fetchedAt,
     source: payload.source,
+    nextUpdateAt,
   }
 }
 
@@ -102,8 +91,10 @@ async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Ma
     const payload = (await response.json()) as QuotesPayload
     const fetchedAt = Date.parse(payload.fetchedAt)
     if (!Number.isFinite(fetchedAt)) return quotes
+    const hinted = Date.parse(payload.nextUpdateAt ?? '')
+    const nextUpdateAt = Number.isFinite(hinted) && hinted > fetchedAt ? hinted : null
     for (const item of payload.quotes ?? []) {
-      const quote = quoteFromPayload(item, fetchedAt)
+      const quote = quoteFromPayload(item, fetchedAt, nextUpdateAt)
       if (quote && batch.includes(item.symbol)) quotes.set(item.symbol, quote)
     }
   } catch {
@@ -112,24 +103,54 @@ async function fetchQuoteBatch(batch: string[], signal: AbortSignal): Promise<Ma
   return quotes
 }
 
+/** Symbols requested within this window share one set of batches; 0 sends each request on its own. */
+export const quoteCoalescing = { windowMs: 25 }
+let coalescing: { symbols: Set<string>; batches: Promise<string[][]> } | null = null
+
+/**
+ * Holdings and the index ticker poll on the same beat, so their symbols go out together: one call where there were two.
+ * Each caller still receives only the symbols it asked for.
+ */
+function batchesOf(symbols: string[]): string[][] {
+  const all = [...symbols].sort()
+  return Array.from({ length: Math.ceil(all.length / MAX_MARKET_SYMBOLS) }, (_, index) => all.slice(index * MAX_MARKET_SYMBOLS, (index + 1) * MAX_MARKET_SYMBOLS))
+}
+
+function sharedBatches(symbols: string[]): Promise<string[][]> {
+  if (quoteCoalescing.windowMs <= 0) return Promise.resolve(batchesOf(symbols))
+  if (!coalescing) {
+    const group: { symbols: Set<string>; batches: Promise<string[][]> } = { symbols: new Set(), batches: Promise.resolve([]) }
+    group.batches = new Promise((resolve) => setTimeout(() => {
+      if (coalescing === group) coalescing = null
+      resolve(batchesOf([...group.symbols]))
+    }, quoteCoalescing.windowMs))
+    coalescing = group
+  }
+  for (const symbol of symbols) coalescing.symbols.add(symbol)
+  return coalescing.batches
+}
+
 export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal, onBatch?: (quotes: Map<string, YahooResult>) => void): Promise<Map<string, YahooResult>> {
   const unique = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(isMarketSymbol))].sort()
+  const wanted = new Set(unique)
   const quotes = new Map<string, YahooResult>()
   const missing = new Set<string>()
+  if (!unique.length) return quotes
+  const batches = (await sharedBatches(unique)).filter((batch) => batch.some((symbol) => wanted.has(symbol)))
+  signal?.throwIfAborted()
   let next = 0
   const worker = async () => {
-    while (next < unique.length) {
+    while (next < batches.length) {
       signal?.throwIfAborted()
-      const start = next
-      next += MAX_MARKET_SYMBOLS
-      const batch = unique.slice(start, start + MAX_MARKET_SYMBOLS)
+      const batch = batches[next++]
       const results = await sharedQuoteBatch(batch.join(','), (requestSignal) => fetchQuoteBatch(batch, requestSignal), signal)
-      for (const [symbol, quote] of results) quotes.set(symbol, quote)
-      if (results.size) onBatch?.(results)
-      if (results.size) for (const symbol of batch) if (symbol.endsWith('.NS') && !results.has(symbol)) missing.add(symbol)
+      const own = new Map([...results].filter(([symbol]) => wanted.has(symbol)))
+      for (const [symbol, quote] of own) quotes.set(symbol, quote)
+      if (own.size) onBatch?.(own)
+      if (results.size) for (const symbol of batch) if (wanted.has(symbol) && symbol.endsWith('.NS') && !results.has(symbol)) missing.add(symbol)
     }
   }
-  await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, Math.ceil(unique.length / MAX_MARKET_SYMBOLS)) }, worker))
+  await Promise.all(Array.from({ length: Math.min(QUOTE_REQUEST_CONCURRENCY, batches.length) }, worker))
   // Healthy batches reach callers before single-symbol requests enable server recovery.
   const recovery = [...missing]
   let nextRecovery = 0
@@ -146,11 +167,6 @@ export async function fetchYahooPrices(symbols: string[], signal?: AbortSignal, 
   return quotes
 }
 
-export async function fetchYahooPrice(symbol: string, signal?: AbortSignal): Promise<YahooResult | null> {
-  const normalized = symbol.toUpperCase()
-  return (await fetchYahooPrices([normalized], signal)).get(normalized) ?? null
-}
-
 // ---------------------------------------------------------------------------
 // Mutual-fund NAV (mfapi.in — keyless, CORS-friendly; NAV publishes once daily)
 // ---------------------------------------------------------------------------
@@ -165,6 +181,8 @@ function navDate(value: unknown): string | null {
 }
 
 const sharedNav = createSharedRequest<LiveQuote | null>()
+// Covers the longest Indian market closures while avoiding a scheme's full NAV history.
+const LATEST_NAV_WINDOW_DAYS = 14
 
 function fetchNavByCode(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
   return sharedNav(String(code), (requestSignal) => fetchNavUncached(code, requestSignal), signal)
@@ -173,7 +191,8 @@ function fetchNavByCode(code: number, signal?: AbortSignal): Promise<LiveQuote |
 async function fetchNavUncached(code: number, signal?: AbortSignal): Promise<LiveQuote | null> {
   try {
     const requestSignal = signal ?? AbortSignal.timeout(12000)
-    const history = await fetchNavHistoryUncached(code, undefined, undefined, requestSignal) ?? []
+    const today = istDate()
+    const history = await fetchNavHistoryUncached(code, adjacentDay(today, -LATEST_NAV_WINDOW_DAYS), today, requestSignal) ?? []
     requestSignal.throwIfAborted()
     let latest = history.at(-1)
     if (!latest) {
@@ -213,6 +232,8 @@ export interface LiveQuotesResult {
   updated: number
   failed: number
   skipped: number
+  /** Earliest time any refreshed stock can have a newer provider price; absent when unknown or no stocks were refreshed. */
+  nextUpdateAt?: number
 }
 
 export function quoteRefreshIssueText(result: LiveQuotesResult | null): string | null {
@@ -252,16 +273,16 @@ export async function fetchLiveQuotes(
   const outcomes: Outcome[] = []
 
   const equities = unique.flatMap((position) => {
-    if (position.type === 'mutual-fund') return []
-    const candidates = resolveYahooSymbolCandidates(position)
-    return candidates.length > 0 ? [{ position, candidates }] : []
+    const symbol = position.type === 'mutual-fund' ? null : resolveYahooSymbol(position)
+    return symbol ? [{ position, symbol }] : []
   })
+  let equityNextUpdateAt: number | undefined
   const refreshEquities = async () => {
-    const primaryQuotes = await fetchYahooPrices(equities.map(({ candidates }) => candidates[0]), signal, (batch) => {
+    const equityQuotes = await fetchYahooPrices(equities.map(({ symbol }) => symbol), signal, (batch) => {
       if (!onProgress) return
       const delivered: Record<string, LiveQuote> = {}
-      for (const { position, candidates } of equities) {
-        const quote = batch.get(candidates[0])
+      for (const { position, symbol } of equities) {
+        const quote = batch.get(symbol)
         const key = quoteKey(position)
         if (!quote || retainNewerQuote(quotes[key], quote, now.getTime())) continue
         delivered[key] = { price: quote.price, at: quote.at, fetchedAt: quote.fetchedAt,
@@ -269,13 +290,9 @@ export async function fetchLiveQuotes(
       }
       if (Object.keys(delivered).length) onProgress({ quotes: delivered, updated: Object.keys(delivered).length, failed: 0, skipped: 0 })
     })
-    const retrySymbols = equities.flatMap(({ candidates }) =>
-      !primaryQuotes.has(candidates[0]) && candidates[1] ? [candidates[1]] : [],
-    )
-    const retryQuotes = await fetchYahooPrices(retrySymbols, signal)
-    for (const { position, candidates } of equities) {
+    for (const { position, symbol } of equities) {
       const key = quoteKey(position)
-      const quote = primaryQuotes.get(candidates[0]) ?? retryQuotes.get(candidates[1])
+      const quote = equityQuotes.get(symbol)
       outcomes.push(quote
         ? {
             key,
@@ -291,6 +308,8 @@ export async function fetchLiveQuotes(
           }
         : { key, status: 'failed' })
     }
+    const hints = equities.map(({ symbol }) => equityQuotes.get(symbol)?.nextUpdateAt ?? null)
+    if (hints.length && hints.every((hint) => hint !== null)) equityNextUpdateAt = Math.min(...hints as number[])
   }
   for (const position of unique) {
     if (position.type !== 'mutual-fund' && !resolveYahooSymbol(position)) {
@@ -350,16 +369,8 @@ export async function fetchLiveQuotes(
     updated: outcomes.filter((o) => o.status === 'updated').length,
     failed: outcomes.filter((o) => o.status === 'failed').length,
     skipped: outcomes.filter((o) => o.status === 'skipped').length,
+    ...(equityNextUpdateAt ? { nextUpdateAt: equityNextUpdateAt } : {}),
   }
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(signal.reason); return }
-    const abort = () => { clearTimeout(timer); reject(signal?.reason) }
-    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve() }, ms)
-    signal?.addEventListener('abort', abort, { once: true })
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -615,7 +626,7 @@ async function fetchNavHistoryUncached(code: number, from: string | undefined, t
 // Manual refresh cooldown. Persisted so a reload cannot bypass the short gap.
 // ---------------------------------------------------------------------------
 
-export const MANUAL_REFRESH_COOLDOWN_MS = 30_000
+export const MANUAL_REFRESH_COOLDOWN_MS = 5_000
 const MANUAL_KEY = 'finverse:manualRefresh'
 
 interface ManualRefreshResult {

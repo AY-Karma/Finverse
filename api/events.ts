@@ -1,6 +1,6 @@
 import { MAX_EVENT_SYMBOLS, isEventDate, isEventSymbol, isOfficialEventUrl, type MarketEventPayload, type MarketEventIssue } from '../src/marketEventsProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
-import { readNseCsv } from './nseReference.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
+import { readNseCsv } from './_nseReference.js'
 
 const DAY_MS = 86_400_000
 const IST_OFFSET_MS = 19_800_000
@@ -12,6 +12,7 @@ const EQUITY_MASTER_URL = 'https://nsearchives.nseindia.com/content/equities/EQU
 const HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 type Row = Record<string, unknown>
+const USED_FIELDS = ['symbol', 'date', 'purpose', 'exDate', 'subject', 'series', 'isin', 'an_dt', 'desc', 'sm_isin', 'attchmntFile', 'seq_id']
 type FeedKind = 'calendar' | 'actions' | 'filings'
 interface Dependencies { fetcher: typeof fetch; now: () => number }
 
@@ -106,7 +107,7 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
     let cacheTtl = CACHE_MS
     return budget([...selected].sort().join(','), () => cacheTtl, async () => {
       const sources: { kind: FeedKind; label: string; path: string; from: string; to: string }[] = [
-        { kind: 'calendar', label: 'NSE meetings', path: '/api/event-calendar', from: today, to: until },
+        { kind: 'calendar', label: 'NSE meetings', path: `/api/event-calendar?index=equities&from_date=${queryDate(today)}&to_date=${queryDate(until)}`, from: today, to: until },
         { kind: 'actions', label: 'NSE corporate actions', path: `/api/corporates-corporateActions?index=equities&from_date=${queryDate(today)}&to_date=${queryDate(until)}`, from: today, to: until },
         { kind: 'filings', label: 'NSE filings', path: `/api/corporate-announcements?index=equities&from_date=${queryDate(since)}&to_date=${queryDate(today)}`, from: since, to: today },
       ]
@@ -116,10 +117,12 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
             const deadline = AbortSignal.any([signal, AbortSignal.timeout(4_000)])
             const upstream = await fetcher(`https://www.nseindia.com${source.path}`, { signal: deadline })
             if (!upstream.ok) throw new Error('Source unavailable')
-            const body = await readBoundedText(upstream, 6 * 1024 * 1024, deadline)
+            // A week of market-wide filings is already ~6.5 MB, so filings get a larger read limit.
+            const body = await readBoundedText(upstream, (source.kind === 'filings' ? 24 : 6) * 1024 * 1024, deadline)
             const rows: unknown = JSON.parse(body)
-            if (!Array.isArray(rows) || rows.length > 10_000 || rows.some((row) => row === null || typeof row !== 'object' || Array.isArray(row))) throw new Error('Source format changed')
-            return Response.json(rows)
+            if (!Array.isArray(rows) || rows.length > 30_000 || rows.some((row) => row === null || typeof row !== 'object' || Array.isArray(row))) throw new Error('Source format changed')
+            // Cache only the fields parseRow reads; full filing rows would crowd the shared response cache.
+            return Response.json(rows.map((row: Row) => Object.fromEntries(USED_FIELDS.flatMap((field) => field in row ? [[field, row[field]]] : []))))
           } catch { return Response.json({ error: 'Source unavailable.' }, { status: 502 }) }
         })
         if (!response.ok) return { events: [], issue: { source: source.label, message: 'Source unavailable. Open NSE to verify its latest updates.' } }
@@ -144,7 +147,8 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
       const unique = new Map(verifiedEvents.map((event) => [event.id, event]))
       const events = [...unique.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
       if (issues.length) cacheTtl = PARTIAL_CACHE_MS
-      return Response.json({ events, issues, fetchedAt: now() }, { status: feeds.every((feed) => feed.issue) ? 502 : 200, headers: HEADERS })
+      const status = feeds.every((feed) => feed.issue) ? 502 : 200
+      return Response.json({ events, issues, fetchedAt: now() }, { status, headers: status === 200 && !issues.length ? { ...HEADERS, ...cdnCache(CACHE_MS / 1000) } : HEADERS })
     })
   }
 }

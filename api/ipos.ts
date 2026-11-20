@@ -1,16 +1,15 @@
 import { isIpoDate, type IpoBoard, type IpoFeed, type IpoGmp, type IpoIssue, type IpoStatus } from '../src/ipoProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
+import { isIpoGmpHistorySlug, type IpoGmpHistoryResponse, type IpoGmpPoint } from '../src/ipoGmpHistoryProtocol.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
 
 const CORE_URL = 'https://www.xflot.com/api/public/market/ipos?limit=200'
-const GMP_URL = 'https://gmptoday.in/'
 const CACHE_MS = 60 * 60_000
 const RETRY_MS = 60_000
-const DAY_MS = 86_400_000
+const MAX_BYTES = 2 * 1024 * 1024
+const MAX_REPORTS = 3660
 const HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }
 type Row = Record<string, unknown>
 interface Dependencies { fetcher: typeof fetch; now: () => number }
-interface GmpRow { name: string; slug: string; board: IpoBoard; gmp: IpoGmp }
-interface GmpBoard { rows: GmpRow[]; updatedAt: number | null }
 interface IpoDirectory { issues: IpoIssue[]; warnings: string[]; disclaimer?: string }
 
 function number(value: unknown): number | null {
@@ -22,19 +21,8 @@ function number(value: unknown): number | null {
 function positive(value: unknown): number | null { const parsed = number(value); return parsed !== null && parsed > 0 ? parsed : null }
 function text(value: unknown): string { return typeof value === 'string' ? value.trim().slice(0, 200) : '' }
 function date(value: unknown): string | null { const parsed = text(value).slice(0, 10); return isIpoDate(parsed) ? parsed : null }
-function timestamp(value: unknown, now: number): number | null {
-  if (typeof value !== 'string' || !/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) && parsed > 0 && parsed <= now + 300_000 ? parsed : null
-}
 function today(now: number): string { return new Date(now + 19_800_000).toISOString().slice(0, 10) }
 export function normalizeIpoName(value: string): string { return value.toLowerCase().replace(/\b(?:limited|ltd)\b/g, '').replace(/[^a-z0-9]/g, '') }
-
-// These publisher display names were reconciled against the corresponding issue names and slugs.
-const GMP_ALIASES: Record<string, string> = {
-  'maxwell-engineering-solutions': 'Maxwell Engineering Solutions Limited',
-  'bombay-coated': 'Bombay Coated and Special Steels',
-}
 
 function status(row: Row, at: number): IpoStatus | null {
   const known = text(row.status)
@@ -125,101 +113,134 @@ function parseDirectory(value: unknown, at: number): IpoDirectory {
   return { issues, warnings, ...(typeof rawDisclaimer === 'string' ? { disclaimer: rawDisclaimer } : {}) }
 }
 
-function decode(value: string): string {
-  return value.replace(/&(?:amp|quot|apos|lt|gt|#\d+|#x[\da-f]+);/gi, (entity) => {
-    const named: Record<string, string> = { '&amp;': '&', '&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>' }
-    if (named[entity.toLowerCase()]) return named[entity.toLowerCase()]
-    const code = entity.toLowerCase().startsWith('&#x') ? parseInt(entity.slice(3, -1), 16) : parseInt(entity.slice(2, -1), 10)
-    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ''
-  })
-}
-function attributes(tag: string): Record<string, string> {
-  return Object.fromEntries([...tag.matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)].map((match) => [match[1].toLowerCase(), decode(match[2] ?? match[3])]))
-}
-
-export function parseGmpBoard(html: string, at: number): GmpBoard {
-  const meta = [...html.matchAll(/<meta\b([^>]*)>/gi)].map((match) => attributes(match[1])).find((attrs) => attrs.name === 'gmp-built')
-  const updatedAt = timestamp(meta?.content, at)
-  if (!updatedAt) throw new Error('GMP source update time unavailable.')
-  const rows: GmpRow[] = []
-  for (const match of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
-    const attrs = attributes(match[1]), body = decode(match[2].replace(/<[^>]*>/g, ' '))
-    if (!attrs.class?.split(/\s+/).includes('row')) continue
-    const board = attrs['data-group'] === 'sme' ? 'SME' : attrs['data-group'] === 'mainboard' ? 'MAINBOARD' : null
-    const name = text(attrs['data-name']), slug = text(attrs['data-slug']), amount = number(attrs['data-med'])
-    if (!board || !name || !/^[a-z0-9][a-z0-9-]{0,149}$/.test(slug) || attrs.href !== `/ipo/${slug}/` || amount === null) continue
-    const sources = body.match(/\b(\d+)\s+sources?\b/i)
-    const range = match[2].match(/class=["'][^"']*\bc-range\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1]
-    const bounds = range ? decode(range.replace(/<[^>]*>/g, '')).replace(/[,₹\s]/g, '').match(/^(-?\d+(?:\.\d+)?)[–−-](-?\d+(?:\.\d+)?)$/) : null
-    rows.push({ name, slug, board, gmp: { amount, percent: number(attrs['data-est']), source: 'GMP Today', sourceUrl: `https://gmptoday.in/ipo/${slug}/`,
-      sourceUpdatedAt: updatedAt, observedAt: null, sources: sources ? Number(sources[1]) : null,
-      rangeLow: bounds ? number(bounds[1]) : null, rangeHigh: bounds ? number(bounds[2]) : null } })
-  }
-  if (!rows.length || rows.length > 200 || new Set(rows.map((row) => row.slug)).size !== rows.length) throw new Error('GMP board format changed.')
-  return { rows, updatedAt }
-}
-
-export function enrichIpoGmp(issues: IpoIssue[], board: GmpBoard, at: number): IpoIssue[] {
-  return issues.map((issue) => {
-    const close = issue.closeDate ? Date.parse(`${issue.closeDate}T00:00:00Z`) : null
-    if (close !== null && at - close > 45 * DAY_MS) return issue
-    const matches = board.rows.filter((row) => row.board === issue.board && normalizeIpoName(GMP_ALIASES[row.slug] ?? row.name) === normalizeIpoName(issue.name))
-    if (matches.length !== 1) return issue
-    const reverse = issues.filter((candidate) => candidate.board === issue.board && normalizeIpoName(candidate.name) === normalizeIpoName(issue.name))
-    if (reverse.length !== 1) return issue
-    return { ...issue, gmp: matches[0].gmp }
-  })
-}
-
+/**
+ * IPO discovery from Xflot's documented public API (attribute, poll at most once a minute, keep the disclaimer).
+ * Its GMP already aggregates the reporting sites (InvestorGain, IPOWatch and others) and blanks disputed values.
+ * GMP Today is no longer read: it answers Vercel's servers with a Cloudflare challenge.
+ */
 export function createIpoHandler(dependencies: Partial<Dependencies> = {}) {
   const fetcher = dependencies.fetcher ?? fetch, now = dependencies.now ?? Date.now
   const budget = createRequestBudget(now)
   let core: (IpoDirectory & { at: number }) | null = null
-  let gmp: GmpBoard | null = null
-  let gmpFetchedAt = 0
   let ttl = CACHE_MS
 
-  async function retrieve(url: string, signal: AbortSignal): Promise<string> {
+  async function retrieve(signal: AbortSignal): Promise<string> {
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-    const response = await fetcher(url, { signal: deadline, headers: { Accept: url === GMP_URL ? 'text/html' : 'application/json' } })
+    const response = await fetcher(CORE_URL, { signal: deadline, headers: { Accept: 'application/json' } })
     if (!response.ok) throw new Error('Source unavailable.')
-    return readBoundedText(response, 2 * 1024 * 1024, deadline)
+    return readBoundedText(response, MAX_BYTES, deadline)
   }
 
   return async (request: Request): Promise<Response> => {
     if (request.method !== 'GET') return Response.json({ error: 'Method not allowed.' }, { status: 405, headers: { ...HEADERS, Allow: 'GET' } })
     if ([...new URL(request.url).searchParams].length) return Response.json({ error: 'IPO discovery does not accept portfolio data or query parameters.' }, { status: 400, headers: HEADERS })
     return budget('ipos', () => ttl, async (signal) => {
-      const warnings: string[] = []
       const at = now()
-      const refreshCore = !core || at - core.at >= CACHE_MS
-      const refreshGmp = !gmp || at - gmpFetchedAt >= CACHE_MS
-      const [directory, board] = await Promise.allSettled([
-        !refreshCore && core ? Promise.resolve(core) : retrieve(CORE_URL, signal).then((body) => parseDirectory(JSON.parse(body), at)),
-        !refreshGmp && gmp ? Promise.resolve(gmp) : retrieve(GMP_URL, signal).then((body) => parseGmpBoard(body, at)),
-      ])
-      const coreFailed = directory.status === 'rejected' || directory.value.issues.length === 0 && Boolean(core)
-      if (directory.status === 'fulfilled' && !coreFailed) {
-        if (refreshCore) core = { ...directory.value, at }
+      let refreshFailed = false
+      if (!core || at - core.at >= CACHE_MS) {
+        try {
+          const directory = parseDirectory(JSON.parse(await retrieve(signal)), at)
+          if (directory.issues.length || !core) core = { ...directory, at }
+          else refreshFailed = true
+        } catch { refreshFailed = true }
       }
-      else warnings.push('IPO details could not be refreshed. Showing the last available data when possible.')
-      if (board.status === 'fulfilled') { if (refreshGmp) { gmp = board.value; gmpFetchedAt = at } }
-      else warnings.push('Reported GMP could not be refreshed. Source values may be unavailable or dated.')
-      ttl = warnings.length ? RETRY_MS : CACHE_MS
+      ttl = refreshFailed ? RETRY_MS : CACHE_MS
       if (!core) return Response.json({ error: 'IPO details are unavailable. Try again shortly.' }, { status: 502, headers: HEADERS })
-      warnings.push(...core.warnings)
+      const warnings = [...(refreshFailed ? ['IPO details could not be refreshed. Showing the last available data when possible.'] : []), ...core.warnings]
       const payload: IpoFeed = {
-        issues: gmp ? enrichIpoGmp(core.issues, gmp, at) : core.issues,
+        issues: core.issues,
         fetchedAt: core.at,
-        sources: [{ name: 'Xflot', url: 'https://www.xflot.com/api-docs', updatedAt: null },
-          ...(gmp ? [{ name: 'GMP Today', url: GMP_URL, updatedAt: gmp.updatedAt }] : [])],
-        warnings, stale: coreFailed || board.status === 'rejected' || Boolean(gmp?.updatedAt && at - gmp.updatedAt > DAY_MS),
+        sources: [{ name: 'Xflot', url: 'https://www.xflot.com/api-docs', updatedAt: null }],
+        warnings, stale: refreshFailed,
         ...(core.disclaimer ? { disclaimer: core.disclaimer } : {}),
       }
-      return Response.json(payload, { headers: HEADERS })
+      // Share fully refreshed feeds for the rest of their source lifetime, and a retained feed only until the next retry.
+      return Response.json(payload, { headers: { ...HEADERS, ...cdnCache(refreshFailed ? RETRY_MS / 1000 : (core.at + CACHE_MS - at) / 1000) } })
+    })
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Daily GMP trend for one issue, served by the same function as the list.
+// ---------------------------------------------------------------------------
+
+
+interface ParsedTrend { points: IpoGmpPoint[]; sourceUrl: string; sourceUpdatedAt: null; gmp: IpoGmp | null }
+const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
+}
+
+/**
+ * Xflot's dated GMP reports for one issue, as one median per reported day before listing.
+ * No interpolation or backfill: days without a report stay absent. A listed issue also gets its final pre-listing GMP.
+ */
+export function parseIpoGmpTrend(reports: unknown, issue: IpoIssue, slug: string, at: number): ParsedTrend | null {
+  if (!Array.isArray(reports) || reports.length > MAX_REPORTS) throw new Error('Historical GMP reports are invalid.')
+  if (!isIpoDate(issue.openDate) || !finite(issue.priceMax) || issue.priceMax <= 0) return null
+  const today = new Date(at + 19_800_000).toISOString().slice(0, 10)
+  const days = new Map<string, number[]>()
+  for (const report of reports) {
+    if (!record(report) || typeof report.observedAt !== 'string' || !finite(report.gmp)) continue
+    const day = report.observedAt.slice(0, 10)
+    if (!isIpoDate(day) || day > today || issue.listingDate && day >= issue.listingDate) continue
+    days.set(day, [...days.get(day) ?? [], report.gmp])
+  }
+  if (!days.size) return null
+  const sourceUrl = `https://www.xflot.com/ipo/${slug}`
+  const points = [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, values]) => ({ date, amount: median(values) }))
+  const final = issue.status === 'LISTED' ? points.filter((point) => point.date >= issue.openDate!).at(-1) : undefined
+  const reported = final ? days.get(final.date)! : []
+  const gmp: IpoGmp | null = final ? { amount: final.amount, percent: final.amount / issue.priceMax * 100, source: 'Xflot', sourceUrl,
+    asOfDate: final.date, observedAt: null, sourceUpdatedAt: null, sources: reported.length,
+    rangeLow: reported.length > 1 ? Math.min(...reported) : null, rangeHigh: reported.length > 1 ? Math.max(...reported) : null } : null
+  return { points, sourceUrl, sourceUpdatedAt: null, gmp }
+}
+
+export function createIpoGmpHistoryHandler(dependencies: Partial<Dependencies> = {}) {
+  const fetcher = dependencies.fetcher ?? fetch, now = dependencies.now ?? Date.now
+  const budget = createRequestBudget(now)
+
+  async function retrieve(url: string, signal: AbortSignal): Promise<string> {
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(6_000)])
+    const response = await fetcher(url, { signal: deadline, redirect: 'error', headers: { Accept: 'application/json' } })
+    if (!response.ok) throw new Error('Historical IPO source is unavailable.')
+    return readBoundedText(response, MAX_BYTES, deadline)
+  }
+
+  return async (request: Request): Promise<Response> => {
+    if (request.method !== 'GET') return Response.json({ error: 'Method not allowed.' }, { status: 405, headers: { ...HEADERS, Allow: 'GET' } })
+    const params = [...new URL(request.url).searchParams]
+    const slug = params[0]?.[1]
+    if (params.length !== 1 || params[0][0] !== 'slug' || !isIpoGmpHistorySlug(slug)) {
+      return Response.json({ error: 'Choose one valid IPO issue.' }, { status: 400, headers: HEADERS })
+    }
+    return budget(slug, CACHE_MS, async (signal) => {
+      const checkedAt = now()
+      const missing = () => Response.json({ slug, gmp: null, points: [], checkedAt } satisfies IpoGmpHistoryResponse, { headers: HEADERS })
+      const raw: unknown = JSON.parse(await retrieve(`https://www.xflot.com/api/public/market/ipos/${slug}`, signal))
+      if (!record(raw) || raw.ok !== true || !record(raw.ipo) || raw.ipo.slug !== slug) throw new Error('Historical IPO identity changed.')
+      let issue: IpoIssue | undefined
+      try { issue = parseIpoDirectory({ ok: true, ipos: [raw.ipo] }, checkedAt)[0] } catch { return missing() }
+      if (!issue) return missing()
+      const trend = parseIpoGmpTrend(raw.ipo.gmp ?? [], issue, slug, checkedAt)
+      if (!trend) return missing()
+      // Half the client lifetime, so a shared response still has time left in the browser cache.
+      return Response.json({ slug, ...trend, gmp: issue.gmp ? null : trend.gmp, checkedAt } satisfies IpoGmpHistoryResponse, { headers: { ...HEADERS, ...cdnCache(CACHE_MS / 2000) } })
     })
   }
 }
 
 export const handleIpoRequest = createIpoHandler()
-export default { fetch: handleIpoRequest }
+export const handleIpoGmpHistoryRequest = createIpoGmpHistoryHandler()
+
+/** One deployed function: `/api/ipos` lists issues; `/api/ipos?slug=<issue>` returns that issue's daily GMP trend. */
+export function handleIpoApiRequest(request: Request): Promise<Response> {
+  return new URL(request.url).searchParams.has('slug') ? handleIpoGmpHistoryRequest(request) : handleIpoRequest(request)
+}
+
+export default { fetch: handleIpoApiRequest }

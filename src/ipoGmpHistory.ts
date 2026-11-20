@@ -34,7 +34,7 @@ export function loadIpoGmpHistory(slug: string, force = false): Promise<IpoGmpHi
   if (saved && !force) return Promise.resolve(saved)
   const task = (async () => {
     try {
-      const response = await fetch(`/api/ipoGmpHistory?slug=${encodeURIComponent(slug)}`, { signal: AbortSignal.timeout(12_000) })
+      const response = await fetch(`/api/ipos?slug=${encodeURIComponent(slug)}`, { signal: AbortSignal.timeout(12_000) })
       const body = await response.text()
       if (body.length > 200_000) throw new Error('Historical GMP response is too large.')
       const value: unknown = JSON.parse(body)

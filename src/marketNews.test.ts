@@ -65,6 +65,26 @@ describe('rssItems', () => {
     expect(items[1].publisher).toBe('Market Desk')
   })
 
+  it('strips a trailing publisher from headlines only when it matches the source', () => {
+    const payload = `<rss><channel>
+      <item><title>Nifty ends flat - Mint</title><link>https://a.test/1</link><source>Mint</source></item>
+      <item><title>Sensex slips - Mint</title><link>https://a.test/2</link><source>Reuters</source></item>
+      <item><title>Banks rally - mint</title><link>https://a.test/3</link><source>Mint</source></item>
+    </channel></rss>`
+
+    expect(rssItems(payload, 'Feed').map((item) => item.title)).toEqual(['Nifty ends flat', 'Sensex slips - Mint', 'Banks rally'])
+  })
+
+  it('drops social media posts but keeps publishers that merely start with the same letter', () => {
+    const payload = `<rss><channel>
+      <item><title>Market pace at whic - Instagram</title><link>https://a.test/1</link><source>Instagram</source></item>
+      <item><title>Post on X</title><link>https://a.test/2</link><source>X</source></item>
+      <item><title>China rate cut</title><link>https://a.test/3</link><source>Xinhua</source></item>
+    </channel></rss>`
+
+    expect(rssItems(payload, 'Feed').map((item) => item.publisher)).toEqual(['Xinhua'])
+  })
+
   it('skips entries without an http link or title', () => {
     const payload = `<rss><channel>
       <item><title>No link here</title></item>

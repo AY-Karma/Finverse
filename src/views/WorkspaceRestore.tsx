@@ -75,11 +75,11 @@ export function WorkspaceRestorePanel({ accountCount, actionsTarget }: { account
         <div><strong>{preview.archive.snapshots.length}</strong><span>tracked balances</span></div>
       </div>
       <p className="hint">{preview.archive.monitor.rules.length} watch rules, {preview.archive.monitor.events.length} reminders and {preview.archive.monitor.alerts.length} observations.</p>
-      <p className="hint">{accountCount === null ? 'Your current saved workspace could not be read.' : `Your current workspace has ${accountCount} account${accountCount === 1 ? '' : 's'}.`} Restoring replaces the whole workspace. A recovery copy is kept for undo. External market data will be off.</p>
+      <p className="hint">{accountCount === null ? 'Your current saved workspace could not be read.' : `Your current workspace has ${accountCount} account${accountCount === 1 ? '' : 's'}.`} Restoring replaces the whole workspace. A recovery copy is kept for undo.</p>
       {preview.warnings.map((warning) => <p className="hint down" key={warning}>{warning}</p>)}
       <div className="import-actions"><button type="button" className="btn btn--primary" disabled={restoring} onClick={() => void restore()}>Replace workspace</button><button type="button" className="btn btn--ghost" disabled={restoring} onClick={() => setPreview(null)}>Cancel restore</button></div>
     </section>}
-    {undoArmed && <div role="alert"><p className="hint">Replace this workspace with the recovery copy from before your last restore? External market data will remain off.</p><div className="import-actions"><button type="button" className="btn btn--primary" disabled={restoring} onClick={() => void restore(true)}>Confirm restore undo</button><button type="button" className="btn btn--ghost" disabled={restoring} onClick={() => setUndoArmed(false)}>Cancel</button></div></div>}
+    {undoArmed && <div role="alert"><p className="hint">Replace this workspace with the recovery copy from before your last restore?</p><div className="import-actions"><button type="button" className="btn btn--primary" disabled={restoring} onClick={() => void restore(true)}>Confirm restore undo</button><button type="button" className="btn btn--ghost" disabled={restoring} onClick={() => setUndoArmed(false)}>Cancel</button></div></div>}
     {error && <p className="hint down" role="alert">{error}</p>}
   </div>
 }

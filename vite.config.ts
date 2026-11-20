@@ -7,8 +7,7 @@ import { handleNewsRequest } from './api/news'
 import { handleEventsRequest } from './api/events'
 import { handleNseListingsRequest } from './api/nseListings'
 import { handleMarketCapRequest } from './api/marketCap'
-import { handleIpoRequest } from './api/ipos'
-import { handleIpoGmpHistoryRequest } from './api/ipoGmpHistory'
+import { handleIpoApiRequest } from './api/ipos'
 
 function localMarketDataApi(): Plugin {
   const handlers = new Map([
@@ -18,8 +17,8 @@ function localMarketDataApi(): Plugin {
     ['/api/events', handleEventsRequest],
     ['/api/nseListings', handleNseListingsRequest],
     ['/api/marketCap', handleMarketCapRequest],
-    ['/api/ipos', handleIpoRequest],
-    ['/api/ipoGmpHistory', handleIpoGmpHistoryRequest],
+    ['/api/ipos', handleIpoApiRequest],
+    ['/api/ipoGmpHistory', handleIpoApiRequest],
   ])
   return {
     name: 'finverse-local-market-data-api',
@@ -47,8 +46,33 @@ function localMarketDataApi(): Plugin {
   }
 }
 
+/** `/` and `/app` open Overview, so fetch its lazy chunk alongside the entry instead of after the entry runs. Low priority keeps the entry first on slow links. */
+function preloadOverview(): Plugin {
+  return {
+    name: 'finverse-preload-overview',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, { bundle }) {
+        const chunks = new Map(Object.values(bundle ?? {}).flatMap((output) => output.type === 'chunk' ? [[output.fileName, output] as const] : []))
+        const overview = [...chunks.values()].find((chunk) => chunk.facadeModuleId?.endsWith('/src/views/Overview.tsx'))
+        if (!overview) throw new Error('Overview chunk not found for preloading.')
+        const graph = new Set([overview.fileName])
+        for (const file of graph) for (const dependency of chunks.get(file)?.imports ?? []) graph.add(dependency)
+        const pending = (file: string) => !html.includes(`/${file}"`)
+        const styles = [...graph].flatMap((file) => [...(chunks.get(file)?.viteMetadata?.importedCss ?? [])])
+        const link = (attrs: Record<string, string | true>) => ({ tag: 'link', attrs: { ...attrs, crossorigin: true, fetchpriority: 'low' }, injectTo: 'head' as const })
+        return [
+          ...[...graph].filter(pending).map((file) => link({ rel: 'modulepreload', href: `/${file}` })),
+          ...[...new Set(styles)].filter(pending).map((file) => link({ rel: 'preload', as: 'style', href: `/${file}` })),
+        ]
+      },
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), localMarketDataApi()],
+  plugins: [react(), localMarketDataApi(), preloadOverview()],
   test: {
     exclude: [...configDefaults.exclude, 'docs/**'],
   },
@@ -57,7 +81,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules/react')) return 'react-vendor'
+          // Exact package match: react-remove-scroll and other react-* helpers belong with the lazy views that use them.
+          if (/\/node_modules\/(react|react-dom)\//.test(id)) return 'react-vendor'
           if (id.includes('node_modules/@e965/xlsx')) return 'xlsx-vendor'
         },
       },

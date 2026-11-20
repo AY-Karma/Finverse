@@ -1,8 +1,7 @@
-.nse-approval-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
-.nse-pricing-note { display: grid; gap: 3px; flex: 1 1 250px; margin: 0; padding: 10px 12px; border: 1px solid var(--hairline-strong); border-radius: 8px; background: var(--surface-2); font-size: 11px; line-height: 1.5; color: var(--ink-subtle); }
-.nse-pricing-note strong { color: var(--ink); font-weight: 500; }
-.nse-priced-label { display: flex; flex-wrap: wrap; gap: 5px 12px; color: var(--primary-hover); font-size: 11px; line-height: 1.5; }
-.nse-priced-label span { color: var(--ink-subtle); }
+.nse-approval-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+.nse-approval-hint { flex: 1 0 100%; margin: 0; color: var(--ink-subtle); font-size: 14px; line-height: 1.5; }
+.nse-priced-label { color: var(--primary-hover); }
+[data-mode='light'] .nse-priced-label { color: var(--primary-action); }
 .nse-approval-dialog { width: min(520px, calc(100% - 32px)); max-height: calc(100% - 40px); overflow: auto; padding: 0; border: 1px solid var(--hairline-strong); border-radius: 16px; background: var(--surface-1); color: var(--ink); }
 .nse-approval-dialog::backdrop { background: rgb(0 0 0 / .65); }
 .nse-approval-card { display: grid; gap: 16px; padding: 24px; }

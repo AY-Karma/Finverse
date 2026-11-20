@@ -72,7 +72,7 @@ export function MarketCapExposure({ positions, quotes, hideValues, allowExternal
         </button>)}
       </div>
       {(loading || resolved.loading) && <p className="market-cap-note" role="status">Loading market classifications</p>}
-      {!allowExternalData && <p className="market-cap-note">External market data is off</p>}
+      {!allowExternalData && <p className="market-cap-note">Market data paused · reload this tab</p>}
       {unavailable && <p className="market-cap-note" role="status">AMFI classifications are temporarily unavailable</p>}
       <div className="market-cap-source"><span>Source</span><p className="market-cap-note">Stocks match by exact ISIN against <a href={AMFI_CLASSIFICATION_PAGE} target="_blank" rel="noreferrer">AMFI's published classifications </a>.</p></div>
     </>}

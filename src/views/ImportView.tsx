@@ -153,7 +153,7 @@ export function ImportView({ compact = false, initialStep = 'dropzone', targetAc
 
   return (
     <>
-      {!compact && <div className="page-head enter d0">
+      {!compact && <div className="page-head enter">
         <div>
           <h1 className="page-title">Import holdings</h1>
         </div>

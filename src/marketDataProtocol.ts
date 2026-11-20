@@ -25,6 +25,8 @@ export interface QuotesPayload {
   fetchedAt: string
   quotes: MarketQuotePayload[]
   errors: QuoteErrorPayload[]
+  /** Earliest time the provider can have newer prices for this request; absent when unknown. */
+  nextUpdateAt?: string
 }
 
 export interface HistoryPayload {

@@ -10,7 +10,7 @@ import { ipoHistorySlug, ipoTrendSlug, useIpoGmpHistory } from './useIpoGmpHisto
 vi.mock('./ipoGmpHistory', () => ({ cachedIpoGmpHistory: vi.fn(), loadIpoGmpHistory: vi.fn() }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const NOW = Date.parse('2026-11-08T06:00:00Z')
-const quote = { amount: 1, percent: 1, source: 'GMP Today' as const, sourceUrl: 'https://gmptoday.in/ipo/example/', observedAt: null, sourceUpdatedAt: null, asOfDate: '2026-11-07', sources: 2, rangeLow: 1, rangeHigh: 1 }
+const quote = { amount: 1, percent: 1, source: 'Xflot' as const, sourceUrl: 'https://www.xflot.com/ipo/example', observedAt: null, sourceUpdatedAt: null, asOfDate: '2026-11-07', sources: 2, rangeLow: 1, rangeHigh: 1 }
 const issue = (id = 'example', overrides: Partial<IpoIssue> = {}): IpoIssue => ({
   id: `xflot:${id}`, name: id, board: 'MAINBOARD', status: 'UPCOMING', openDate: '2026-11-10', closeDate: '2026-11-12', listingDate: '2026-11-17', allotmentDate: null,
   priceMin: 90, priceMax: 100, lotSize: 100, sourceUrl: `https://www.xflot.com/ipo/${id}`, gmp: { ...quote, amount: 3, percent: 3 }, ...overrides,

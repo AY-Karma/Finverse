@@ -232,7 +232,7 @@ it('rebases both comparison returns on the first shared date when the benchmark 
   await renderInsights([100, 200, 220].map((value, index) => ({ at: Date.parse(`2026-09-0${7 + index}T00:00:00+05:30`), value, invested: 100 })))
   expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
   expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('+0.0 pts')
+  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('0.0 pts')
 })
 
 it('keeps the benchmark line continuous across a market holiday without inventing a close', async () => {
@@ -279,7 +279,7 @@ it('updates delayed and refreshed quote analytics in the same mounted view witho
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
   expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('+0.0 pts')
+  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('0.0 pts')
   state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 180, at: Date.parse('2026-10-01T15:30:00+05:30'), source: 'yahoo' } } }
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(state.build).toHaveBeenCalledTimes(1)
@@ -309,7 +309,7 @@ it('restores a cached benchmark when switching back before another benchmark fin
   await select('NIFTY Next 50')
   await select('NIFTY 50')
   expect(state.benchmark).toHaveBeenCalledTimes(2)
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+0.0%')
+  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('0.0%')
 })
 
 it('starts benchmark history while backcast is pending and cancels both when external data is disabled', async () => {
@@ -344,12 +344,27 @@ it('does not turn an account addition into benchmark returns', async () => {
   expect(container.textContent).not.toContain('Portfolio leads')
 })
 
+it('keeps contribution rows distinct for holdings sharing a long name prefix', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-30T18:00:00+05:30'))
+  const positions: Position[] = ['Parag Parikh Flexi Cap Fund', 'Parag Parikh Liquid Fund'].map((name, index) => ({
+    id: `pp-${index}`, ticker: name, name, type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 110,
+  }))
+  await renderInsights([], [], positions)
+  const quotes = Object.fromEntries(positions.map((position, index) => [quoteKey(position), { price: 110, change: 5 + index, changePct: 1 + index, at: Date.parse('2026-10-30T12:00:00+05:30'), source: 'yahoo' as const }]))
+  state.store.snapshot = investmentWorkspace.readSnapshot({ folios: [{ id: 'pp', name: 'PP', importedAt: 1, positions }], quotes })
+  await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
+  const rows = [...container.querySelectorAll('.contribution-row')]
+  expect(rows.map((row) => row.getAttribute('aria-label')?.split(':')[0]).sort()).toEqual(positions.map((position) => position.name).sort())
+  expect(new Set(rows.map((row) => row.querySelector('span')?.textContent)).size).toBe(1)
+})
+
 it('shows portfolio amounts and session availability', async () => {
   await renderInsights([])
   const summary = container.querySelector('.insights-portfolio-summary')!
   expect(summary.querySelector('.insights-summary-current strong')?.textContent).toBe('₹100.00')
   expect(summary.querySelector('.insights-summary-invested strong')?.textContent).toBe('₹100.00')
-  expect(summary.querySelector('.insights-summary-pnl strong')?.textContent).toBe('+₹0.00')
+  expect(summary.querySelector('.insights-summary-pnl strong')?.textContent).toBe('₹0.00')
   expect(summary.querySelector('#session-kpi strong')?.textContent).toBe('Unavailable')
 })
 

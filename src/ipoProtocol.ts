@@ -4,6 +4,7 @@ export type IpoStatus = 'OPEN' | 'UPCOMING' | 'CLOSED' | 'LISTED'
 export interface IpoGmp {
   amount: number
   percent: number | null
+  /** New data is Xflot only; 'GMP Today' stays valid so feeds saved in browsers before the switch still load. */
   source: 'GMP Today' | 'Xflot'
   sourceUrl: string
   sourceUpdatedAt: number | null

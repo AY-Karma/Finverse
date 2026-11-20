@@ -3,6 +3,7 @@ import { CLOSED_QUOTE_RECHECK_MS, isMarketOpen } from './live'
 import { cachedMarketIndexQuotes, INDEX_REFRESH_MS, loadMarketIndexQuotes, nextMarketIndexRefreshAt, persistMarketIndexQuotes } from './marketIndexQuotes'
 import { normalizeMarketIndexIds, selectedMarketIndices } from './marketIndexSelection'
 import { isGlobalIndexSessionOpen } from './marketIndexSessions'
+import { livePace, PACE_STEPS } from './livePace'
 
 export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly string[]) {
   const selection = normalizeMarketIndexIds(indexIds)
@@ -29,7 +30,8 @@ export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly strin
       lastRefreshAt = Date.now()
       const request = new AbortController()
       controller = request
-      setLoading(true)
+      // Background polls keep showing the last quotes instead of toggling "Loading" on every poll.
+      if (!cachedMarketIndexQuotes(selection).checkedAt) setLoading(true)
       void loadMarketIndexQuotes(request.signal, force, selection)
         .then((next) => { if (active && !request.signal.aborted) setCurrent({ key, snapshot: next }) })
         .catch(() => {})
@@ -40,7 +42,7 @@ export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly strin
             setLoading(false)
             if (marketOpen && !document.hidden) refreshTimer = setTimeout(() => {
               if ((updateMarket() || closeRefreshPending) && refresh(closeRefreshPending)) closeRefreshPending = false
-            }, Math.max(INDEX_REFRESH_MS, nextMarketIndexRefreshAt(selection) - Date.now()))
+            }, Math.max(0, (livePace.nextBeatAt() ?? Date.now() + PACE_STEPS[0]) - Date.now(), nextMarketIndexRefreshAt(selection) - Date.now()))
           }
         })
       return true
@@ -75,7 +77,9 @@ export function useMarketIndexQuotes(allowed: boolean, indexIds?: readonly strin
     }, INDEX_REFRESH_MS)
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('pagehide', persistMarketIndexQuotes)
-    return () => { active = false; window.clearInterval(timer); clearTimeout(refreshTimer); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', persistMarketIndexQuotes); controller?.abort(); persistMarketIndexQuotes() }
+    // The refresh button restarts the shared beat: indices refresh with holdings instead of waiting for their next poll.
+    const unsubscribeRestart = livePace.onRestart(() => { if (!document.hidden && refresh(true)) closeRefreshPending = false })
+    return () => { active = false; unsubscribeRestart(); window.clearInterval(timer); clearTimeout(refreshTimer); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', persistMarketIndexQuotes); controller?.abort(); persistMarketIndexQuotes() }
   }, [allowed, key])
 
   return { ...snapshot, quotes: allowed ? snapshot.quotes : {}, loading: allowed && (current.key !== key ? !snapshot.checkedAt : loading) }

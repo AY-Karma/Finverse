@@ -35,7 +35,7 @@ export function MonitorOnboarding({ onRequestImport }: { onRequestImport: () => 
         <div>
           <h3>Follow your investments</h3>
           <p>News and company updates, with your holdings in view.</p>
-          <details><summary>Make it your own</summary><p>Save stories, set price watches and add reminders. You control external market data in Settings.</p></details>
+          <details><summary>Make it your own</summary><p>Save stories, set price watches and add reminders.</p></details>
         </div>
       </article>
 

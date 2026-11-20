@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useStore, type InstrumentCorrection } from '../useStore'
-import { hasInrDenomination, hasVerifiedNsePricing, isNumericBseScripCode, needsInstrumentReview } from '../instruments'
+import { BSE_PRICING_NOTICE, hasInrDenomination, hasVerifiedNsePricing, isNumericBseScripCode, needsInstrumentReview } from '../instruments'
 import { loadNsePricingCandidates, type NsePricingCandidate } from '../nsePricing'
 import type { Exchange, Position } from '../types'
 import { ActionIcon } from './ActionIcon'
@@ -9,7 +9,18 @@ import './nseApproval.css'
 
 const EXCHANGES: Exchange[] = ['NSE', 'BSE', 'OTHER']
 interface NseApprovalMatch { position: Position; candidate: NsePricingCandidate }
-interface NseApprovalPlan { matches: NseApprovalMatch[]; skipped: number }
+interface NseApprovalPlan { matches: NseApprovalMatch[]; unmatched: Position[] }
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+
+/** Separates holdings that still need review from confirmed ones that simply have no exact NSE match. */
+function nseResultMessage(approved: number, needReview: number, kept: number): string {
+  return [
+    approved ? `${plural(approved, 'NSE pricing match', 'NSE pricing matches')} approved.` : 'No new NSE matches.',
+    needReview ? `${plural(needReview, 'listing still needs', 'listings still need')} review.` : '',
+    kept ? `${plural(kept, 'confirmed listing keeps', 'confirmed listings keep')} its current price source.` : '',
+  ].filter(Boolean).join(' ')
+}
 
 function importedBse(position: Position): boolean {
   return position.exchange === 'BSE' || position.reportedExchange?.trim().toUpperCase() === 'BSE'
@@ -18,6 +29,26 @@ function importedBse(position: Position): boolean {
 function listing(position: Pick<Position, 'ticker' | 'type' | 'exchange' | 'currency' | 'providerSymbol'>): string {
   const provider = position.providerSymbol || (position.exchange === 'BSE' && isNumericBseScripCode(position.ticker) ? 'Price symbol required' : 'Derived from listing')
   return `${position.ticker || 'No symbol'} · ${position.type === 'etf' ? 'ETF' : position.type === 'stock' ? 'Stock' : 'Other'} · ${position.exchange ?? 'Unresolved venue'} · ${position.currency ?? 'Unresolved currency'} · ${provider}`
+}
+
+/** One line of listing facts; statement values appear only when they differ from what is used. */
+function ListingFacts({ position }: { position: Position }) {
+  const verifiedNse = hasVerifiedNsePricing(position)
+  const importedExchange = position.reportedExchange?.trim().toUpperCase() || position.exchange
+  const statementExchange = position.reportedExchange && position.reportedExchange.trim().toUpperCase() !== position.exchange ? position.reportedExchange : ''
+  const statementCurrency = position.reportedCurrency && position.reportedCurrency !== position.currency ? position.reportedCurrency : ''
+  const statement = [statementExchange && !verifiedNse ? `exchange ${statementExchange}` : '', statementCurrency ? `currency ${statementCurrency}` : ''].filter(Boolean).join(', ')
+  const facts = [
+    position.name && position.name !== position.ticker ? position.ticker || 'No symbol' : '',
+    `${position.exchange ?? 'Unresolved exchange'}${position.exchangeSource !== 'explicit' ? ' (inferred)' : ''}`,
+    position.currency ?? 'Unresolved currency',
+    verifiedNse ? position.pricingListing!.providerSymbol : position.providerSymbol || 'Symbol derived from listing',
+  ].filter(Boolean)
+  return <p className="listing-facts">
+    {facts.join(' · ')}
+    {verifiedNse && <span className="nse-priced-label"> · Priced via NSE{importedExchange && importedExchange !== 'NSE' ? `, imported ${importedExchange}` : ''}</span>}
+    {statement && <span className="listing-statement"> · Statement says {statement}</span>}
+  </p>
 }
 
 function defaultCorrection(position: Position): InstrumentCorrection {
@@ -44,6 +75,7 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
   const needsProviderSymbol = draft?.exchange === 'BSE' && isNumericBseScripCode(draft.ticker)
   const nsePending = holdings.filter((position) => !hasVerifiedNsePricing(position))
   const sourceSwitches = nsePlan?.matches.filter(({ position }) => importedBse(position)) ?? []
+  const unmatchedReview = nsePlan?.unmatched.filter(needsInstrumentReview).length ?? 0
   const dialogRef = useRef<HTMLDialogElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
@@ -89,7 +121,7 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
     setApprovingNse(true)
     setNsePlan(null)
     let approved = 0
-    let remaining = plan.skipped
+    const notApproved = plan.unmatched.map((position) => position.id)
     const failures: string[] = []
     try {
       for (const { position, candidate } of plan.matches) {
@@ -97,17 +129,19 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
         const current = currentRef.current.positions.find((item) => item.id === position.id)
         if (!current || current.isin !== position.isin || current.type !== position.type
           || current.exchange !== position.exchange || current.reportedExchange !== position.reportedExchange
-          || current.providerSymbol !== position.providerSymbol) { remaining += 1; continue }
+          || current.providerSymbol !== position.providerSymbol) { notApproved.push(position.id); continue }
         try {
           await confirmNsePricing(current.id, candidate)
           approved += 1
         } catch (cause) {
-          remaining += 1
+          notApproved.push(position.id)
           failures.push(cause instanceof Error ? cause.message : 'The pricing source could not be saved.')
         }
       }
       if (canContinue(controller)) {
-        setMessage(`${approved} NSE pricing ${approved === 1 ? 'match' : 'matches'} approved.${remaining ? ` ${remaining} ${remaining === 1 ? 'needs' : 'need'} review.` : ''}`)
+        const left = notApproved.flatMap((id) => currentRef.current.positions.filter((item) => item.id === id))
+        const needReview = left.filter(needsInstrumentReview).length
+        setMessage(nseResultMessage(approved, needReview, left.length - needReview))
         if (failures.length) setBulkError(`${failures.length} could not be saved. ${failures[0]}`)
       }
     } finally {
@@ -134,7 +168,7 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
         const exact = candidates.filter((candidate) => candidate.isin === position.isin && candidate.type === position.type)
         return exact.length === 1 ? [{ position, candidate: exact[0] }] : []
       })
-      const plan = { matches, skipped: nsePending.length - matches.length }
+      const plan = { matches, unmatched: nsePending.filter((position) => !matches.some((match) => match.position.id === position.id)) }
       if (matches.some(({ position }) => importedBse(position))) setNsePlan(plan)
       else await approveNsePlan(plan, controller)
     } catch (cause) {
@@ -216,15 +250,11 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
       {onClose && <button className="icon-btn" type="button" aria-label="Close listing review" onClick={onClose}><ActionIcon name="close" /></button>}
     </div>
     <div className="instrument-review-scroll" role="region" aria-label="Instrument listings" tabIndex={0}>
-      <p className="hint">Confirm listing details against your broker statement. NSE auto-approval checks exact ISIN matches against the official listing reference.</p>
-      {nsePending.length > 0 && <div className="nse-approval-actions">
-        <button type="button" className="btn btn--primary btn--small" aria-busy={approvingNse} disabled={saving || !!nsePlan || !settings.allowExternalData} onClick={() => void findNseMatches()}>{approvingNse ? 'Checking NSE matches…' : 'Auto-approve NSE matches'}</button>
-        <p className="nse-pricing-note"><strong>NSE pricing preferred</strong><span>Verified matches use NSE prices. Our current BSE feed is delayed by about 15 minutes.</span></p>
-        {!settings.allowExternalData && <span className="hint">Enable external market data in Settings to check NSE matches.</span>}
-      </div>}
-      {reviewCount > 0 && <div className="import-actions">
-        <button type="button" className="btn btn--secondary btn--small" aria-busy={approvingAll} disabled={saving || !!nsePlan} onClick={() => void approveAll()}>{approvingAll ? 'Approving default listings…' : 'Approve all default listings'}</button>
-        <span className="hint">Use the current values shown below. Listings with invalid details will still need review.</span>
+      {(nsePending.length > 0 || reviewCount > 0) && <div className="nse-approval-actions">
+        {nsePending.length > 0 && <button type="button" className="btn btn--primary btn--small" aria-busy={approvingNse} disabled={saving || !!nsePlan || !settings.allowExternalData} onClick={() => void findNseMatches()}>{approvingNse ? 'Checking NSE matches…' : 'Auto-approve NSE matches'}</button>}
+        {reviewCount > 0 && <button type="button" className="btn btn--secondary btn--small" aria-busy={approvingAll} disabled={saving || !!nsePlan} onClick={() => void approveAll()}>{approvingAll ? 'Approving default listings…' : 'Approve all default listings'}</button>}
+        <span className="hint nse-approval-hint">{BSE_PRICING_NOTICE} Auto-approve uses exact ISIN matches.</span>
+        {!settings.allowExternalData && <span className="hint">Market data is paused because this workspace changed in another tab. Reload to continue.</span>}
       </div>}
       {bulkError && <p className="hint down" role="alert">{bulkError}</p>}
       {message && <p className="hint" role="status">{message}</p>}
@@ -238,15 +268,8 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
             </div>
           </div>
           <div className="folio-copy listing-copy">
-            <dl className={`listing-facts${!position.name || position.name === position.ticker ? ' listing-facts--compact' : ''}`}>
-              {position.name && position.name !== position.ticker && <div><dt>Symbol</dt><dd>{position.ticker || 'Not provided'}</dd></div>}
-              <div><dt>Exchange</dt><dd>{position.exchange ?? 'Unresolved'}{position.exchangeSource !== 'explicit' && <span className="listing-fact-note">Inferred</span>}</dd></div>
-              <div><dt>Currency</dt><dd>{position.currency ?? 'Unresolved'}</dd></div>
-              <div><dt>Price symbol</dt><dd>{hasVerifiedNsePricing(position) ? position.pricingListing!.providerSymbol : position.providerSymbol || 'Derived from listing'}</dd></div>
-            </dl>
-            {hasVerifiedNsePricing(position) && <div className="listing-provenance"><span className="nse-priced-label">Priced via NSE<span>Imported exchange: {position.reportedExchange || position.exchange || 'not provided'}</span></span></div>}
-            {position.identityIssue && <span className="hint down">{position.identityIssue}</span>}
-            {(position.reportedExchange || position.reportedCurrency) && <span className="hint">Statement metadata: {position.reportedExchange ? `exchange ${position.reportedExchange}` : ''}{position.reportedExchange && position.reportedCurrency ? ', ' : ''}{position.reportedCurrency ? `currency ${position.reportedCurrency}` : ''}</span>}
+            <ListingFacts position={position} />
+            {position.identityIssue && position.identityIssue !== BSE_PRICING_NOTICE && <span className="hint down">{position.identityIssue}</span>}
             {!hasInrDenomination(position) && <span className="hint">Import a corrected INR statement to review this listing. Original unsupported amounts are retained.</span>}
           </div>
         </div>
@@ -274,7 +297,7 @@ export function InstrumentReview({ onClose, autoFocus = true }: { onClose?: () =
         <h3 id="nse-approval-title">Use NSE prices for matched holdings?</h3>
         <p id="nse-approval-description">{sourceSwitches.length} imported BSE {sourceSwitches.length === 1 ? 'holding has' : 'holdings have'} a verified NSE match. Valuations will use NSE prices. Your imported exchange, quantity and purchase details stay as recorded.</p>
         <ul className="nse-approval-matches">{sourceSwitches.map(({ position, candidate }) => <li key={position.id}><strong>{position.name || position.ticker}</strong><span>BSE → NSE · {candidate.providerSymbol}</span></li>)}</ul>
-        <p className="hint">NSE prices may differ from BSE prices.{nsePlan.skipped > 0 ? ` ${nsePlan.skipped} unmatched ${nsePlan.skipped === 1 ? 'holding needs' : 'holdings need'} individual review.` : ''}</p>
+        <p className="hint">NSE prices may differ from BSE prices.{unmatchedReview > 0 ? ` ${plural(unmatchedReview, 'unmatched holding needs', 'unmatched holdings need')} individual review.` : ''}</p>
         <div className="import-actions"><button className="btn btn--primary" type="button" onClick={() => { if (controllerRef.current) void approveNsePlan(nsePlan, controllerRef.current) }}>Use NSE prices &amp; approve</button><button className="btn btn--ghost" type="button" onClick={() => dismissNsePlan(true)}>Review individually</button></div>
       </div>}
     </dialog>

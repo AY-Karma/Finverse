@@ -28,47 +28,11 @@ export function supportsCompanyResearch(position: Position): boolean {
   return position.type === 'stock' && (exchange === 'NSE' || exchange === 'BSE')
 }
 
-const RESOLVE_TTL_MS = 7 * 24 * 60 * 60 * 1000
-function validCompanyPath(value: unknown): value is string {
-  return typeof value === 'string' && /^\/company\/[A-Za-z0-9&_-]+\/$/.test(value)
-}
-
-/** Only an exact symbol match becomes a company link. Failure stays a search. */
-export async function resolveScreenerCompanyPath(symbol: string, signal?: AbortSignal): Promise<string | null> {
-  signal?.throwIfAborted()
-  const key = `finverse:screenerPath:v3:${tickerBase(symbol)}`
-  try {
-    const cached = JSON.parse(localStorage.getItem(key) || 'null') as { path?: unknown; at?: number } | null
-    if (cached && validCompanyPath(cached.path) && cached.path.split('/')[2].toUpperCase() === tickerBase(symbol) && typeof cached.at === 'number' && Date.now() - cached.at >= 0 && Date.now() - cached.at < RESOLVE_TTL_MS) return cached.path
-  } catch { /* A denied cache does not prevent a lookup. */ }
-  try {
-    const target = `https://www.screener.in/api/company/search/?q=${encodeURIComponent(symbol)}`
-    const response = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(target)}`, {
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),
-    })
-    if (!response.ok) return null
-    const candidates: unknown = await response.json()
-    if (!Array.isArray(candidates)) return null
-    const paths = [...new Set(candidates.flatMap((candidate): string[] => {
-      if (!candidate || typeof candidate.url !== 'string') return []
-      const path = candidate.url.replace(/\/consolidated\/?$/, '/').replace(/\/+$/, '/')
-      return validCompanyPath(path) ? [path] : []
-    }))]
-    const path = paths.find((path) => path.split('/')[2].toUpperCase() === tickerBase(symbol))
-    if (!path) return null
-    try { localStorage.setItem(key, JSON.stringify({ path, at: Date.now() })) } catch { /* Link still works without cache. */ }
-    return path
-  } catch {
-    signal?.throwIfAborted()
-    return null
-  }
-}
-
 function sourceSearch(label: string, query: string, description: string): ResearchLink {
   return { label, url: `https://www.google.com/search?q=${encodeURIComponent(query)}`, description, kind: 'search' }
 }
 
-export function marketLinks(position: Position, screenerPath?: string | null): ResearchLink[] {
+export function marketLinks(position: Position): ResearchLink[] {
   const name = position.name?.trim() || position.ticker
   const symbol = tickerBase(position.ticker)
   if (position.type === 'mutual-fund') return [
@@ -81,9 +45,9 @@ export function marketLinks(position: Position, screenerPath?: string | null): R
   const links: ResearchLink[] = []
   if (supportsCompanyResearch({ ...position, exchange })) links.push({
     label: 'Company financials',
-    url: screenerPath && validCompanyPath(screenerPath) ? `https://www.screener.in${screenerPath}` : screenerFallbackSearchUrl(`${name} ${exchange}`),
+    url: screenerFallbackSearchUrl(`${name} ${exchange}`),
     description: 'Review earnings, cash flow, ownership and peers at the source.',
-    kind: screenerPath && validCompanyPath(screenerPath) ? 'page' : 'search',
+    kind: 'search',
   })
   if (exchange === 'NSE') links.push({ label: 'Exchange quote', url: `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`, description: 'Open the NSE quote and company disclosures.', kind: 'page' })
   else if (exchange === 'BSE') links.push(sourceSearch('Exchange quote', `site:bseindia.com ${name} ${symbol} quote`, 'Find the matching BSE security page.'))

@@ -11,7 +11,7 @@ const retry = vi.fn(), close = vi.fn()
 const points: IpoGmpPoint[] = [{ date: '2026-10-30', amount: -5 }, { date: '2026-10-31', amount: 0 }, { date: '2026-11-02', amount: 8 }]
 beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container); retry.mockReset(); close.mockReset() })
 afterEach(async () => { await act(async () => root.unmount()); container.remove() })
-const render = (values = points, status: 'ready' | 'loading' | 'error' = 'ready') => act(async () => root.render(<IpoGmpTrend id="trend" name="Example" points={values} sourceUrl="https://gmptoday.in/ipo/example/" status={status} onRetry={retry} onClose={close} />))
+const render = (values = points, status: 'ready' | 'loading' | 'error' = 'ready') => act(async () => root.render(<IpoGmpTrend id="trend" name="Example" points={values} sourceUrl="https://www.xflot.com/ipo/example" status={status} onRetry={retry} onClose={close} />))
 
 it('shows genuine dated values and lets the user select each day with keyboard controls', async () => {
   await render()
@@ -23,7 +23,7 @@ it('shows genuine dated values and lets the user select each day with keyboard c
   expect(slider.getAttribute('aria-valuetext')).toBe('30 Oct, GMP -₹5.00')
   expect(container.querySelector('.mi-trend-plot path[stroke="currentColor"]')!.getAttribute('d')!.match(/M/g)).toHaveLength(2)
   expect(container.textContent).toContain('Reported days only')
-  expect(container.querySelector('.mi-trend-source a')?.getAttribute('href')).toBe('https://gmptoday.in/ipo/example/')
+  expect(container.querySelector('.mi-trend-source a')?.getAttribute('href')).toBe('https://www.xflot.com/ipo/example')
 })
 
 it('selects the nearest actual observation on tap without creating a missing-day value', async () => {

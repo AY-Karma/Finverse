@@ -10,7 +10,9 @@ describe('verified NSE listing reference API', () => {
   it('uses official stock and ETF masters and reuses the cached reference across different queries', async () => {
     const fetch = fetcher()
     const handle = createNseListingsHandler({ fetcher: fetch })
-    const result = await (await handle(request())).json()
+    const response = await handle(request())
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=3600, stale-while-revalidate=86400')
+    const result = await response.json()
     expect(result.candidates).toEqual([
       { exchange: 'NSE', type: 'stock', providerSymbol: 'TCS.NS', isin: 'INE467B01029' },
       { exchange: 'NSE', type: 'etf', providerSymbol: 'NIFTYBEES.NS', isin: 'INF204KB14I2' },
@@ -35,7 +37,9 @@ describe('verified NSE listing reference API', () => {
     const handle = createNseListingsHandler({ fetcher: fetch })
     expect((await handle(request('invalid'))).status).toBe(400)
     expect(fetch).not.toHaveBeenCalled()
-    expect((await handle(request())).status).toBe(502)
+    const failed = await handle(request())
+    expect(failed.status).toBe(502)
+    expect(failed.headers.get('vercel-cdn-cache-control')).toBeNull()
     const unavailable = createNseListingsHandler({ fetcher: vi.fn(async () => new Response('', { status: 503 })) })
     expect((await unavailable(request())).status).toBe(502)
   })

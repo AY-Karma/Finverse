@@ -13,7 +13,7 @@ export function MarketRefreshStatus({ externalEnabled, now = new Date(), issue, 
   return <div className="market-refresh-status">
     <div className={`market-status ${open ? 'market-open' : 'market-closed'}`} role="status">
       <span className={`live-dot${!open ? ' live-dot--market-closed' : ''}`} aria-hidden="true" />
-      <span className="market-status-copy">{!externalEnabled ? 'External market data off · showing imported prices' : `Market ${open ? 'open' : 'closed'}`}</span>
+      <span className="market-status-copy">{!externalEnabled ? 'Market data paused · showing imported prices' : `Market ${open ? 'open' : 'closed'}`}</span>
     </div>
     <span className="market-refresh-issue hint down" role={issue ? issueRole : undefined} aria-hidden={!issue || undefined}>{issue}</span>
   </div>

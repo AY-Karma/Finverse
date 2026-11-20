@@ -150,7 +150,7 @@ export function FundSchemeReview() {
     <summary className="listing-review-trigger">
       <ActionIcon name="review" />
       <span className="listing-review-copy"><strong>Mutual-fund schemes</strong><span>{reviewCount > 0 ? `${reviewCount} scheme${reviewCount === 1 ? ' needs' : 's need'} your confirmation.` : 'No schemes need review. View or edit them here.'}</span></span>
-      <span className="listing-review-action">{expanded ? 'Close schemes' : reviewCount > 0 ? 'Review schemes' : 'View schemes'}</span>
+      {reviewCount > 0 && !expanded && <span className="listing-review-action">Review schemes</span>}
       <svg className="listing-review-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
     </summary>
     <div className="fund-scheme-content">

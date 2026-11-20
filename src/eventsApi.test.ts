@@ -22,11 +22,23 @@ describe('company events API', () => {
     expect(feed.issues).toEqual([])
   })
 
+  it('reads a week of market-wide filings above 6 MB and accepts NSE archive links on nseindia.in', async () => {
+    const padding = 'x'.repeat(1_500)
+    const bulk = Array.from({ length: 4_600 }, (_, index) => ({ ...filings[0], symbol: 'OTHER', seq_id: String(index), attchmntText: padding }))
+    const current = { ...filings[0], attchmntFile: 'https://nsearchives.nseindia.in/corporate/INFY_26102026.pdf' }
+    expect(JSON.stringify(bulk).length).toBeGreaterThan(6 * 1024 * 1024)
+    const fetcher = provider({ calendar: [], actions: [], filings: [...bulk, current] })
+    const feed = await (await createEventsHandler({ fetcher, now: () => NOW })(request())).json()
+    expect(feed.issues).toEqual([])
+    expect(feed.events).toEqual([expect.objectContaining({ kind: 'filing', sourceUrl: current.attchmntFile })])
+  })
+
   it('keeps meeting dates, ex-dates and publication times distinct and filters symbols', async () => {
     const fetcher = provider()
     const response = await createEventsHandler({ fetcher, now: () => NOW })(request())
     const feed = await response.json()
     expect(response.status).toBe(200)
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=900, must-revalidate')
     expect(feed.issues).toEqual([])
     expect(feed.events).toHaveLength(3)
     expect(feed.events.find((event: { kind: string }) => event.kind === 'results')).toMatchObject({ date: '2026-10-28', dateLabel: 'Meeting date' })
@@ -46,6 +58,15 @@ describe('company events API', () => {
     expect(fetcher.mock.calls.filter(([url]) => url.toString().endsWith('/EQUITY_L.csv'))).toHaveLength(1)
     expect(second.events).toHaveLength(1)
     expect(second.events[0].symbol).toBe('OTHER')
+  })
+
+  it('bounds the meeting calendar to the same 90-day window as corporate actions', async () => {
+    const fetcher = provider()
+    await createEventsHandler({ fetcher, now: () => NOW })(request())
+    const calendar = new URL(fetcher.mock.calls.map(([url]) => url.toString()).find((url) => url.includes('event-calendar'))!)
+    expect(calendar.searchParams.get('index')).toBe('equities')
+    expect(calendar.searchParams.get('from_date')).toMatch(/^\d{2}-\d{2}-\d{4}$/)
+    expect(calendar.searchParams.get('to_date')).toMatch(/^\d{2}-\d{2}-\d{4}$/)
   })
 
   it('rechecks filings every fifteen minutes while retaining slower calendars and identity references', async () => {
@@ -76,6 +97,7 @@ describe('company events API', () => {
     expect(firstResponse.status).toBe(200)
     expect(first.events).toHaveLength(2)
     expect(first.issues).toEqual([expect.objectContaining({ source: 'NSE corporate actions' })])
+    expect(firstResponse.headers.get('vercel-cdn-cache-control')).toBeNull()
     await handler(request())
     expect(fetcher).toHaveBeenCalledTimes(4)
 
@@ -218,7 +240,7 @@ describe('company events API', () => {
   })
 
   it('rejects oversized upstream bodies before parsing them', async () => {
-    const response = await createEventsHandler({ fetcher: vi.fn(async () => new Response('[]', { headers: { 'content-length': String(7 * 1024 * 1024) } })), now: () => NOW })(request())
+    const response = await createEventsHandler({ fetcher: vi.fn(async () => new Response('[]', { headers: { 'content-length': String(25 * 1024 * 1024) } })), now: () => NOW })(request())
     expect(response.status).toBe(502)
   })
 

@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { livePace } from './livePace'
 import { useMarketIndexQuotes } from './useMarketIndexQuotes'
 
 const state = vi.hoisted(() => ({ open: true, load: vi.fn(), empty: { quotes: {}, checkedAt: 0, unavailable: [] } }))
@@ -22,6 +23,7 @@ const render = () => act(async () => root.render(<Capture />))
 
 beforeEach(() => {
   vi.useFakeTimers()
+  livePace.restartBeat(0)
   state.open = true
   state.load.mockReset().mockResolvedValue({ quotes: { '^NSEI': { price: 25_000, change: 100, pct: 0.4, at: Date.now() } }, checkedAt: Date.now(), unavailable: [] })
   Object.defineProperty(document, 'hidden', { configurable: true, value: false })
@@ -38,11 +40,23 @@ describe('index quote refresh lifecycle', () => {
     indexIds = ['sp-500', 'nasdaq-composite']
     await render()
     expect(state.load.mock.calls[0][2]).toEqual(indexIds)
-    await act(async () => vi.advanceTimersByTime(1_000))
+    await act(async () => vi.advanceTimersByTime(5_000))
     expect(state.load).toHaveBeenCalledTimes(2)
     Object.defineProperty(document, 'hidden', { configurable: true, value: true })
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); vi.advanceTimersByTime(5_000) })
     expect(state.load).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps showing retained quotes instead of loading during background polls', async () => {
+    vi.setSystemTime(new Date('2026-11-09T05:00:00Z'))
+    const retained = { quotes: { '^NSEI': { price: 25_000, change: 100, pct: 0.4, at: Date.now() } }, checkedAt: Date.now(), unavailable: [] }
+    state.empty = retained
+    try {
+      state.load.mockImplementation(() => new Promise(() => {}))
+      await render()
+      expect(state.load).toHaveBeenCalledOnce()
+      expect(result.loading).toBe(false)
+    } finally { state.empty = { quotes: {}, checkedAt: 0, unavailable: [] } }
   })
 
   it.each(['2026-11-14T15:00:00Z', '2026-11-09T02:00:00Z'])('does not continuously poll closed global markets at %s', async (date) => {
@@ -69,17 +83,31 @@ describe('index quote refresh lifecycle', () => {
     expect(result.quotes).toEqual(selected.quotes)
   })
 
-  it('schedules from the cache deadline instead of rounding delayed results to another polling tick', async () => {
+  it('keeps index polls on the shared 5s beat instead of drifting by the response time', async () => {
+    vi.setSystemTime(new Date('2026-11-09T05:00:00Z'))
     state.load.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 250))
       return { quotes: {}, checkedAt: Date.now(), unavailable: [] }
     })
     await render()
     await act(async () => { await vi.advanceTimersByTimeAsync(250) })
-    await act(async () => { await vi.advanceTimersByTimeAsync(999) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_749) })
     expect(state.load).toHaveBeenCalledOnce()
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(state.load).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes with holdings when the refresh button restarts the beat', async () => {
+    vi.setSystemTime(new Date('2026-11-09T05:00:00Z'))
+    await render()
+    expect(state.load).toHaveBeenCalledOnce()
+    await act(async () => { vi.advanceTimersByTime(2_000); livePace.restartBeat() })
+    expect(state.load).toHaveBeenCalledTimes(2)
+    expect(state.load.mock.calls[1][1]).toBe(true)
+    await act(async () => vi.advanceTimersByTime(4_999))
+    expect(state.load).toHaveBeenCalledTimes(2)
+    await act(async () => vi.advanceTimersByTime(1))
+    expect(state.load).toHaveBeenCalledTimes(3)
   })
 
   it('makes no request before permission and clears visible quotes after permission is removed', async () => {

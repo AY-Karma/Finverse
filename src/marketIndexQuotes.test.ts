@@ -79,6 +79,21 @@ describe('public index quotes', () => {
     expect(provider.quotes).toHaveBeenCalledTimes(2)
   })
 
+  it('waits for the provider snapshot to expire when both indices report one', async () => {
+    const { loadMarketIndexQuotes, nextMarketIndexRefreshAt } = await import('./marketIndexQuotes')
+    provider.quotes.mockResolvedValue(new Map([['^NSEI', { ...quote(), nextUpdateAt: now + 90_000 }], ['^NSEBANK', { ...quote(), nextUpdateAt: now + 60_000 }]]))
+    await loadMarketIndexQuotes()
+    expect(nextMarketIndexRefreshAt()).toBe(now + 60_000)
+    vi.advanceTimersByTime(59_999)
+    await loadMarketIndexQuotes()
+    expect(provider.quotes).toHaveBeenCalledTimes(1)
+    provider.quotes.mockResolvedValue(new Map([['^NSEI', { ...quote(), nextUpdateAt: now + 90_000 }], ['^NSEBANK', quote()]]))
+    vi.advanceTimersByTime(1)
+    await loadMarketIndexQuotes()
+    expect(provider.quotes).toHaveBeenCalledTimes(2)
+    expect(nextMarketIndexRefreshAt()).toBe(now + 60_000 + 1_000)
+  })
+
   it('retains valid previous observations on partial and failed refreshes', async () => {
     const { INDEX_REFRESH_MS, loadMarketIndexQuotes } = await import('./marketIndexQuotes')
     provider.quotes.mockResolvedValueOnce(new Map(['^NSEBANK', '^NSEI'].map((symbol) => [symbol, quote()])))

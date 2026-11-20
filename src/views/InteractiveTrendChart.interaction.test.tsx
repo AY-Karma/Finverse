@@ -86,7 +86,7 @@ describe('interactive chart controls', () => {
   it('rebuilds visible paths when keyboard navigation pans history and returns to the latest points', async () => {
     const rows = Array.from({ length: 250 }, (_, index) => ({ at: start + index * 86_400_000, close: 100 + index }))
     const onReachStart = vi.fn()
-    await act(async () => root.render(<InteractiveTrendChart rows={rows} lines={lines} valueFormatter={format} yAxisLabel="Price" onReachStart={onReachStart} />))
+    await act(async () => root.render(<InteractiveTrendChart rows={rows} lines={lines} valueFormatter={format} yAxisLabel="Price" onReachStart={onReachStart} appearance="insight" />))
     const chart = container.querySelector('.interactive-trend-chart > svg')!
     expect(chart.getAttribute('tabindex')).toBe('0')
     const latestPath = container.querySelector('.interactive-trend-line')!.getAttribute('d')

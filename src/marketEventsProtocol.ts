@@ -40,6 +40,6 @@ export function isOfficialEventUrl(value: string): boolean {
   try {
     const url = new URL(value)
     return url.protocol === 'https:' && !url.username && !url.password && !url.port
-      && ['www.nseindia.com', 'nsearchives.nseindia.com', 'archives.nseindia.com'].includes(url.hostname)
+      && ['www.nseindia.com', 'nsearchives.nseindia.com', 'nsearchives.nseindia.in', 'archives.nseindia.com'].includes(url.hostname)
   } catch { return false }
 }

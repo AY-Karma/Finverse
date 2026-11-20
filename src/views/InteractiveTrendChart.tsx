@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Keyb
 import { clampViewportStart, createChartViewport, shiftViewportStart } from '../chartViewport'
 import { ActionIcon } from './ActionIcon'
 import { observeSettledResize } from '../observeSettledResize'
+import { plusSign, signedPercent } from '../valuation'
 import { DitherAreaFill } from './DitherAreaFill'
 import type { DitherColor } from '../components/dither-kit/palette'
 
@@ -59,7 +60,7 @@ interface InteractiveTrendChartProps {
   showArea?: boolean
   ditherColor?: DitherColor
   ditherTo?: string
-  appearance?: 'default' | 'minimal' | 'price' | 'insight'
+  appearance: 'price' | 'insight'
 }
 
 interface PanState {
@@ -141,7 +142,7 @@ export function InteractiveTrendChart({
   showArea = true,
   ditherColor,
   ditherTo,
-  appearance = 'default',
+  appearance,
 }: InteractiveTrendChartProps) {
   const chartId = useId().replace(/:/g, '')
   const chartRef = useRef<HTMLDivElement>(null)
@@ -465,8 +466,8 @@ export function InteractiveTrendChart({
         <span className="interactive-trend-unit">{yAxisLabel}</span>
         {comparisonMarker && comparisonTarget && comparisonDifference != null && comparisonPercent != null && comparisonDays != null ? <div className="interactive-trend-comparison" role="status">
           <span className="interactive-trend-comparison-period"><strong>{DATE_FORMATTER.format(new Date(comparisonMarker.at))}</strong><span>to</span><strong>{DATE_FORMATTER.format(new Date(comparisonTarget.at))}</strong></span>
-          <b className={`interactive-trend-comparison-change ${comparisonDifference >= 0 ? 'up' : 'down'}`}>{comparisonDifference >= 0 ? '▲' : '▼'} {comparisonDifference >= 0 ? '+' : ''}{valueFormatter(comparisonDifference)} <i>({comparisonPercent >= 0 ? '+' : ''}{comparisonPercent.toFixed(2)}%)</i></b>
-          <span className="interactive-trend-comparison-duration">{comparisonDays >= 0 ? '+' : ''}{comparisonDays} days</span>
+          <b className={`interactive-trend-comparison-change ${comparisonDifference >= 0 ? 'up' : 'down'}`}>{comparisonDifference >= 0 ? '▲' : '▼'} {plusSign(comparisonDifference)}{valueFormatter(comparisonDifference)} <i>({signedPercent(comparisonPercent)})</i></b>
+          <span className="interactive-trend-comparison-duration">{plusSign(comparisonDays)}{comparisonDays} days</span>
           <button type="button" className="interactive-trend-clear" onClick={() => setComparison(null)} aria-label="Clear price comparison">Clear</button>
         </div> : comparisonMarker ? <span className="interactive-trend-compare-prompt">Select another point on the chart</span> : markers.some((marker) => marker.comparable) ? <span className="interactive-trend-compare-prompt">{isPriceChart ? 'Select buy point to compare' : 'Select the purchase marker to compare'}</span> : null}
       </div>
@@ -521,8 +522,7 @@ export function InteractiveTrendChart({
         <linearGradient id={`comparison-flat-${chartId}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b9b9b4" stopOpacity="0.18" /><stop offset="100%" stopColor="#b9b9b4" stopOpacity="0.025" /></linearGradient>
         <clipPath id={`trend-plot-${chartId}`}><rect x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} /></clipPath>
       </defs>
-      {domain.ticks.map((tick, index) => <g key={tick}>{appearance !== 'minimal' && <line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - plotRight} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} />}<text x={isRightScaleChart ? chartWidth - plotRight + 14 : plotLeft - 12} y={yAt(tick) + 4} textAnchor={isRightScaleChart ? 'start' : 'end'} className="interactive-trend-axis-text">{labels[index]}</text></g>)}
-      {appearance === 'default' && <line x1={plotLeft} y1={PLOT_TOP} x2={plotLeft} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />}
+      {domain.ticks.map((tick, index) => <g key={tick}><line x1={plotLeft} y1={yAt(tick)} x2={chartWidth - plotRight} y2={yAt(tick)} className={includeZero && Math.abs(tick) < Number.EPSILON ? 'interactive-trend-grid interactive-trend-grid--zero' : 'interactive-trend-grid'} /><text x={isRightScaleChart ? chartWidth - plotRight + 14 : plotLeft - 12} y={yAt(tick) + 4} textAnchor={isRightScaleChart ? 'start' : 'end'} className="interactive-trend-axis-text">{labels[index]}</text></g>)}
       <line x1={plotLeft} y1={chartHeight - PLOT_BOTTOM} x2={chartWidth - plotRight} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-axis" />
       {visibleRows.length > 0 && tickIndices(visibleRows.length, dateTickCount).map((localIndex) => localIndex + visibleStartIndex).filter((index) => {
         const x = xAtIndex(index)
@@ -532,7 +532,7 @@ export function InteractiveTrendChart({
         {areaPath && (ditherColor
           ? <DitherAreaFill points={ditherPoints} x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} color={ditherColor} />
           : <path d={areaPath} fill={`url(#trend-area-${chartId})`} className="interactive-trend-area" />)}
-        {references.map((line) => <g key={line.label} className="interactive-trend-reference">
+        {references.map((line) => <g key={`${line.label}-${line.value}`} className="interactive-trend-reference">
           <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} className="interactive-trend-reference-underlay" />
           <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} stroke={line.color} className="interactive-trend-reference-line" />
         </g>)}
@@ -549,7 +549,7 @@ export function InteractiveTrendChart({
           const pointValue = chartRows[0][line.key]
           return typeof pointValue === 'number' ? <circle key={line.key} cx={xAtIndex(0)} cy={yAt(pointValue)} r="5" fill={line.color} className="interactive-trend-dot" /> : null
         })}
-        {hovered && hoveredIndex != null && <g>{appearance !== 'minimal' && <line x1={hoverX} y1={PLOT_TOP} x2={hoverX} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-hover-line" />}{lines.map((line) => {
+        {hovered && hoveredIndex != null && <g><line x1={hoverX} y1={PLOT_TOP} x2={hoverX} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-hover-line" />{lines.map((line) => {
           const value = hovered[line.key]
           return typeof value === 'number' && Number.isFinite(value) ? <circle key={line.key} cx={hoverX} cy={yAt(value)} r="5" fill={line.color} className="interactive-trend-dot" /> : null
         })}</g>}
@@ -559,7 +559,7 @@ export function InteractiveTrendChart({
         const label = `${line.label} ${valueFormatter(line.value)}`
         const width = Math.min(plotWidth - 8, Math.max(100, label.length * 6.4 + 22))
         const y = clamp(yAt(line.value) - 30, PLOT_TOP + 2, PLOT_TOP + plotHeight - 26)
-        return <g key={line.label} className="interactive-trend-reference-label" pointerEvents="none">
+        return <g key={`${line.label}-${line.value}`} className="interactive-trend-reference-label" pointerEvents="none">
           <title>{`${line.label}: ${valueFormatter(line.value)}`}</title>
           <rect x={plotLeft + 4} y={y} width={width} height="24" rx="5" />
           <circle cx={plotLeft + 15} cy={y + 12} r="3" fill={line.color} />
@@ -605,12 +605,12 @@ export function InteractiveTrendChart({
           } : undefined}
         >
           {marker.description && <title>{marker.description}</title>}
-          {appearance !== 'minimal' && <line x1={x} y1={PLOT_TOP} x2={x} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-marker-line" />}
+          <line x1={x} y1={PLOT_TOP} x2={x} y2={chartHeight - PLOT_BOTTOM} className="interactive-trend-marker-line" />
           <circle cx={x} cy={y} r={active ? 8 : 6} fill={marker.color} className="interactive-trend-marker-dot" />
           {marker.label && <g className="interactive-trend-marker-label"><rect x={labelX} y={labelY} width={labelWidth} height="24" rx="12" /><circle cx={labelX + 12} cy={labelY + 12} r="3" fill={marker.color} /><text x={labelX + 21} y={labelY + 15.5}>{marker.label}</text></g>}
         </g>
       })}
     </svg>
-    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{references.map((line) => <span key={line.label}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(line.value)}</b></span>)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />{differenceLabel}<b>{differenceFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
+    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{references.map((line) => <span key={`${line.label}-${line.value}`}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(line.value)}</b></span>)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />{differenceLabel}<b>{differenceFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
   </div>
 }

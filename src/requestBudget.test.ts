@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRequestBudget, readBoundedText } from '../api/requestBudget'
+import { createRequestBudget, readBoundedText } from '../api/_requestBudget'
 
 afterEach(() => vi.useRealTimers())
 
@@ -25,6 +25,21 @@ describe('public API budgets', () => {
     expect(lifetime).toHaveBeenCalledTimes(2)
   })
 
+  it('shrinks the edge lifetime of a replayed response to what is left of the local cache', async () => {
+    let at = 1_000_000
+    const budget = createRequestBudget(() => at)
+    const load = vi.fn(async () => new Response('ok', { headers: { 'Vercel-CDN-Cache-Control': 'public, s-maxage=1800, must-revalidate', 'Cache-Control': 'no-store' } }))
+    const first = await budget('trend', 3_600_000, load)
+    expect(first.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1800, must-revalidate')
+    at += 2_700_000 // 45 minutes later: the edge copy has expired but the local cache still has 15 minutes
+    const replay = await budget('trend', 3_600_000, load)
+    expect(load).toHaveBeenCalledOnce()
+    expect(replay.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=900, must-revalidate')
+    expect(replay.headers.get('cache-control')).toBe('no-store')
+    at += 899_000
+    expect((await budget('trend', 3_600_000, load)).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1, must-revalidate')
+  })
+
   it('returns a bounded deadline response even if a provider ignores cancellation', async () => {
     vi.useFakeTimers()
     const budget = createRequestBudget()
@@ -45,14 +60,23 @@ describe('public API budgets', () => {
     expect(cancelled).toBe(true)
   })
 
-  it('limits the rolling request count and admits work after reset', async () => {
+  it('serves cached and in-flight responses without spending the provider budget', async () => {
+    const budget = createRequestBudget(() => 0)
+    const load = vi.fn(async () => Response.json({ ok: true }))
+    const statuses = await Promise.all(Array.from({ length: 700 }, () => budget('shared', 1000, load).then((response) => response.status)))
+    for (let i = 0; i < 700; i++) statuses.push((await budget('shared', 1000, load)).status)
+    expect(statuses.every((status) => status === 200)).toBe(true)
+    expect(load).toHaveBeenCalledOnce()
+  })
+
+  it('limits provider calls per window and admits them again after reset', async () => {
     let now = 0
     const budget = createRequestBudget(() => now)
     const load = vi.fn(async () => Response.json({ ok: true }))
-    for (let i = 0; i < 600; i++) expect((await budget('cached', 120_000, load)).status).toBe(200)
-    expect((await budget('cached', 120_000, load)).status).toBe(429)
-    expect(load).toHaveBeenCalledTimes(1)
+    for (let i = 0; i < 600; i++) expect((await budget(`key-${i}`, 1, load)).status).toBe(200)
+    expect((await budget('key-600', 1, load)).status).toBe(429)
+    expect(load).toHaveBeenCalledTimes(600)
     now = 60_000
-    expect((await budget('cached', 120_000, load)).status).toBe(200)
+    expect((await budget('key-600', 1, load)).status).toBe(200)
   })
 })

@@ -7,7 +7,7 @@ describe('interactive trend chart', () => {
     const markup = renderToStaticMarkup(<InteractiveTrendChart
       rows={[{ at: Date.UTC(2026, 0, 1), value: 100 }, { at: Date.UTC(2026, 0, 2) }, { at: Date.UTC(2026, 0, 3), value: 90 }, { at: Date.UTC(2026, 0, 4), value: 120 }]}
       lines={[{ key: 'value', label: 'Portfolio', color: 'blue' }]}
-      valueFormatter={(value) => `${value}%`} yAxisLabel="Return" />)
+      valueFormatter={(value) => `${value}%`} yAxisLabel="Return" appearance="price" />)
     const description = markup.match(/<desc id="([^"]+)">([^<]+)<\/desc>/)!
     expect(markup).toContain(`aria-describedby="${description[1]}"`)
     expect(description[2]).toContain('01 Jan 2026 to 04 Jan 2026')

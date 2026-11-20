@@ -56,7 +56,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
 
   return <div className="mp-page">
     <header className="mp-hero"><div className="mp-hero-main">
-      <div><h1 className="page-title">Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : <>External data off · <a href="/app/settings">Settings</a></>}</p></div>
+      <div><h1 className="page-title">Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : 'Market data paused · reload this tab'}</p></div>
       <button className="mp-button" type="button" disabled={controller.refreshing || !controller.allowExternalData} onClick={() => { void controller.refresh(); refreshEvents() }}>{controller.refreshing ? 'Refreshing prices…' : 'Refresh prices'}</button>
     </div></header>
     <nav className="mp-section-links" aria-label="Monitor sections"><a href="#monitor-news-heading">News</a><a href="#monitor-ipos-heading">IPOs</a><a href="#monitor-upcoming-heading">Upcoming</a><a href="#monitor-watch-rules">Watches</a></nav>
@@ -64,7 +64,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
       <div className="mp-monitor-content">
         <MonitorAlerts controller={controller} onOpenHolding={setContextId} />
         <MonitorNewsPanel initialQuery={initialQuery} selectedIdentity={newsSelection.identity} selectedRevision={newsSelection.revision} reading={controller.reading} onReadingChange={controller.updateReading} onOpenHolding={openIdentity} readOnly={workspaceReadOnly} />
-        <MonitorDevelopments events={feed.events} onOpenHolding={setContextId} />
+        <MonitorDevelopments events={feed.events} issues={feed.issues} onOpenHolding={setContextId} />
       </div>
       {controller.positions.length > 0 && <aside className="mp-monitor-sidebar" aria-label="Upcoming events, IPOs and watch rules">
         <MonitorAgenda controller={controller} feed={feed} loading={loading} onRemind={remind} onOpenHolding={setContextId} onRetry={refreshEvents} reminderRequest={reminderRequest} />

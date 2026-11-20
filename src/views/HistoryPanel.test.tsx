@@ -10,17 +10,15 @@ import { HistoryPanel } from './HistoryPanel'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
-const { history, settings, store, chart } = vi.hoisted(() => ({
+const { history, settings, chart } = vi.hoisted(() => ({
   history: vi.fn<(_position: unknown, _from: Date, _to: Date, _signal?: AbortSignal) => Promise<HistoryPoint[]>>(),
   chart: { rows: [] as { at: number; close: number | undefined }[], props: null as ComponentProps<typeof import('./InteractiveTrendChart').InteractiveTrendChart> | null },
   settings: { allowExternalData: true, hideValues: false, currency: 'INR' },
-  store: { positions: [] as Position[] },
 }))
 
 vi.mock('../marketData', () => ({ marketData: { history } }))
 vi.mock('../useStore', () => ({
   useStore: () => ({
-    positions: store.positions,
     settings,
   }),
 }))
@@ -35,25 +33,16 @@ vi.mock('./InteractiveTrendChart', () => ({
 
 const defaultPosition: Position = { id: 'fund', ticker: 'FMCGIETF', name: 'FMCGIETF', type: 'etf', quantity: 1, buyPrice: 100, lastPrice: null, invested: 100 }
 
-beforeEach(() => { store.positions = [defaultPosition]; chart.rows = []; chart.props = null })
+beforeEach(() => { chart.rows = []; chart.props = null })
 
 let root: Root
 let container: HTMLDivElement
 
-async function renderPanel(position?: Position, active = true) {
+async function renderPanel(position: Position = defaultPosition, active = true) {
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
-  await act(async () => { root.render(<HistoryPanel scope="all" position={position} active={active} />) })
-}
-
-async function trackHolding(label: string) {
-  const input = container.querySelector<HTMLInputElement>('.history-input')!
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, label)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await act(async () => { container.querySelector<HTMLButtonElement>('.history-track')!.click() })
+  await act(async () => { root.render(<HistoryPanel position={position} active={active} />) })
 }
 
 afterEach(async () => {
@@ -71,7 +60,7 @@ describe('Holding Price History', () => {
     await renderPanel(selected)
 
     expect(history.mock.lastCall?.[0]).toBe(selected)
-    expect(container.querySelector('.history-picker, .section-index')).toBeNull()
+    expect(container.querySelector('.section-index')).toBeNull()
     expect(container.textContent).not.toContain('FMCGIETF')
     expect(container.querySelectorAll('.range-btn')).toHaveLength(5)
     expect(container.querySelector('.history-cost-summary')?.textContent).toContain('Avg cost ₹100.00')
@@ -87,11 +76,11 @@ describe('Holding Price History', () => {
     await renderPanel(defaultPosition)
     const signal = history.mock.calls[0][3]!
     const updated = { ...defaultPosition, name: 'Updated holding name', quantity: 20, lastPrice: 150 }
-    await act(async () => { root.render(<HistoryPanel scope="all" position={updated} />) })
+    await act(async () => { root.render(<HistoryPanel position={updated} />) })
     expect(history).toHaveBeenCalledTimes(1)
     expect(signal.aborted).toBe(false)
 
-    await act(async () => { root.render(<HistoryPanel scope="all" position={updated} active={false} />) })
+    await act(async () => { root.render(<HistoryPanel position={updated} active={false} />) })
     expect(signal.aborted).toBe(true)
     await act(async () => resolveHistory([{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 120 }]))
     expect(container.querySelector('[data-testid="history-chart"]')).toBeNull()
@@ -103,7 +92,7 @@ describe('Holding Price History', () => {
     await renderPanel(defaultPosition, false)
     await act(async () => { container.querySelector<HTMLButtonElement>('.range-btn')!.click() })
     expect(history).not.toHaveBeenCalled()
-    await act(async () => { root.render(<HistoryPanel scope="all" position={defaultPosition} active />) })
+    await act(async () => { root.render(<HistoryPanel position={defaultPosition} active />) })
     expect(history).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
   })
@@ -111,9 +100,9 @@ describe('Holding Price History', () => {
   it('keeps a loaded chart visible while revalidating after returning to the page', async () => {
     history.mockResolvedValueOnce([{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 120 }])
     await renderPanel(defaultPosition)
-    await act(async () => { root.render(<HistoryPanel scope="all" position={defaultPosition} active={false} />) })
+    await act(async () => { root.render(<HistoryPanel position={defaultPosition} active={false} />) })
     history.mockImplementationOnce(() => new Promise(() => {}))
-    await act(async () => { root.render(<HistoryPanel scope="all" position={defaultPosition} active />) })
+    await act(async () => { root.render(<HistoryPanel position={defaultPosition} active />) })
     expect(history).toHaveBeenCalledTimes(2)
     expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
     expect(container.querySelector('.history-last')?.textContent).toContain('120.00')
@@ -123,7 +112,7 @@ describe('Holding Price History', () => {
     history.mockImplementation(() => new Promise(() => {}))
     await renderPanel(defaultPosition)
     const next = { ...defaultPosition, exchange: 'BSE' as const, providerSymbol: 'FMCGIETF.BO' }
-    await act(async () => { root.render(<HistoryPanel scope="all" position={next} />) })
+    await act(async () => { root.render(<HistoryPanel position={next} />) })
     expect(history.mock.calls[0][3]?.aborted).toBe(true)
     expect(history.mock.lastCall?.[0]).toBe(next)
     expect(history).toHaveBeenCalledTimes(2)
@@ -131,10 +120,10 @@ describe('Holding Price History', () => {
     expect(history.mock.calls[1][3]?.aborted).toBe(true)
     expect(history).toHaveBeenCalledTimes(3)
     settings.allowExternalData = false
-    await act(async () => { root.render(<HistoryPanel scope="all" position={next} />) })
+    await act(async () => { root.render(<HistoryPanel position={next} />) })
     expect(history.mock.calls[2][3]?.aborted).toBe(true)
     expect(history).toHaveBeenCalledTimes(3)
-    expect(container.textContent).toContain('Enable external market data')
+    expect(container.textContent).toContain('Market data is paused')
   })
 
   it.each(['etf', 'mutual-fund'] as const)('keeps %s prices and their fill continuous across market holidays and weekends', async (type) => {
@@ -182,10 +171,10 @@ describe('Holding Price History', () => {
       .mockImplementationOnce(() => new Promise((resolve) => { resolveSelected = resolve }))
     await renderPanel(defaultPosition)
     expect(container.querySelector('.history-last')?.textContent).toBe('₹120.00')
-    await act(async () => { root.render(<HistoryPanel scope="all" position={{ ...defaultPosition, id: 'pending', ticker: 'PENDING' }} />) })
+    await act(async () => { root.render(<HistoryPanel position={{ ...defaultPosition, id: 'pending', ticker: 'PENDING' }} />) })
     expect(container.querySelector('[data-testid="history-chart"], .history-cost-summary, .history-last')).toBeNull()
     const next = { ...defaultPosition, id: 'next', ticker: 'NEXT', buyPrice: 50 }
-    await act(async () => { root.render(<HistoryPanel scope="all" position={next} />) })
+    await act(async () => { root.render(<HistoryPanel position={next} />) })
     expect(history.mock.calls[1][3]?.aborted).toBe(true)
     expect(container.querySelector('[data-testid="history-chart"], .history-cost-summary, .history-last')).toBeNull()
     await act(async () => resolveOld([{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 999 }]))
@@ -200,14 +189,14 @@ describe('Holding Price History', () => {
     history.mockImplementation(() => new Promise(() => {}))
     const fund = { ...defaultPosition, type: 'mutual-fund' as const, name: 'Fund Direct Growth' }
     await renderPanel(fund)
-    await act(async () => { root.render(<HistoryPanel scope="all" position={{ ...fund, ticker: 'REIMPORT', quantity: 20 }} />) })
+    await act(async () => { root.render(<HistoryPanel position={{ ...fund, ticker: 'REIMPORT', quantity: 20 }} />) })
     expect(history).toHaveBeenCalledTimes(1)
-    await act(async () => { root.render(<HistoryPanel scope="all" position={{ ...fund, name: 'Fund Regular Growth' }} />) })
+    await act(async () => { root.render(<HistoryPanel position={{ ...fund, name: 'Fund Regular Growth' }} />) })
     expect(history.mock.calls[0][3]?.aborted).toBe(true)
     expect(history).toHaveBeenCalledTimes(2)
   })
 
-  it('shows an unavailable state for an unsupported holding and can retry without a portfolio picker', async () => {
+  it('shows an unavailable state for an unsupported holding and can retry', async () => {
     const selected = { ...defaultPosition, id: 'other', type: 'other' as const, ticker: 'OTHER' }
     history.mockResolvedValue([])
     await renderPanel(selected)
@@ -220,12 +209,11 @@ describe('Holding Price History', () => {
     expect(history.mock.lastCall?.[0]).toBe(selected)
   })
 
-  it('retries a rejected selected-holding request without the portfolio picker', async () => {
+  it('retries a rejected selected-holding request', async () => {
     history.mockRejectedValueOnce(new Error('Network failure')).mockResolvedValueOnce([
       { date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 120 },
     ])
     await renderPanel(defaultPosition)
-    expect(container.querySelector('.history-picker')).toBeNull()
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("Couldn't load price history")
     const retry = container.querySelector<HTMLButtonElement>('[role="alert"] button')!
     expect(retry.textContent).toBe('Retry')
@@ -245,75 +233,16 @@ describe('Holding Price History', () => {
     await renderPanel()
     expect(signal.aborted).toBe(false)
     settings.allowExternalData = false
-    await act(async () => { root.render(<HistoryPanel scope="all" />) })
+    await act(async () => { root.render(<HistoryPanel position={defaultPosition} />) })
     expect(signal.aborted).toBe(true)
     await act(async () => { container.querySelector<HTMLButtonElement>('.range-btn')!.click() })
     expect(history).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('Enable external market data')
+    expect(container.textContent).toContain('Market data is paused')
     expect(container.querySelector('[role="alert"]')).toBeNull()
   })
-  it('tracks the second NSE-mapped listing of a shared imported ticker and keeps it when the range changes', async () => {
-    store.positions = [
-      { ...defaultPosition, id: 'nse-listing', ticker: 'TWIN', exchange: 'NSE', currency: 'INR', providerSymbol: 'TWIN.NS' },
-      { ...defaultPosition, id: 'bse-listing', ticker: 'TWIN', exchange: 'BSE', currency: 'INR', providerSymbol: 'TWIN.BO', isin: 'INF204KB14I2',
-        pricingListing: { exchange: 'NSE', isin: 'INF204KB14I2', providerSymbol: 'TWIN2.NS', type: 'etf', source: 'nse-master', verifiedAt: Date.now() } },
-    ]
-    history.mockImplementation(async (position) => [
-      { date: '2026-09-21', close: 100 },
-      { date: '2026-09-22', close: (position as Position).id === 'bse-listing' ? 210 : 110 },
-    ])
-    await renderPanel()
-    const labels = [...container.querySelectorAll<HTMLOptionElement>('datalist option')].map((option) => option.value)
-    expect(labels).toEqual(['TWIN · NSE · INR · TWIN.NS', 'TWIN · BSE · INR · TWIN.BO · INF204KB14I2'])
-    expect(labels.join(' ')).not.toMatch(/nse-listing|bse-listing/)
-
-    await trackHolding(labels[1])
-    expect(history.mock.lastCall?.[0]).toBe(store.positions[1])
-    expect(container.querySelector('.history-last')?.textContent).toBe('₹210.00')
-    expect(container.querySelector('.history-source')?.textContent).toContain('TWIN2.NS')
-
-    await act(async () => { container.querySelector<HTMLButtonElement>('.range-btn')!.click() })
-    expect(history.mock.lastCall?.[0]).toBe(store.positions[1])
-  })
-
-  it('tracks the second mapped mutual fund scheme when the holding names match', async () => {
-    store.positions = [
-      { ...defaultPosition, id: 'direct-fund', type: 'mutual-fund', name: 'Example Fund', mfScheme: { code: 101, name: 'Example Fund Direct Growth', source: 'confirmed' } },
-      { ...defaultPosition, id: 'regular-fund', type: 'mutual-fund', name: 'Example Fund', mfScheme: { code: 202, name: 'Example Fund Regular Growth', source: 'confirmed' } },
-    ]
-    history.mockResolvedValue([{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 102 }])
-    await renderPanel()
-    const labels = [...container.querySelectorAll<HTMLOptionElement>('datalist option')].map((option) => option.value)
-    expect(labels[0]).toContain('Direct Growth · Scheme 101')
-    expect(labels[1]).toContain('Regular Growth · Scheme 202')
-
-    await trackHolding(labels[1])
-    expect(history.mock.lastCall?.[0]).toBe(store.positions[1])
-    expect(container.querySelector<HTMLInputElement>('.history-input')?.value).toBe(labels[1])
-  })
-
-  it('defaults to the current scope when the committed holding leaves it', async () => {
-    store.positions = [
-      defaultPosition,
-      { ...defaultPosition, id: 'mutual', name: 'Example Fund', type: 'mutual-fund' },
-    ]
-    history.mockResolvedValue([{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 102 }])
-    await renderPanel()
-    await trackHolding('Example Fund')
-    expect(history.mock.lastCall?.[0]).toBe(store.positions[1])
-
-    await act(async () => { root.render(<HistoryPanel scope="equity" />) })
-    expect(history.mock.lastCall?.[0]).toBe(defaultPosition)
-    expect(container.querySelector<HTMLInputElement>('.history-input')?.value).toBe('FMCGIETF')
-
-    await act(async () => { root.render(<HistoryPanel scope="all" />) })
-    expect(container.querySelector<HTMLInputElement>('.history-input')?.value).toBe('Example Fund')
-  })
-
   it('formats history and average cost in INR', async () => {
-    store.positions = [{ ...defaultPosition, ticker: 'TCS', currency: 'INR', exchange: 'NSE', providerSymbol: 'TCS.NS' }]
     history.mockResolvedValue([{ date: '2026-09-21', close: 100 }, { date: '2026-09-22', close: 120 }])
-    await renderPanel()
+    await renderPanel({ ...defaultPosition, ticker: 'TCS', currency: 'INR', exchange: 'NSE', providerSymbol: 'TCS.NS' })
     expect(container.querySelector('.history-last')?.textContent).toBe('₹120.00')
     expect(container.querySelector('.history-delta')?.textContent).toContain('+₹20.00')
     const chart = container.querySelector('[data-testid="history-chart"]')!
@@ -340,39 +269,7 @@ describe('Holding Price History', () => {
     expect(container.textContent).not.toMatch(/since you|Bought|started this investment/)
   })
 
-  it('hides holdings, prices, purchase details, and chart interactions, then restores them', async () => {
-    history.mockResolvedValue([
-      { date: '2026-09-21', close: 100 },
-      { date: '2026-09-22', close: 102 },
-    ])
-    await renderPanel()
-    expect(container.querySelector('.history-cost-summary')).not.toBeNull()
-    expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
-
-    settings.hideValues = true
-    await act(async () => { root.render(<HistoryPanel scope="all" />) })
-    expect(container.textContent).toContain('Values are hidden')
-    expect(container.textContent).not.toContain('FMCGIETF')
-    expect(container.querySelector('.history-tools, .history-quote, .history-cost-summary, [data-testid="history-chart"]')).toBeNull()
-    expect(container.innerHTML).not.toContain('FMCGIETF')
-
-    settings.hideValues = false
-    await act(async () => { root.render(<HistoryPanel scope="all" />) })
-    expect(container.querySelector<HTMLInputElement>('.history-input')?.value).toBe('FMCGIETF')
-    expect(container.querySelector('.history-cost-summary')).not.toBeNull()
-    expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
-  })
-
-  it('hides holding names in load errors when masking is already enabled', async () => {
-    settings.hideValues = true
-    history.mockResolvedValue([])
-    await renderPanel()
-    expect(container.textContent).toContain('Values are hidden')
-    expect(container.innerHTML).not.toContain('FMCGIETF')
-    expect(container.querySelector('[role="alert"]')).toBeNull()
-  })
-
-  it('shows a failed default load and retries it', async () => {
+  it('shows a failed load and retries it', async () => {
     history.mockResolvedValueOnce([]).mockResolvedValueOnce([
       { date: '2026-09-21', close: 100 },
       { date: '2026-09-22', close: 102 },
@@ -381,13 +278,20 @@ describe('Holding Price History', () => {
     await renderPanel()
     expect(history).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('No price data')
-    expect(container.querySelector<HTMLButtonElement>('.history-track')?.textContent).toBe('Retry')
+    const retry = container.querySelector<HTMLButtonElement>('[role="alert"] button')!
+    expect(retry.textContent).toBe('Retry')
 
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('.history-track')?.click()
-    })
+    await act(async () => { retry.click() })
     expect(history).toHaveBeenCalledTimes(2)
     expect(container.querySelector('[data-testid="history-chart"]')).not.toBeNull()
+  })
+
+  it('points an unconfirmed listing to listing review instead of blaming the ticker', async () => {
+    history.mockResolvedValue([])
+    await renderPanel({ ...defaultPosition, identityIssue: 'Confirm the exchange listing.' })
+    expect(container.textContent).toContain('Confirm this listing in Settings to load price history')
+    expect(container.textContent).not.toContain('check the ticker')
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Retry')).toBe(false)
   })
 
   it('ends loading and shows a retry when the history request rejects', async () => {
@@ -397,6 +301,6 @@ describe('Holding Price History', () => {
 
     expect(container.textContent).toContain("Couldn't load price history")
     expect(container.textContent).not.toContain('Fetching FMCGIETF')
-    expect(container.querySelector<HTMLButtonElement>('.history-track')?.textContent).toBe('Retry')
+    expect(container.querySelector('[role="alert"] button')?.textContent).toBe('Retry')
   })
 })

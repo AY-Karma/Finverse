@@ -30,7 +30,6 @@ function setFeed(issues: IpoIssue[], overrides: Partial<IpoFeed> = {}) {
   const feed: IpoFeed = {
     issues, fetchedAt: Date.UTC(2026, 10, 7, 12), sources: [
       { name: 'Xflot', url: 'https://www.xflot.com', updatedAt: null },
-      { name: 'GMP Today', url: 'https://gmptoday.in', updatedAt: Date.UTC(2026, 10, 7, 12) },
     ], warnings: [], stale: false, ...overrides,
   }
   vi.mocked(useIpos).mockReturnValue({ feed, loading: false, error: null, refresh })
@@ -117,11 +116,12 @@ describe('Monitor IPOs', () => {
     setFeed([selected])
     await render(true, { onWatch, onUnwatch })
     await click('View Company watchable IPO details')
-    expect(container.textContent).toContain('Overview reminder on 9 Nov')
+    expect(container.querySelector('.mi-watch-action button')?.getAttribute('title')).toBe('Overview reminds you on 9 Nov')
     await click('Watch last day')
     expect(onWatch).toHaveBeenCalledExactlyOnceWith(selected)
     await render(true, { onWatch, onUnwatch, watchedIds: [selected.id] })
-    await click('Stop watching last day')
+    expect(container.querySelector('.mi-watch-action button')?.getAttribute('aria-pressed')).toBe('true')
+    await click('Watching last day')
     expect(onUnwatch).toHaveBeenCalledExactlyOnceWith(selected.id)
     await render(true, { onWatch, onUnwatch, watchReadOnly: true })
     const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find((element) => element.textContent === 'Watch last day')!
@@ -172,8 +172,8 @@ describe('Monitor IPOs', () => {
 
   it('opens a separate inline chart from the sparkline without overwriting the current quote or nesting buttons', async () => {
     vi.mocked(cachedIpoGmpHistory).mockReturnValue({ slug: 'example', checkedAt: Date.now(), gmp: null,
-      points: [{ date: '2026-10-30', amount: 8 }, { date: '2026-10-31', amount: 5 }], sourceUrl: 'https://gmptoday.in/ipo/example/' })
-    setFeed([issue('example', { id: 'xflot:example', gmp: { amount: 72, percent: 72, source: 'GMP Today', sourceUrl: 'https://gmptoday.in/ipo/example/', sourceUpdatedAt: null, observedAt: null, sources: null, rangeLow: null, rangeHigh: null } })])
+      points: [{ date: '2026-10-30', amount: 8 }, { date: '2026-10-31', amount: 5 }], sourceUrl: 'https://www.xflot.com/ipo/example' })
+    setFeed([issue('example', { id: 'xflot:example', gmp: { amount: 72, percent: 72, source: 'Xflot', sourceUrl: 'https://www.xflot.com/ipo/example', sourceUpdatedAt: null, observedAt: null, sources: null, rangeLow: null, rangeHigh: null } })])
     await render()
     expect(rowText(rowButtons()[0])).toContain('₹72[+72%]')
     expect(container.querySelector('button button')).toBeNull()
@@ -211,7 +211,7 @@ describe('Monitor IPOs', () => {
   })
 
   it('sorts signed GMP amounts with real zero preserved and missing quotes last', async () => {
-    const premium = (amount: number) => ({ amount, percent: amount, source: 'GMP Today' as const, sourceUrl: 'https://gmptoday.in/ipo/example/', sourceUpdatedAt: null, observedAt: null, sources: null, rangeLow: null, rangeHigh: null })
+    const premium = (amount: number) => ({ amount, percent: amount, source: 'Xflot' as const, sourceUrl: 'https://www.xflot.com/ipo/example', sourceUpdatedAt: null, observedAt: null, sources: null, rangeLow: null, rangeHigh: null })
     setFeed([issue('missing'), issue('zero', { gmp: premium(0) }), issue('negative', { gmp: premium(-5) }), issue('positive', { gmp: premium(80) })])
     await render()
     const names = () => rowButtons().map((row) => row.querySelector('.mi-name')!.textContent)
@@ -225,7 +225,7 @@ describe('Monitor IPOs', () => {
   it('includes historical GMP beyond the initial four rows when ranking the full recent list', async () => {
     vi.mocked(loadIpoGmpHistory).mockImplementation(async (slug) => ({ slug, checkedAt: Date.now(), gmp: {
       amount: slug === 'listed-4' ? 80 : 1, percent: slug === 'listed-4' ? 80 : 1,
-      source: 'GMP Today', sourceUrl: `https://gmptoday.in/ipo/${slug}/`, asOfDate: '2026-11-01',
+      source: 'Xflot', sourceUrl: `https://www.xflot.com/ipo/${slug}`, asOfDate: '2026-11-01',
       sourceUpdatedAt: null, observedAt: null, sources: null, rangeLow: null, rangeHigh: null,
     } }))
     setFeed(Array.from({ length: 5 }, (_, index) => issue(`listed-${index}`, {
@@ -335,12 +335,11 @@ describe('Monitor IPOs', () => {
     expect(rowButtons()).toHaveLength(2)
     const sources = container.querySelector('.mi-source-line')!
     expect(sources.textContent).toContain('Xflot')
-    expect(sources.querySelectorAll('a')).toHaveLength(2)
-    expect(container.querySelector<HTMLTimeElement>('.mi-source-time time')?.dateTime).toBe('2026-11-07T12:00:00.000Z')
+    expect(sources.querySelectorAll('a')).toHaveLength(1)
+    expect(container.querySelector('.mi-feed-facts time')?.getAttribute('datetime')).toBe('2026-11-07T12:00:00.000Z')
     const disclaimer = container.querySelector<HTMLElement>('.mi-disclaimer')!
     expect(disclaimer.tagName).toBe('DETAILS')
     expect(disclaimer.hidden).toBe(false)
-    expect(disclaimer.textContent).toContain('Source-page updates are not dealer quote times.')
     expect(container.querySelector('.mi-data-notes-toggle')).toBeNull()
   })
 
@@ -362,7 +361,7 @@ describe('Monitor IPOs', () => {
     expect(upcomingRows()[0].textContent).toBe('Company unannouncedMainboard')
   })
 
-  it('discloses the grouped publisher disclaimer with an alert triangle and closes on repeat click', async () => {
+  it('discloses the publisher disclaimer with its source and check time, without internal feed warnings', async () => {
     const disclaimerText = 'Aggregated public information. GMP is unofficial and not published by any exchange or regulator. Nothing here is investment advice.'
     const warnings = ['Omitted 45 issues with conflicting source records.', 'Reported GMP could not be refreshed.']
     setFeed([issue('one')], { disclaimer: disclaimerText, warnings, stale: true })
@@ -379,16 +378,15 @@ describe('Monitor IPOs', () => {
     await act(async () => summary.click())
     expect(disclaimer.hasAttribute('open')).toBe(false)
     expect([...disclaimer.querySelectorAll('p')].some((paragraph) => paragraph.textContent === disclaimerText)).toBe(true)
-    expect([...disclaimer.querySelectorAll('h4')].map((element) => element.textContent)).toEqual(['Data sources', 'Updates', 'Coverage'])
+    expect([...disclaimer.querySelectorAll('dt')].map((element) => element.textContent)).toEqual(['Source', 'IPO list checked'])
     const links = [...disclaimer.querySelectorAll<HTMLAnchorElement>('a')]
-    expect(links.map((link) => link.href)).toEqual(['https://www.xflot.com/', 'https://gmptoday.in/'])
+    expect(links.map((link) => link.href)).toEqual(['https://www.xflot.com/'])
     expect(links.every((link) => link.target === '_blank' && link.rel.includes('noopener'))).toBe(true)
-    expect(disclaimer.textContent).toContain('GMP page updated')
+    expect(disclaimer.textContent).toContain('Xflot, which collects GMP from public trackers')
+    expect(disclaimer.textContent).not.toContain('GMP Today')
     expect(disclaimer.textContent).toContain('IPO list checked')
-    expect(disclaimer.querySelectorAll('time')).toHaveLength(2)
-    expect(disclaimer.textContent).toContain('Source-page updates are not dealer quote times.')
-    for (const warning of warnings) expect(disclaimer.textContent).toContain(warning)
-    expect(disclaimer.textContent).toContain('Some sources are dated or could not be refreshed.')
+    expect(disclaimer.querySelectorAll('time')).toHaveLength(1)
+    for (const warning of warnings) expect(disclaimer.textContent).not.toContain(warning)
     expect(disclaimer.closest('[role="alert"]')).toBeNull()
     expect(disclaimer.querySelector('[role="alert"]')).toBeNull()
   })
@@ -403,23 +401,43 @@ describe('Monitor IPOs', () => {
     expect(region!.textContent).toContain('100')
     const researchLinks = [...region!.querySelectorAll<HTMLAnchorElement>('.mi-links a')]
     expect(researchLinks.map((link) => link.href)).toEqual([
+      'https://www.xflot.com/ipo/one',
       'https://www.investorgain.com/report/ipo-gmp-live/331/',
       'https://www.chittorgarh.com/',
     ])
     expect(researchLinks.every((link) => link.target === '_blank' && link.rel.includes('noopener') && link.rel.includes('noreferrer'))).toBe(true)
     expect(region!.querySelector('.mi-issue-source')?.getAttribute('href')).toBe('https://www.xflot.com/ipo/one')
-    expect(region!.querySelectorAll('.mi-timeline li')).toHaveLength(2)
-    expect(region!.querySelector('.mi-timeline')!.textContent).not.toContain('not announced')
-    expect(region!.textContent).toContain('Allotment / listing dates unavailable')
+    const stages = [...region!.querySelectorAll('.mi-timeline li')]
+    expect(stages.map((stage) => stage.querySelector('.mi-step-label')?.firstChild?.textContent)).toEqual(['Opens', 'Closes', 'Allotment', 'Listing'])
+    expect(stages.slice(2).map((stage) => stage.getAttribute('data-unknown'))).toEqual(['true', 'true'])
+    expect(stages.slice(2).map((stage) => stage.querySelector('strong')?.textContent)).toEqual(['TBA', 'TBA'])
     await click('View Company one IPO details')
     expect(container.querySelector('[role="region"][aria-label="Company one IPO details"]')).toBeNull()
     expect(rowButtons()[0].getAttribute('aria-expanded')).toBe('false')
   })
 
+  it('counts down to future stages beside their labels', async () => {
+    const istDay = (offset: number) => new Date(Date.now() + 19_800_000 + offset * 86_400_000).toISOString().slice(0, 10)
+    setFeed([issue('soon', { openDate: istDay(-2), closeDate: istDay(0), allotmentDate: istDay(1), listingDate: istDay(3) })])
+    await render()
+    await click('View Company soon IPO details')
+    const labels = [...container.querySelectorAll('.mi-step-label')].map((label) => (label.querySelector('.mi-due-long') ?? label.querySelector('.mi-step-due'))?.textContent?.trim() ?? '')
+    expect(labels).toEqual(['', '(today)', '(in 1 day)', '(in 3 days)'])
+  })
+
+  it('marks missing dates TBA only while an issue is still open or upcoming', async () => {
+    setFeed([issue('closed', { status: 'CLOSED', closeDate: '2026-11-06', allotmentDate: null, listingDate: null })])
+    await render()
+    await click('Recent')
+    await click('View Company closed IPO details')
+    const dates = [...container.querySelectorAll('.mi-timeline strong')].map((date) => date.textContent)
+    expect(dates.slice(2)).toEqual(['Not reported', 'Not reported'])
+  })
+
   it('distinguishes a reported zero premium from missing GMP', async () => {
     setFeed([
       issue('zero', { gmp: {
-        amount: 0, percent: 0, source: 'GMP Today', sourceUrl: 'https://gmptoday.in/ipo/zero/',
+        amount: 0, percent: 0, source: 'Xflot', sourceUrl: 'https://www.xflot.com/ipo/zero',
         sourceUpdatedAt: Date.UTC(2026, 10, 7, 12), observedAt: null,
         sources: 2, rangeLow: 0, rangeHigh: 0,
       } }),
@@ -432,22 +450,19 @@ describe('Monitor IPOs', () => {
     expect(rowText(zero)).not.toContain('Not reported')
     expect(rowText(unknown)).toContain('Not reported')
     expect(container.textContent).toMatch(/unofficial/i)
-    expect(container.querySelector('a[href="https://gmptoday.in/"]')).not.toBeNull()
+    expect(container.querySelector('a[href="https://www.xflot.com/"]')).not.toBeNull()
     await click('View Company zero IPO details')
     const region = container.querySelector<HTMLElement>('[role="region"][aria-label="Company zero IPO details"]')!
-    expect(region.textContent).toContain('Page updated')
-    expect(region.textContent).toContain('Quote time unavailable')
-    expect(region.textContent).not.toContain('Reported 7 Nov')
+    expect(region.querySelector('.mi-gmp-note')).toBeNull()
   })
 
-  it('keeps unavailable milestones concise instead of creating empty timeline stages', async () => {
+  it('replaces the timeline with one line when no dates are announced', async () => {
     setFeed([issue('unknown-dates', { openDate: null, closeDate: null, allotmentDate: null, listingDate: null })])
     await render()
     await click('View Company unknown-dates IPO details')
     const region = container.querySelector<HTMLElement>('[role="region"][aria-label="Company unknown-dates IPO details"]')!
     expect(region.querySelector('.mi-timeline')).toBeNull()
-    expect(region.querySelectorAll('.mi-unannounced')).toHaveLength(1)
-    expect(region.textContent).toContain('Allotment / listing dates unavailable')
+    expect(region.querySelector('.mi-unannounced')?.textContent).toBe('Dates to be announced')
   })
 
   it('offers a retry when the first request fails', async () => {
@@ -464,21 +479,19 @@ describe('Monitor IPOs', () => {
     await render()
     expect(rowButtons()).toHaveLength(1)
     const notice = container.querySelector('[role="status"]')!
-    expect(notice.textContent).toContain('Saved data may be out of date')
+    expect(notice.textContent).toBe('Showing saved IPOs. The latest refresh failed.')
     expect(notice.closest('details')).toBeNull()
     expect(container.querySelector('.mi-loading')).toBeNull()
     await click('Refresh IPOs')
     expect(refresh).toHaveBeenCalledOnce()
   })
 
-  it('makes partial coverage visible before the user opens source details', async () => {
+  it('does not surface internal feed warnings above the list', async () => {
     setFeed([issue('partial')], { warnings: ['Omitted conflicting issue records.'] })
     await render()
-    const notice = container.querySelector('[role="status"]')!
-    expect(notice.textContent).toContain('Limited coverage')
-    expect(notice.textContent).toContain('Unofficial GMP')
-    expect(notice.closest('details')).toBeNull()
-    expect(container.querySelector('.mi-source-time')!.textContent).toContain('GMP page updated')
+    expect(container.querySelector('.mi-availability')).toBeNull()
+    expect(container.textContent).not.toContain('Omitted conflicting issue records.')
+    expect(container.textContent).toContain('IPO list checked')
   })
 
   it('identifies listed-issue GMP as a historical pre-listing quote', async () => {
@@ -507,7 +520,7 @@ describe('Monitor IPOs', () => {
     expect(rowText(rowButtons()[0])).toContain('Loading history')
     expect(rowText(rowButtons()[0])).toContain('Listed 23 Oct')
     await act(async () => { finish({ slug: 'bonfiglioli-ipo', checkedAt: Date.now(), gmp: {
-      amount: 80, percent: 80, source: 'GMP Today', sourceUrl: 'https://gmptoday.in/ipo/bonfiglioli-transmissions/',
+      amount: 80, percent: 80, source: 'Xflot', sourceUrl: 'https://www.xflot.com/ipo/bonfiglioli-transmissions',
       observedAt: null, sourceUpdatedAt: null, asOfDate: '2026-10-22', sources: 3, rangeLow: 75, rangeHigh: 85,
     } }) })
     expect(rowText(rowButtons()[0])).toContain('As of 22 Oct')
@@ -516,12 +529,11 @@ describe('Monitor IPOs', () => {
     const details = container.querySelector('[aria-label="Company bonfiglioli IPO details"]')!
     expect(details.textContent).toContain('Daily reported GMP')
     expect(details.textContent).not.toContain('05:30')
-    expect(details.querySelector('a[href="https://gmptoday.in/ipo/bonfiglioli-transmissions/"]')).not.toBeNull()
   })
 
   it('prepares trend data for every visible row when a long recent list is expanded', async () => {
     vi.mocked(loadIpoGmpHistory).mockImplementation(async (slug) => ({ slug, checkedAt: Date.now(), gmp: null,
-      points: [{ date: '2026-11-03', amount: 10 }, { date: '2026-11-04', amount: 12 }], sourceUrl: `https://gmptoday.in/ipo/${slug}/` }))
+      points: [{ date: '2026-11-03', amount: 10 }, { date: '2026-11-04', amount: 12 }], sourceUrl: `https://www.xflot.com/ipo/${slug}` }))
     setFeed(Array.from({ length: 10 }, (_, index) => issue(`listed-${index}`, { id: `xflot:listed-${index}`, status: 'LISTED', listingDate: '2026-11-06' })))
     await render()
     await click('Recent')
@@ -552,7 +564,7 @@ describe('Monitor IPOs', () => {
     { reason: 'another issue price', asOfDate: '2026-10-22', percent: 20 },
   ])('does not attach cached history from $reason', async ({ asOfDate, percent }) => {
     vi.mocked(cachedIpoGmpHistory).mockReturnValue({ slug: 'listed', checkedAt: Date.now(), gmp: {
-      source: 'GMP Today', sourceUrl: 'https://gmptoday.in/ipo/listed/', amount: 80, percent,
+      source: 'Xflot', sourceUrl: 'https://www.xflot.com/ipo/listed', amount: 80, percent,
       asOfDate, observedAt: null, sourceUpdatedAt: null, sources: 2, rangeLow: 75, rangeHigh: 85,
     } })
     setFeed([issue('listed', { id: 'xflot:listed', status: 'LISTED', openDate: '2026-10-15', closeDate: '2026-10-19', listingDate: '2026-10-23' })], { fetchedAt: Date.UTC(2026, 9, 25, 12) })

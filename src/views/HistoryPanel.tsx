@@ -5,12 +5,10 @@ import { instrumentLabel } from '../instruments'
 import { marketData } from '../marketData'
 import type { Position } from '../types'
 import { useStore } from '../useStore'
-import { quoteKey } from '../valuation'
+import { numberFormatter } from '../formatters'
+import { quoteKey, signedPercent } from '../valuation'
 import { InteractiveTrendChart } from './InteractiveTrendChart'
-import { HiddenValuesState } from './HiddenValuesState'
 import './historyPanel.css'
-
-type ScopeFilter = 'all' | 'equity' | 'mutual'
 
 const RANGES: { label: string; days: number }[] = [
   { label: '1M', days: 31 },
@@ -22,6 +20,7 @@ const RANGES: { label: string; days: number }[] = [
 
 const LINE_COLOR = 'var(--holding-chart-line)'
 const COST_LINE_COLOR = 'var(--holding-chart-cost)'
+const WATCH_LINE_COLOR = 'var(--chart-benchmark)'
 
 type HistoryChartRow = {
   at: number
@@ -51,43 +50,11 @@ function historyRows(points: HistoryPoint[]): HistoryChartRow[] {
   return rows
 }
 
+const axisFormat = numberFormatter({ maximumFractionDigits: 0 })
 function fmtY(v: number): string {
   return Math.abs(v) >= 1000
-    ? v.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+    ? axisFormat.format(v)
     : v.toFixed(2)
-}
-
-function norm(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, ' ')
-}
-
-function historyOptions(positions: Position[]) {
-  const labelCounts = new Map<string, number>()
-  for (const position of positions) {
-    const label = norm(instrumentLabel(position))
-    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1)
-  }
-  const options = positions.map((position) => {
-    const label = instrumentLabel(position)
-    if (labelCounts.get(norm(label)) === 1) return { position, label }
-    const details = position.type === 'mutual-fund'
-      ? [position.mfScheme?.name, position.mfScheme && `Scheme ${position.mfScheme.code}`, position.currency ?? 'INR']
-      : [position.exchange, position.currency, position.providerSymbol, position.isin]
-    return { position, label: [label, ...details.filter(Boolean)].join(' · ') }
-  })
-  const descriptionCounts = new Map<string, number>()
-  for (const option of options) {
-    const label = norm(option.label)
-    descriptionCounts.set(label, (descriptionCounts.get(label) ?? 0) + 1)
-  }
-  const holdingNumbers = new Map<string, number>()
-  return options.map((option) => {
-    const label = norm(option.label)
-    if (descriptionCounts.get(label) === 1) return option
-    const number = (holdingNumbers.get(label) ?? 0) + 1
-    holdingNumbers.set(label, number)
-    return { ...option, label: `${option.label} · Holding ${number}` }
-  })
 }
 
 interface HistoryResult {
@@ -98,41 +65,22 @@ interface HistoryResult {
   error: string | null
 }
 
-export function HistoryPanel({ scope, position, active = true }: { scope: ScopeFilter; position?: Position; active?: boolean }) {
-  const { positions, settings } = useStore()
-  const boundToPosition = position !== undefined
-  const all = useMemo(
-    () => boundToPosition ? [] : positions.filter((p) => (p.ticker || '').trim() !== '' || (p.name || '').trim() !== ''),
-    [positions, boundToPosition],
-  )
-  // The dropdown mirrors the top All / Equity / Mutual Funds filter, so a
-  // scoped board only offers scoped options.
-  const scopeHistoryable = useMemo(() => {
-    const list =
-      scope === 'all' ? all : all.filter((p) => (scope === 'mutual' ? p.type === 'mutual-fund' : p.type !== 'mutual-fund'))
-    return [...list].sort((a, b) => instrumentLabel(a).localeCompare(instrumentLabel(b)))
-  }, [all, scope])
-  const options = useMemo(() => historyOptions(scopeHistoryable), [scopeHistoryable])
-
-  const [text, setText] = useState('')
-  const [committedId, setCommittedId] = useState<string | null>(null)
+export function HistoryPanel({ position, active = true, watchLevels = [] }: { position: Position; active?: boolean; watchLevels?: { value: number; label: string; color?: string }[] }) {
+  const { settings } = useStore()
   const [rangeDays, setRangeDays] = useState(366)
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [result, setResult] = useState<HistoryResult | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
-  // Until the user commits a pick, default to the first holding in scope so the
-  // panel shows a chart immediately, and re-defaults when the scope changes.
-  const selectedOption = options.find(({ position }) => position.id === committedId) ?? options[0]
-  const holding = position ?? selectedOption?.position
-  const holdingLabel = position ? instrumentLabel(position) : selectedOption?.label ?? ''
+  const holding = position
+  const holdingLabel = instrumentLabel(position)
+  const listingUnconfirmed = position.type === 'stock' || position.type === 'etf' ? !resolveYahooSymbol(position) : false
   const holdingRef = useRef(holding)
   holdingRef.current = holding
-  const requestIdentity = holding ? JSON.stringify([
+  const requestIdentity = JSON.stringify([
     holding.id, quoteKey(holding), holding.type, holding.providerSymbol, holding.exchange,
     holding.currency, holding.reportedCurrency, holding.isin, holding.identityIssue,
     holding.type === 'mutual-fund' ? holding.name : holding.ticker, holding.mfScheme?.code,
-  ]) : null
+  ])
   const requestKey = JSON.stringify([requestIdentity, rangeDays, retryAttempt])
   const currentResult = active && settings.allowExternalData && result?.key === requestKey ? result : null
   const points = currentResult?.points ?? []
@@ -141,17 +89,9 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
   const usedLabel = currentResult?.usedLabel ?? ''
 
   useEffect(() => {
-    if (committedId && !options.some(({ position }) => position.id === committedId)) setCommittedId(null)
-  }, [committedId, options])
-
-  useEffect(() => {
-    setText(holdingLabel)
-  }, [holdingLabel])
-
-  useEffect(() => {
     const requestedHolding = holdingRef.current
     if (!active) return
-    if (!settings.allowExternalData || !requestedHolding) {
+    if (!settings.allowExternalData) {
       setResult(null)
       return
     }
@@ -172,7 +112,9 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
           ? `Price history is unavailable for “${label}” from the current provider.`
           : isMf
             ? `Couldn't find “${label}” on mfapi.in, or no NAVs exist for this range.`
-            : `No price data for “${label}”. Retry, or check the ticker, exchange, or provider symbol.`
+            : resolveYahooSymbol(requestedHolding)
+              ? `No price data for “${label}” from the provider. Retry later.`
+              : `Confirm this listing in Settings to load price history for “${label}”.`
         setResult({ key, points, usedLabel, loading: false, error })
       } catch {
         if (!alive) return
@@ -202,7 +144,7 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
   }, [points])
 
   const costComparison = useMemo(() => {
-    if (!holding || points.length === 0) return null
+    if (points.length === 0) return null
     const buy = holding.buyPrice
     if (!Number.isFinite(buy) || buy <= 0) return null
     const last = points[points.length - 1].close
@@ -214,54 +156,21 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
     }
   }, [holding, points])
 
-  const isMf = holding?.type === 'mutual-fund'
-  const nativeCurrency = holding?.currency ?? 'INR'
+  const isMf = holding.type === 'mutual-fund'
+  const nativeCurrency = holding.currency ?? 'INR'
   const currencySymbol = '\u20b9'
   const formatPrice = (value: number) => `${currencySymbol}${fmtY(value)}`
+  const signedPrice = (value: number) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${formatPrice(Math.abs(value))}`
   const sourceLabel = isMf ? `NAV · ${usedLabel}` : usedLabel ? `daily close · ${usedLabel}` : 'daily close · Yahoo NSE'
   const rangeLabel = RANGES.find((r) => r.days === rangeDays)?.label.toLowerCase() ?? 'range'
-
-  const commit = () => {
-    const v = text.trim()
-    if (!v) return
-    const matched = options.find((option) => norm(option.label) === norm(v))
-    if (!matched) return
-    setText(matched.label)
-    setCommittedId(matched.position.id)
-    setRetryAttempt((attempt) => attempt + 1)
-    inputRef.current?.focus()
-  }
 
   return (
     <div className="panel history-panel chart-open enter d4">
       <div className="panel-head">
         <div className="panel-head-titles">
           <span className="panel-title">Holding Price History</span>
-          {!position && <span className="section-index">Trends</span>}
         </div>
-        {!settings.hideValues && <div className="history-tools">
-          {!position && <div className="history-picker">
-            <input
-              ref={inputRef}
-              className="input history-input"
-              list="history-symbols"
-              placeholder="Pick a holding from your portfolio…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commit()
-              }}
-              aria-label="Holding from your portfolio"
-            />
-            <datalist id="history-symbols">
-              {options.map(({ position, label }) => (
-                <option key={position.id} value={label} />
-              ))}
-            </datalist>
-            <button className="btn btn--primary btn--small history-track" onClick={commit} disabled={!text.trim()}>
-              {error && norm(text) === norm(holdingLabel) ? 'Retry' : 'Track'}
-            </button>
-          </div>}
+        <div className="history-tools">
           <div className="history-range" role="group" aria-label="Date range">
             {RANGES.map((r) => (
               <button
@@ -275,18 +184,14 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
               </button>
             ))}
           </div>
-        </div>}
+        </div>
       </div>
 
       <div className="history-body">
-        {settings.hideValues ? (
-          <HiddenValuesState />
-        ) : !settings.allowExternalData ? (
-          <p className="hint muted">Enable external market data in Settings to fetch price history.</p>
+        {!settings.allowExternalData ? (
+          <p className="hint muted">Market data is paused because this workspace changed in another tab. Reload to continue.</p>
         ) : !active ? (
           <p className="hint muted">Open this view to load price history.</p>
-        ) : !holding ? (
-          <p className="hint muted">Select a holding from your portfolio to plot its history.</p>
         ) : (
           <div className="history-stage">
             {(loading || points.length >= 2) && (
@@ -297,8 +202,8 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
                     {rangeChange && <div className="history-quote">
                       <span className="history-last"><small>{currencySymbol}</small>{fmtY(rangeChange.last)}</span>
                       <span className={`history-delta ${rangeChange.pct >= 0 ? 'up' : 'down'}`}>
-                        {rangeChange.change >= 0 ? '+' : '-'}{formatPrice(Math.abs(rangeChange.change))}
-                        <span>({rangeChange.pct >= 0 ? '+' : ''}{rangeChange.pct.toFixed(2)}%)</span>
+                        {signedPrice(rangeChange.change)}
+                        <span>({signedPercent(rangeChange.pct)})</span>
                         <small>{rangeLabel}</small>
                       </span>
                     </div>}
@@ -316,11 +221,10 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
                         valueFormatter={formatPrice}
                         yAxisLabel={`${isMf ? 'NAV' : 'Price'} (${nativeCurrency})`}
                         appearance="price"
-                        referenceLines={costComparison ? [{
-                          value: costComparison.buy,
-                          color: COST_LINE_COLOR,
-                          label: 'Avg cost',
-                        }] : undefined}
+                        referenceLines={[
+                          ...(costComparison ? [{ value: costComparison.buy, color: COST_LINE_COLOR, label: 'Avg cost' }] : []),
+                          ...watchLevels.map((level) => ({ ...level, color: level.color ?? WATCH_LINE_COLOR })),
+                        ]}
                       />
                     ) : (
                       <p className="hint muted history-empty">Not enough data in this range yet.</p>
@@ -336,12 +240,12 @@ export function HistoryPanel({ scope, position, active = true }: { scope: ScopeF
                 {costComparison && !loading && (
                   <div className="history-cost-summary">
                     <span><i aria-hidden="true" />Avg cost <strong>{formatPrice(costComparison.buy)}</strong></span>
-                    <span>Latest {isMf ? 'NAV' : 'close'} vs cost <strong className={costComparison.pct >= 0 ? 'up' : 'down'}>{costComparison.change >= 0 ? '+' : '−'}{formatPrice(Math.abs(costComparison.change))} ({costComparison.pct >= 0 ? '+' : ''}{costComparison.pct.toFixed(1)}%)</strong></span>
+                    <span>Latest {isMf ? 'NAV' : 'close'} vs cost <strong className={costComparison.pct >= 0 ? 'up' : 'down'}>{signedPrice(costComparison.change)} ({signedPercent(costComparison.pct, 1)})</strong></span>
                   </div>
                 )}
               </>
             )}
-            {error && <div className="hint history-error down" role="alert">{error}{position && <button type="button" className="btn btn--ghost btn--small" onClick={() => setRetryAttempt((attempt) => attempt + 1)}>Retry</button>}</div>}
+            {error && <div className="hint history-error down" role="alert">{error}{!listingUnconfirmed && <button type="button" className="btn btn--ghost btn--small" onClick={() => setRetryAttempt((attempt) => attempt + 1)}>Retry</button>}</div>}
             {!loading && points.length < 2 && !error && <p className="hint muted history-empty">Not enough data in this range.</p>}
           </div>
         )}

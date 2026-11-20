@@ -50,13 +50,14 @@ describe('mobile watch rule actions', () => {
     const position = state.store.positions[0]
     state.store.liveQuotes = { [quoteKey(position)]: { price: 100, source: 'nav', at: Date.now() } }
     await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
-    expect(container.querySelector('.mp-rule-state')?.textContent).toBe('Active')
-    expect(container.querySelector('.mp-rule-observation')?.textContent).toContain('10.00% to level')
-    expect(container.querySelector('.mp-rule-observation')?.textContent).toContain('Published NAV')
+    expect(container.querySelector('.mp-rule-state')).toBeNull()
+    const observation = container.querySelector('.mp-rule-observation')!
+    expect(observation.textContent).toContain('10.0% away')
+    expect(observation.getAttribute('title')).toContain('Published NAV')
     state.store.liveQuotes = { [quoteKey(position)]: { price: 100, source: 'nav', at: Date.now() - 5 * 86_400_000 } }
     await act(async () => root.render(<MonitorView onRequestImport={() => {}} />))
     expect(container.querySelector('.mp-rule-state')?.textContent).toBe('Waiting')
-    expect(container.querySelector('.mp-rule-observation')?.textContent).not.toContain('10.00%')
+    expect(container.querySelector('.mp-rule-observation')).toBeNull()
   })
 
   it('opens a contextual watch form for the requested holding and supports repeating the action', async () => {

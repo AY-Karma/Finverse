@@ -16,7 +16,7 @@ vi.mock('../valuation', async (original) => {
   return { ...actual, formatCurrency: (...args: Parameters<typeof actual.formatCurrency>) => { state.format(); return actual.formatCurrency(...args) } }
 })
 vi.mock('./PortfolioPerformance', () => ({ PortfolioPerformance: ({ scope }: { scope: string }) => <section className="portfolio-performance" data-scope={scope}>Portfolio performance</section> }))
-vi.mock('./MarketIndexTicker', () => ({ MarketIndexTicker: ({ allowed }: { allowed: boolean }) => <div className="tiker-wrap" data-indices-allowed={allowed}>{['Bank Nifty', 'NIFTY 50'].map((name) => <span className="ticker-item" key={name}>{name}</span>)}</div> }))
+vi.mock('./MarketIndexTicker', () => ({ MarketIndexTicker: ({ allowed }: { allowed: boolean }) => <div className="ticker-wrap" data-indices-allowed={allowed}>{['Bank Nifty', 'NIFTY 50'].map((name) => <span className="ticker-item" key={name}>{name}</span>)}</div> }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 describe('overview valuation and visible work', () => {
@@ -34,6 +34,21 @@ describe('overview valuation and visible work', () => {
       await choose('All')
       expect(container.querySelector('.ledger-empty')).toBeNull()
       expect(container.querySelectorAll('.panel--ledger tbody > tr')).toHaveLength(1)
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('marks unconfirmed listings as imported prices and keeps zero P&L neutral', async () => {
+    const holding: Position = { id: 'unconfirmed', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100, identityIssue: 'Confirm the exchange listing.' }
+    const folios = [{ id: 'sample', name: 'Sample', importedAt: Date.now(), positions: [holding] }]
+    state.store = { positions: [holding], rawPositions: [holding], folios, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: {} }), settings: { ...loadSettings(), allowExternalData: true }, refreshNow: vi.fn() } as unknown as ReturnType<typeof useStore>
+    const container = document.createElement('div'), root = createRoot(container)
+    try {
+      await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
+      const pnl = container.querySelector('.panel--ledger tbody > tr > td:last-child')!
+      expect(pnl.textContent).toBe('₹0.00')
+      expect(pnl.classList.contains('up')).toBe(false)
+      expect(container.querySelector('.panel--ledger .last-trade-source')?.textContent).toBe('Imported')
+      expect(container.querySelector('.score--session')?.textContent).toContain('Confirm listings for live prices')
     } finally { await act(async () => root.unmount()) }
   })
 
@@ -128,7 +143,7 @@ describe('overview valuation and visible work', () => {
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
       expect(container.querySelector('.scoreboard')?.textContent).not.toContain('Imported value')
       expect(container.querySelector('.overview-market-strip .score--session')).not.toBeNull()
-      expect(container.querySelector('.overview-market-strip .tiker-wrap')).not.toBeNull()
+      expect(container.querySelector('.overview-market-strip .ticker-wrap')).not.toBeNull()
       expect(container.querySelector('.overview-meta')?.textContent).toContain('1 BSE holding uses imported prices')
       expect(container.querySelector('.overview-meta')?.textContent).toContain('NSE match is needed')
       expect(container.querySelector('.last-trade-source')?.textContent).toBe('Imported')
@@ -199,7 +214,7 @@ describe('overview valuation and visible work', () => {
       await render()
       const cells = [...container.querySelectorAll('.ticker-item')]
       expect(cells.map((cell) => cell.textContent)).toEqual(['Bank Nifty', 'NIFTY 50'])
-      expect(container.querySelector('.tiker-wrap')?.textContent).not.toMatch(/DOWN|MISSING|REVIEW/)
+      expect(container.querySelector('.ticker-wrap')?.textContent).not.toMatch(/DOWN|MISSING|REVIEW/)
       const rows = [...container.querySelectorAll('.table--ledger > tbody > tr')]
       expect(rows[0].querySelector('.ltp-arrow')?.textContent).toBe('▼')
       expect(rows[0].querySelector('.last-trade-move')?.textContent).toBe('−₹5.00')
@@ -393,7 +408,7 @@ describe('overview valuation and visible work', () => {
 
       state.store = { ...state.store, settings: { ...state.store.settings, allowExternalData: false } }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(card.querySelector('.market-status-copy')?.textContent).toBe('External market data off · showing imported prices')
+      expect(card.querySelector('.market-status-copy')?.textContent).toBe('Market data paused · showing imported prices')
       expect(card.querySelector('[aria-label="NSE market calendar"]')).not.toBeNull()
 
       await act(async () => { vi.setSystemTime(new Date('2027-01-04T04:00:00Z')); vi.advanceTimersByTime(30_000) })
@@ -450,7 +465,7 @@ describe('overview valuation and visible work', () => {
       const summary = container.querySelector('.overview-market-strip .scoreboard')!
       const session = summary.querySelector('[aria-label="Session summary"]')!
       expect([...summary.querySelectorAll('.score > .score-value')].map((node) => node.textContent)).toEqual(['−₹7.00'])
-      expect(container.querySelector('.overview-market-strip .tiker-wrap')?.getAttribute('data-indices-allowed')).toBe('true')
+      expect(container.querySelector('.overview-market-strip .ticker-wrap')?.getAttribute('data-indices-allowed')).toBe('true')
       expect(container.querySelector('.score--current')).toBeNull()
       expect(container.querySelector('.score--secondary')).toBeNull()
       expect(session.querySelector('.score-value')?.getAttribute('aria-label')).toBe('Latest session · 01 Oct 2026 portfolio move: −₹7.00')
@@ -478,7 +493,7 @@ describe('overview valuation and visible work', () => {
       const flatQuotes = Object.fromEntries(Object.entries(quotes).map(([key, quote]) => [key, { ...quote, change: 0 }]))
       state.store = { ...state.store, snapshot: investmentWorkspace.readSnapshot({ folios, quotes: flatQuotes }) }
       await act(async () => root.render(<Overview onGoTo={vi.fn()} onRequestImport={vi.fn()} />))
-      expect(session.querySelector('.score-value')?.textContent).toBe('+₹0.00')
+      expect(session.querySelector('.score-value')?.textContent).toBe('₹0.00')
       expect(session.querySelector('.score-value')?.classList.contains('up')).toBe(false)
       expect(session.querySelector('.score-value')?.classList.contains('down')).toBe(false)
 

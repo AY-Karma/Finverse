@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LiveQuote, Position } from './types'
 import { normalizePosition } from './instruments'
 import { quoteKey } from './valuation'
@@ -8,8 +8,9 @@ import {
   fetchLiveQuotes,
   fetchHistory,
   fetchNavHistory,
-  fetchYahooPrice,
+  fetchYahooPrices,
   isMarketOpen,
+  quoteCoalescing,
   quoteRefreshIssueText,
   type LiveQuotesResult,
 } from './live'
@@ -50,6 +51,10 @@ describe('NSE market session', () => {
 })
 
 describe('market data client', () => {
+  // These tests are about one caller at a time; the shared-beat coalescing has its own tests below.
+  beforeEach(() => { quoteCoalescing.windowMs = 0 })
+  afterEach(() => { quoteCoalescing.windowMs = 25 })
+
   it('retains a newer intraday holding quote when a later refresh falls back to the previous close', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-06T06:00:00Z'))
@@ -297,8 +302,7 @@ describe('market data client', () => {
     const positions: Position[] = Array.from({ length: 125 }, (_, i) => ({ id: String(i), ticker: `POOL${i}`, name: '', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: null }))
     const first = fetchLiveQuotes(positions, {})
     const second = fetchLiveQuotes(positions, {})
-    await Promise.resolve()
-    expect(fetcher).toHaveBeenCalledTimes(4)
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4))
     release()
     const results = await Promise.all([first, second])
     expect(results.map((result) => result.updated)).toEqual([125, 125])
@@ -461,14 +465,15 @@ describe('market data client', () => {
     )
     vi.stubGlobal('fetch', fetcher)
 
-    await expect(fetchYahooPrice('RELIANCE.NS')).resolves.toEqual({
+    await expect(fetchYahooPrices(['RELIANCE.NS'])).resolves.toEqual(new Map([['RELIANCE.NS', {
       price: 1309.8,
       change: -6.2,
       pct: -0.47,
       at: Date.parse(marketTime),
       fetchedAt: Date.parse('2026-08-25T06:00:00.000Z'),
       source: 'yahoo',
-    })
+      nextUpdateAt: null,
+    }]]))
     expect(fetcher).toHaveBeenCalledWith(
       '/api/quotes?symbols=RELIANCE.NS',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -564,7 +569,7 @@ describe('market data client', () => {
       expect(repeated).toMatchObject({ updated: 2, skipped: 0, failed: 0 })
       expect(repeated.quotes[quoteKey(fund)]).toMatchObject({ price: 120, at: initial.quotes[quoteKey(fund)].at, fetchedAt: Date.now(), source: 'nav' })
       expect(fetcher).toHaveBeenCalledTimes(4)
-      expect(String(fetcher.mock.calls[2][0])).toContain('/api/quotes')
+      expect(fetcher.mock.calls.slice(2).some(([url]) => String(url).startsWith('/api/quotes'))).toBe(true)
 
       vi.setSystemTime(new Date('2026-09-25T18:00:00Z'))
       navDate = '25-09-2026'
@@ -683,7 +688,7 @@ describe('market data client', () => {
     const range = [new Date('2026-09-01T00:00:00Z'), new Date('2026-09-23T00:00:00Z')] as const
     await expect(fetchNavHistory({ ...fund, name: 'Changed alias' }, ...range)).resolves.toEqual([{ date: '2026-09-22', close: 77.5 }])
     expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
-      'https://api.mfapi.in/mf/42',
+      expect.stringMatching(/^https:\/\/api\.mfapi\.in\/mf\/42\?startDate=\d{4}-\d{2}-\d{2}&endDate=\d{4}-\d{2}-\d{2}$/),
       'https://api.mfapi.in/mf/42?startDate=2026-09-01&endDate=2026-09-23',
     ])
     expect(stored.has('finverse:history:v2:mfapi:42')).toBe(true)
@@ -783,3 +788,34 @@ function position(ticker: string): Position {
     exchange: 'NSE',
   }
 }
+
+describe('quote request coalescing and provider timing', () => {
+  const payload = (symbols: string[], nextUpdateAt?: string) => Response.json({ provider: 'yahoo-unofficial', fetchedAt: '2026-11-19T05:00:00.000Z',
+    quotes: symbols.map((symbol) => ({ symbol, price: 100, previousClose: 99, change: 1, changePct: 1.01, marketTime: '2026-11-19T04:59:00.000Z', source: 'yahoo' })),
+    errors: [], ...(nextUpdateAt ? { nextUpdateAt } : {}) })
+
+  it('sends holdings and index symbols asked for on the same beat as one call, each caller getting only its own', async () => {
+    const fetcher = vi.fn(async (input: string) => payload(new URL(input, 'http://x').searchParams.get('symbols')!.split(','), '2026-11-19T05:03:00.000Z'))
+    vi.stubGlobal('fetch', fetcher)
+    const [holdings, indices] = await Promise.all([fetchYahooPrices(['TCS.NS', 'INFY.NS']), fetchYahooPrices(['^NSEI'])])
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(new URL(fetcher.mock.calls[0][0], 'http://x').searchParams.get('symbols')).toBe('INFY.NS,TCS.NS,^NSEI')
+    expect([...holdings.keys()]).toEqual(['INFY.NS', 'TCS.NS'])
+    expect([...indices.keys()]).toEqual(['^NSEI'])
+    expect(indices.get('^NSEI')?.nextUpdateAt).toBe(Date.parse('2026-11-19T05:03:00.000Z'))
+  })
+
+  it('reports when Yahoo can next change the holdings, and nothing when any batch gives no time', async () => {
+    const stock = (ticker: string): Position => ({ id: ticker, ticker, name: ticker, type: 'stock', exchange: 'NSE', exchangeSource: 'explicit', identityVersion: 2,
+      currency: 'INR', providerSymbol: `${ticker}.NS`, quantity: 1, buyPrice: 1, invested: 1, lastPrice: 1 })
+    quoteCoalescing.windowMs = 0
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => payload(['TCS.NS'], '2026-11-19T05:03:00.000Z')))
+      expect((await fetchLiveQuotes([stock('TCS')], {})).nextUpdateAt).toBe(Date.parse('2026-11-19T05:03:00.000Z'))
+      vi.stubGlobal('fetch', vi.fn(async () => payload(['TCS.NS'])))
+      expect((await fetchLiveQuotes([stock('TCS')], {})).nextUpdateAt).toBeUndefined()
+      vi.stubGlobal('fetch', vi.fn(async () => payload(['TCS.NS'], '2026-11-19T04:00:00.000Z')))
+      expect((await fetchLiveQuotes([stock('TCS')], {})).nextUpdateAt).toBeUndefined()
+    } finally { quoteCoalescing.windowMs = 25 }
+  })
+})

@@ -1,3 +1,4 @@
+import { livePace, PACE_STEPS } from './livePace'
 import {
   createContext,
   useCallback,
@@ -43,8 +44,10 @@ type RefreshResult =
   | { ok: true; retryInMs: number }
   | { ok: false; reason: 'disabled' | 'no-live-listings' | 'scheduled-nav' | 'cooldown' | 'failed'; retryInMs: number }
 
-const EQUITY_REFRESH_MS = 1_000
+// Market open/close is a clock check with no network use, so it stays at 1s; polling follows livePace's beat.
+const MARKET_CLOCK_MS = 1_000
 const FAILED_QUOTE_REFRESH_MS = 30_000
+const MAX_SNAPSHOT_WAIT_MS = 10 * 60_000
 const MAX_REFRESH_BACKOFF_MS = 5 * 60_000
 const NAV_SLOT_WINDOW_MS = 60_000
 const EMPTY_QUOTES: Record<string, LiveQuote> = {}
@@ -71,8 +74,6 @@ interface Store {
   portfolioHistory: PortfolioSnapshot[]
   marketDataRefreshing: boolean
   marketDataResult: LiveQuotesResult | null
-  quoteLastCheckedAt: number | null
-  quoteNextRefreshAt: number | null
   removeFolio: (id: string) => Promise<boolean>
   confirmFolioUnchanged: (id: string) => Promise<void>
   setSettings: (s: Settings) => void
@@ -93,6 +94,22 @@ interface Store {
 
 const StoreContext = createContext<Store | null>(null)
 
+/** Stocks and ETFs with a confirmed provider symbol receive live quotes; funds follow the NAV schedule. */
+function hasLiveListing(position: Position): boolean {
+  return position.type !== 'mutual-fund' && resolveYahooSymbol(position) != null
+}
+
+/** A holding and every position merged into it, or the single position with that id. */
+function holdingMembers(folios: Folio[], holdingId: string): Position[] {
+  const positions = folios.flatMap((folio) => folio.positions)
+  return combinedPositionMembers(positions).get(holdingId) ?? positions.filter((position) => position.id === holdingId)
+}
+
+/** Earlier snapshots were valued under the previous instrument identity. */
+function legacyIdentityHistory() {
+  return loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+}
+
 function readPersistedFolios(): string | null | undefined {
   try { return localStorage.getItem('finverse:folios') } catch { return undefined }
 }
@@ -107,10 +124,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [liveQuotes, setLiveQuotesState] = useState<Record<string, LiveQuote>>(() => savedSettings.allowExternalData
     ? loadCachedQuotes(folios.flatMap((folio) => folio.positions)) : {})
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>(() => loadPortfolioSnapshots())
-  const [marketDataRefreshing, setMarketDataRefreshing] = useState(savedSettings.allowExternalData && folios.some((folio) => folio.positions.length > 0))
+  const [marketDataRefreshing, setMarketDataRefreshing] = useState(() => savedSettings.allowExternalData && folios.some((folio) => folio.positions.some(hasLiveListing)))
   const [marketDataResult, setMarketDataResult] = useState<LiveQuotesResult | null>(null)
-  const [quoteLastCheckedAt, setQuoteLastCheckedAt] = useState<number | null>(null)
-  const [quoteNextRefreshAt, setQuoteNextRefreshAt] = useState<number | null>(null)
   const [folioSaveFailed, setFolioSaveFailed] = useState(false)
   const [settingsSaveFailed, setSettingsSaveFailed] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
@@ -133,7 +148,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const loadedQuoteKey = useRef<string | null>(null)
   const failedQuoteChecks = useRef(0)
   const lastQuoteCheck = useRef(0)
-  const scheduleQuotes = useRef<((failed: boolean, checked?: boolean) => void) | null>(null)
+  const scheduleQuotes = useRef<((failed: boolean, checked?: boolean, nextUpdateAt?: number) => void) | null>(null)
+  // Yahoo cannot have newer stock prices before this time, so polls wait for it instead of re-reading the same snapshot.
+  const providerNextUpdateAt = useRef(0)
 
   const assertCurrentWorkspace = useCallback(() => {
     if (workspaceChangedRef.current
@@ -299,21 +316,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [assertCurrentWorkspace])
 
   const confirmFundScheme = useCallback(async (holdingId: string, candidate: FundSchemeCandidate) => {
-    if (!settings.allowExternalData) throw new Error('Enable external market data before confirming a provider scheme.')
-    const before = foliosRef.current.flatMap((folio) => folio.positions)
-    const members = combinedPositionMembers(before).get(holdingId) ?? before.filter((position) => position.id === holdingId)
+    if (!settings.allowExternalData) throw new Error('Market data is paused. Reload this tab before confirming a provider scheme.')
+    const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length || members.some((position) => position.type !== 'mutual-fund' || !canConfirmFundScheme(position.name || position.ticker, candidate))) throw new Error('Choose a scheme compatible with this fund, plan and option.')
     if (members.some((position) => !hasSupportedValuationCurrency(position))) throw new Error('MFAPI NAV and history support INR mutual-fund holdings only. Original native amounts are retained.')
     const ids = new Set(members.map((position) => position.id))
     const next = foliosRef.current.map((folio) => ({ ...folio, positions: folio.positions.map((position) => ids.has(position.id)
       ? normalizePosition({ ...position, mfScheme: { code: candidate.schemeCode, name: candidate.schemeName, source: 'confirmed' } }) : position) }))
-    const history = loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+    const history = legacyIdentityHistory()
     await persistPortfolioChange(next, history)
   }, [persistPortfolioChange, settings.allowExternalData])
 
   const confirmInstrument = useCallback(async (holdingId: string, correction: InstrumentCorrection) => {
-    const before = foliosRef.current.flatMap((folio) => folio.positions)
-    const members = combinedPositionMembers(before).get(holdingId) ?? before.filter((position) => position.id === holdingId)
+    const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length || members.some((position) => position.type === 'mutual-fund') || correction.type === 'mutual-fund') throw new Error('Choose a current equity or ETF listing to correct.')
     if (members.some((position) => !hasInrDenomination(position))) throw new Error('Import a corrected INR statement before reviewing this listing. Original unsupported amounts are retained.')
     const ids = new Set(members.map((position) => position.id))
@@ -323,20 +338,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (corrected.identityIssue && corrected.identityIssue !== BSE_PRICING_NOTICE) throw new Error(corrected.identityIssue)
       return corrected
     }) }))
-    const history = loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+    const history = legacyIdentityHistory()
     await persistPortfolioChange(next, history)
   }, [persistPortfolioChange])
 
   const confirmNsePricing = useCallback(async (holdingId: string, candidate: NsePricingCandidate) => {
-    if (!settings.allowExternalData) throw new Error('Enable external market data before approving NSE pricing.')
-    const before = foliosRef.current.flatMap((folio) => folio.positions)
-    const members = combinedPositionMembers(before).get(holdingId) ?? before.filter((position) => position.id === holdingId)
+    if (!settings.allowExternalData) throw new Error('Market data is paused. Reload this tab before approving NSE pricing.')
+    const members = holdingMembers(foliosRef.current, holdingId)
     if (!members.length) throw new Error('This holding is no longer available. Reload and try again.')
     if (members.some((position) => !hasSupportedValuationCurrency(position))) throw new Error('NSE pricing supports INR holdings only.')
     const ids = new Set(members.map((position) => position.id))
     const next = foliosRef.current.map((folio) => ({ ...folio, positions: folio.positions.map((position) =>
       ids.has(position.id) ? applyNsePricing(position, candidate) : position) }))
-    const history = loadPortfolioSnapshots().map((balance) => ({ ...balance, dataQuality: 'legacy-instrument-identity' as const }))
+    const history = legacyIdentityHistory()
     await persistPortfolioChange(next, history)
   }, [persistPortfolioChange, settings.allowExternalData])
 
@@ -451,9 +465,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     slot.current = controller
     activeRefreshControllers.current.add(controller)
-    const ownsIndicator = group === 'equity' || !positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
+    // Only the first load of a group shows progress; background polls would flicker the indicator on every poll.
+    const ownsIndicator = !quoteResults.current[group] && (group === 'equity' || !positionsRef.current.some(hasLiveListing))
     if (ownsIndicator) setMarketDataRefreshing(true)
-    if (group === 'equity') setQuoteNextRefreshAt(null)
     const apply = (result: LiveQuotesResult) => {
       const activeKeys = new Set(positionsRef.current.map(quoteKey))
       const requestedKeys = new Set(requested.map(quoteKey))
@@ -465,13 +479,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const applied = setLiveQuotes(merged)
       quoteResults.current[group] = result
       const results = Object.values(quoteResults.current)
-      setMarketDataResult({ quotes: applied, updated: results.reduce((sum, item) => sum + item.updated, 0),
-        failed: results.reduce((sum, item) => sum + item.failed, 0), skipped: results.reduce((sum, item) => sum + item.skipped, 0) })
+      const next = { quotes: applied, updated: results.reduce((sum, item) => sum + item.updated, 0),
+        failed: results.reduce((sum, item) => sum + item.failed, 0), skipped: results.reduce((sum, item) => sum + item.skipped, 0) }
+      setMarketDataResult((current) => current && current.quotes === next.quotes && current.updated === next.updated
+        && current.failed === next.failed && current.skipped === next.skipped ? current : next)
     }
     try {
-      const result = await marketData.refreshQuotes(requested, liveQuotesRef.current, controller.signal, (partial) => {
+      // The first load shows each 25-symbol batch as it lands; background polls commit once, so a
+      // 100-holding portfolio re-renders once per poll instead of once per batch.
+      const firstLoad = !quoteResults.current[group]
+      const result = await marketData.refreshQuotes(requested, liveQuotesRef.current, controller.signal, firstLoad ? (partial) => {
         if (!controller.signal.aborted && !workspaceChangedRef.current) apply(partial)
-      })
+      } : undefined)
       controller.signal.throwIfAborted()
       assertCurrentWorkspace()
       apply(result)
@@ -497,17 +516,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ok: false, reason: 'disabled', retryInMs: 0 }
     }
     if (!settings.allowExternalData || positionsRef.current.length === 0) return { ok: false, reason: 'disabled', retryInMs: 0 }
-    const hasEquities = positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
+    const hasEquities = positionsRef.current.some(hasLiveListing)
     if (!hasEquities) return { ok: false, reason: positionsRef.current.every((position) => position.type === 'mutual-fund') ? 'scheduled-nav' : 'no-live-listings', retryInMs: 0 }
     const slot = activeQuoteController
     if (slot.current && !slot.current.signal.aborted) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
     const check = manualRefreshCheck()
     if (!check.allowed) return { ok: false, reason: 'cooldown', retryInMs: check.retryInMs ?? 0 }
+    // Restarting the beat refreshes the index ticker alongside holdings, and the next automatic poll follows one interval later.
+    livePace.restartBeat()
     try {
       const result = await refreshQuoteGroup('equity')
       if (!result) return { ok: false, reason: 'cooldown', retryInMs: 1000 }
       const failed = result.failed > 0 && result.updated === 0 && result.skipped === 0
-      scheduleQuotes.current?.(failed)
+      scheduleQuotes.current?.(failed, true, result.nextUpdateAt)
       if (failed) return { ok: false, reason: 'failed', retryInMs: 0 }
       recordManualRefresh()
       return { ok: true, retryInMs: MANUAL_REFRESH_COOLDOWN_MS }
@@ -522,18 +543,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!settings.allowExternalData || positions.length === 0) {
       setMarketDataRefreshing(false)
       setMarketDataResult(null)
-      setQuoteNextRefreshAt(null)
-      setQuoteLastCheckedAt(null)
       loadedQuoteKey.current = null
     }
-    if (!positionsRef.current.some((position) => position.type === 'mutual-fund' || resolveYahooSymbol(position))) {
-      setMarketDataRefreshing(false)
-      setQuoteNextRefreshAt(null)
-    }
+    if (!positionsRef.current.some(hasLiveListing) && !activeNavController.current) setMarketDataRefreshing(false)
   }, [folioRefreshKey, settings.allowExternalData, positions.length])
 
   useEffect(() => {
-    if (!settings.allowExternalData || !positionsRef.current.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))) return
+    if (!settings.allowExternalData || !positionsRef.current.some(hasLiveListing)) return
     let open = isMarketOpen()
     let closeRefreshPending = false
     let active = true
@@ -541,29 +557,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const queue = () => {
       clearTimeout(refreshTimer)
-      if (open && !document.hidden) refreshTimer = setTimeout(() => {
+      if (open && !document.hidden && livePace.interval() != null) refreshTimer = setTimeout(() => {
         updateMarket()
         if (open) void refresh()
       }, Math.max(0, nextAt - Date.now()))
     }
-    const schedule = (failed: boolean, checked = true) => {
+    const schedule = (failed: boolean, checked = true, nextUpdateAt?: number) => {
       if (!active) return
-      if (checked) {
-        lastQuoteCheck.current = Date.now()
-        setQuoteLastCheckedAt(lastQuoteCheck.current)
-      }
+      if (checked) lastQuoteCheck.current = Date.now()
       failedQuoteChecks.current = failed ? Math.min(failedQuoteChecks.current + 1, 4) : 0
-      nextAt = Date.now() + (failed ? Math.min(FAILED_QUOTE_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS) : EQUITY_REFRESH_MS)
-      setQuoteNextRefreshAt(open && !document.hidden ? nextAt : null)
+      providerNextUpdateAt.current = !failed && nextUpdateAt ? Math.min(nextUpdateAt, Date.now() + MAX_SNAPSHOT_WAIT_MS) : 0
+      nextAt = failed ? Date.now() + Math.min(FAILED_QUOTE_REFRESH_MS * 2 ** failedQuoteChecks.current, MAX_REFRESH_BACKOFF_MS)
+        : Math.max(livePace.nextBeatAt() ?? Date.now() + PACE_STEPS[0], providerNextUpdateAt.current)
       queue()
     }
     scheduleQuotes.current = schedule
-    const refresh = async () => {
+    const refresh = async (force = false) => {
       if (!active || document.hidden || (activeQuoteController.current && !activeQuoteController.current.signal.aborted)) return
+      // Screens without prices pause polling; the first load and the market-close fetch still run.
+      if (!force && livePace.interval() == null && loadedQuoteKey.current === folioRefreshKey) return
       loadedQuoteKey.current = folioRefreshKey
+      const started = performance.now()
       try {
         const result = await refreshQuoteGroup('equity')
-        if (active && result) schedule(result.failed > 0 && result.updated === 0 && result.skipped === 0)
+        if (result && result.updated > 0) livePace.recordResponse(performance.now() - started)
+        if (active && result) schedule(result.failed > 0 && result.updated === 0 && result.skipped === 0, true, result.nextUpdateAt)
       } catch {
         if (active && !workspaceChangedRef.current) schedule(false, false)
       }
@@ -575,25 +593,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (open && !nowOpen) closeRefreshPending = true
       const marketOpened = !open && nowOpen
       open = nowOpen
+      livePace.watchMainThread(open)
       if (marketOpened) { closeRefreshPending = false; void refresh() }
       else if (closeRefreshPending && !document.hidden && !activeQuoteController.current) {
         closeRefreshPending = false
-        void refresh()
+        void refresh(true)
       }
-      if (!open) setQuoteNextRefreshAt(null)
     }
-    const timer = window.setInterval(updateMarket, EQUITY_REFRESH_MS)
+    const timer = window.setInterval(updateMarket, MARKET_CLOCK_MS)
     const visibility = () => {
       clearTimeout(refreshTimer)
-      if (document.hidden) { setQuoteNextRefreshAt(null); return }
+      if (document.hidden) return
       updateMarket()
       if ((open && Date.now() >= nextAt) || loadedQuoteKey.current !== folioRefreshKey
         || (!open && Date.now() - lastQuoteCheck.current >= CLOSED_QUOTE_RECHECK_MS)) void refresh()
-      else { setQuoteNextRefreshAt(open ? nextAt : null); queue() }
+      else queue()
     }
     document.addEventListener('visibilitychange', visibility)
+    // A pace change (or returning to a screen with prices) re-times the next poll to the first beat after the last check.
+    livePace.watchMainThread(open)
+    const unsubscribePace = livePace.subscribe(() => {
+      const beat = livePace.nextBeatAt(lastQuoteCheck.current)
+      if (beat == null) { clearTimeout(refreshTimer); return }
+      // After a failed poll the backoff deadline stands; only its timer, cleared while paused, needs re-arming.
+      if (failedQuoteChecks.current) { queue(); return }
+      nextAt = Math.max(beat, providerNextUpdateAt.current)
+      if (open && !document.hidden && Date.now() >= nextAt) void refresh()
+      else queue()
+    })
     return () => {
       active = false
+      unsubscribePace()
+      livePace.watchMainThread(false)
       activeQuoteController.current?.abort()
       if (scheduleQuotes.current === schedule) scheduleQuotes.current = null
       window.clearInterval(timer)
@@ -670,14 +701,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     confirmFundScheme,
     confirmInstrument,
     confirmNsePricing,
-    quoteLastCheckedAt,
-    quoteNextRefreshAt,
     workspaceReadOnly: workspaceChanged,
     settingsSaved: !settingsSaveFailed && !workspaceChanged,
     refreshNow,
   }), [folios, positions, rawPositions, liveQuotes, snapshot, portfolioHistory, marketDataRefreshing,
     marketDataResult, removeFolio, confirmFolioUnchanged, settings, setSettings, previewFile, commitImport, commitImports,
-    undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, confirmNsePricing, quoteLastCheckedAt, quoteNextRefreshAt, workspaceChanged, settingsSaveFailed, refreshNow])
+    undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, confirmNsePricing, workspaceChanged, settingsSaveFailed, refreshNow])
 
   return <StoreContext.Provider value={value}>
     {!!snapshot.unsupportedCurrencyCount && <div className="folio-save-warning" role="status"><span>Partial INR totals. {snapshot.unsupportedCurrencyCount} holding{snapshot.unsupportedCurrencyCount === 1 ? '' : 's'} in unsupported native currencies excluded. Original amounts remain in exports.</span></div>}
@@ -702,6 +731,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     </div>}
     {children}
   </StoreContext.Provider>
+}
+
+/**
+ * Keeps a hidden screen idle. While hidden (React <Activity mode="hidden">) it holds the store value and the screen
+ * element it last rendered, so live prices and parent re-renders skip the subtree entirely. Shown again, it renders
+ * once with current data. Effects are already torn down while hidden, so nothing goes stale that could act.
+ */
+export function IdleWhenHidden({ visible, children }: { visible: boolean; children: ReactNode }) {
+  const value = useStore()
+  const held = useRef({ value, children })
+  if (visible) held.current = { value, children }
+  return <StoreContext.Provider value={held.current.value}>{held.current.children}</StoreContext.Provider>
 }
 
 export function useStore(): Store {

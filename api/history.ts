@@ -1,7 +1,7 @@
 import { isMarketSymbol, type HistoryPayload } from '../src/marketDataProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
-import { createNseSymbolResolver } from './nseSymbolChanges.js'
-import { fetchLatestNseClose, type NseCloseState } from './nseClosingPrices.js'
+import { createRequestBudget, readBoundedText } from './_requestBudget.js'
+import { createNseSymbolResolver } from './_nseSymbolChanges.js'
+import { fetchLatestNseClose, type NseCloseState } from './_nseClosingPrices.js'
 import { getMarketCalendarInfo } from '../src/marketCalendar.js'
 
 const UPSTREAM_TIMEOUT_MS = 8_000

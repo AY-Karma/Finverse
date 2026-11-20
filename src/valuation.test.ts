@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Folio, Position } from './types'
-import { combinedPositionMembers, combinePositions, computePortfolioStats, nativePrice, portfolioPulse, positionPnl, positionsWithStatementDates, quoteKey } from './valuation'
+import { combinedPositionMembers, combinePositions, computePortfolioStats, gainTone, nativePrice, plusSign, portfolioPulse, positionPnl, positionsWithStatementDates, quoteKey } from './valuation'
 
 function position(overrides: Partial<Position>): Position {
   return {
@@ -192,5 +192,12 @@ describe('portfolioPulse', () => {
       bandWeight: { heavy: 0, mid: 0, light: 0 },
       bandMembers: { heavy: [], mid: [], light: [] },
     })
+  })
+})
+
+describe('gain and loss tone', () => {
+  it('keeps zero and unknown amounts neutral and unsigned', () => {
+    expect([gainTone(120), gainTone(-0.01), gainTone(0), gainTone(null)]).toEqual(['up', 'down', '', ''])
+    expect([plusSign(120), plusSign(0), plusSign(-5)]).toEqual(['+', '', ''])
   })
 })

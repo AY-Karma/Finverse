@@ -9,6 +9,10 @@ const shortDate = dateFormatter({ day: 'numeric', month: 'short', timeZone: 'Asi
 const dateText = (date: string) => shortDate.format(new Date(`${date}T12:00:00Z`))
 const monthText = dateFormatter({ month: 'short', timeZone: 'Asia/Kolkata' })
 const fullDate = dateFormatter({ day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })
+/** Filing problems belong to Company updates; Upcoming lists only meetings and corporate actions. */
+const FILING_SOURCES = new Set(['NSE filings', 'NSE issuer reference'])
+const OUT_OF_SCOPE = /^(Mutual fund notices|Asset type not covered|\S+ listings are not covered)/
+const isFilingIssue = (issue: MarketEventsFeed['issues'][number]) => FILING_SOURCES.has(issue.source)
 const eventLabels = { results: 'Results', meeting: 'Meeting', dividend: 'Dividend', 'corporate-action': 'Corporate action', filing: 'Filing' }
 
 function CalendarDate({ date }: { date: string }) {
@@ -21,6 +25,13 @@ export function MonitorAgenda({ controller, feed, loading, onRemind, onOpenHoldi
   const [count, setCount] = useState(4)
   const [reminderCount, setReminderCount] = useState(3)
   const today = new Date(controller.now + 19_800_000).toISOString().slice(0, 10)
+  const issues = feed.issues.filter((issue) => !isFilingIssue(issue))
+  // "Company events" notes explain holdings the NSE feed does not cover; they are not source failures.
+  const coverage = issues.filter((issue) => issue.source === 'Company events')
+  // Funds, other asset types and other exchanges are outside the feed by design; the rest need the user's attention.
+  const partialCoverage = coverage.some((issue) => OUT_OF_SCOPE.test(issue.message))
+  const attention = coverage.filter((issue) => !OUT_OF_SCOPE.test(issue.message))
+  const failures = issues.filter((issue) => issue.source !== 'Company events')
   const upcoming = feed.events.filter((event) => event.kind !== 'filing' && event.date >= today).sort((a, b) => a.date.localeCompare(b.date))
   const reminders = controller.events.filter((event) => event.reminder)
   const inactive = controller.events.filter((event) => !event.reminder)
@@ -35,20 +46,24 @@ export function MonitorAgenda({ controller, feed, loading, onRemind, onOpenHoldi
         </div>
       </div>)}</div>}
       {upcoming.length > count && <button type="button" className="mp-section-more" onClick={() => setCount((value) => value + 6)}>Show more events <span aria-hidden="true">↓</span></button>}
-      {!loading && !upcoming.length && !feed.issues.length && <p className="mp-section-note">{controller.allowExternalData ? 'No announced NSE events in the next 90 days.' : 'Enable market data to see announced events.'}</p>}
-      {feed.issues.length > 0 && <details className="mp-source-issues"><summary>Event coverage {feed.events.length > 0 ? 'is partial' : 'unavailable'}</summary>{feed.issues.map((issue) => <p key={`${issue.source}:${issue.message}`}>{issue.source !== 'Company events' && <strong>{issue.source}: </strong>}{issue.message}</p>)}<p>Holdings stay in your portfolio. Only announced events appear here.</p><button type="button" className="mp-small-action" disabled={loading} onClick={onRetry}>Retry</button></details>}
+      {!loading && !upcoming.length && !failures.length && <p className="mp-section-note">{controller.allowExternalData ? 'No announced events for your NSE holdings in the next 90 days.' : 'Enable market data to see announced events.'}</p>}
+      {failures.length > 0 && <details className="mp-source-issues"><summary>{upcoming.length > 0 ? 'Some event sources are unavailable' : 'Event sources unavailable'}</summary>{failures.map((issue) => <p key={`${issue.source}:${issue.message}`}><strong>{issue.source}: </strong>{issue.message}</p>)}<button type="button" className="mp-small-action" disabled={loading} onClick={onRetry}>Retry</button></details>}
+      {attention.length > 0 && <details className="mp-source-issues"><summary>Some holdings need attention</summary>{attention.map((issue) => <p key={issue.message}>{issue.message}</p>)}</details>}
+      {partialCoverage && <p className="mp-coverage-line">Covers NSE-listed stocks and ETFs. Funds and other listings are not included.</p>}
     </>}
     {reminders.length > 0 && <div className="mp-personal-reminders"><h3>Personal reminders</h3>{reminders.slice(0, reminderCount).map((event) => <div className="mp-agenda-event" key={event.id}><div className="mp-reminder-date"><time dateTime={event.date}>{dateText(event.date)}</time>{event.date <= today && <span>{event.date === today ? 'Today' : 'Overdue'}</span>}</div><div><strong>{event.title}</strong><span>{event.holding}</span></div><button className="mp-small-action" type="button" aria-label={`Turn off reminder: ${event.title}`} onClick={() => controller.toggleReminder(event.id)}>Turn off</button></div>)}{reminders.length > reminderCount && <button className="mp-show-more" type="button" onClick={() => setReminderCount((value) => value + 6)}>Show more reminders</button>}</div>}
     {inactive.length > 0 && <details className="pa-inactive-reminders"><summary>Inactive reminders</summary>{inactive.map((event) => <div className="mp-agenda-event" key={event.id}><div><strong>{event.title}</strong><span>{event.holding} · {dateText(event.date)}</span></div><div className="mp-reminder-actions"><button type="button" className="mp-small-action" onClick={() => controller.toggleReminder(event.id)}>Restore</button><button type="button" className="mp-small-action mp-reminder-delete" aria-label={`Delete inactive reminder: ${event.title}`} onClick={() => controller.deleteInactiveReminder(event.id)}>Delete</button></div></div>)}</details>}
   </section>
 }
 
-export function MonitorDevelopments({ events, onOpenHolding }: { events: MarketEvent[]; onOpenHolding: (holdingId: string) => void }) {
+export function MonitorDevelopments({ events, issues = [], onOpenHolding }: { events: MarketEvent[]; issues?: MarketEventsFeed['issues']; onOpenHolding: (holdingId: string) => void }) {
   const filings = events.filter((event) => event.kind === 'filing').sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
-  if (!filings.length) return null
+  const filingIssues = issues.filter(isFilingIssue)
+  if (!filings.length && !filingIssues.length) return null
   return <section className="mp-panel mp-developments" aria-labelledby="monitor-developments-heading"><header className="mp-section-head mp-feature-head"><div className="mp-feature-title"><span className="mp-heading-mark" aria-hidden="true"><ActionIcon name="sources" /></span><h2 id="monitor-developments-heading">Company updates</h2></div><span className="mp-kicker">Exchange filings</span></header>
-    <div className="mp-updates-scroll" role="region" aria-label="Company updates feed" tabIndex={0}>
+    {filingIssues.length > 0 && <p className="mp-section-note">{filingIssues.map((issue) => issue.message).join(' ')}</p>}
+    {filings.length > 0 && <div className="mp-updates-scroll" role="region" aria-label="Company updates feed" tabIndex={0}>
       {filings.map((event) => <article key={event.id}><span className="mp-filing-document" aria-hidden="true"><ActionIcon name="sources" /></span><div className="mp-filing-meta"><button className="mp-company-link" type="button" onClick={() => onOpenHolding(event.holdingId)}>{event.holdingName}</button><span>{event.source} · <time dateTime={event.date}>{dateText(event.date)}</time></span></div><a className="mp-filing-link" href={event.sourceUrl} target="_blank" rel="noreferrer"><span>{event.title}</span><span className="mp-filing-open" aria-hidden="true"><ActionIcon name="external" /></span></a></article>)}
-    </div>
+    </div>}
   </section>
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createNseSymbolResolver } from '../api/nseSymbolChanges'
+import { createNseSymbolResolver } from '../api/_nseSymbolChanges'
 
 const NOW = Date.parse('2026-07-01T00:00:00+05:30')
 const master = 'SYMBOL,SERIES,ISIN NUMBER\nNEW,EQ,INE001A01010\n'

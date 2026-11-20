@@ -14,10 +14,10 @@
 .mi-trend-reading strong { color: var(--ink); font-family: var(--font-mono); font-size: 16px; font-weight: 550; }
 .mi-trend-plot { touch-action: pan-y; }
 .mi-trend-chart { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
-.mi-trend-scale { display: flex; flex-direction: column; justify-content: space-between; padding: 10px 0 30px; color: var(--ink-muted); font-family: var(--font-mono); font-size: 14px; }
+.mi-trend-scale { display: flex; flex-direction: column; justify-content: space-between; padding: 5px 0 27px; color: var(--ink-muted); font-family: var(--font-mono); font-size: 14px; }
 .mi-trend-scale > :only-child { margin-block: auto; }
 .mi-trend-series { min-width: 0; }
-.mi-trend-plot svg { display: block; width: 100%; height: 160px; }
+.mi-trend-plot svg { display: block; width: 100%; height: 200px; }
 .mi-trend-grid { stroke: var(--hairline-strong); stroke-dasharray: 2 4; }
 .mi-trend-cursor { stroke: var(--ink-subtle); stroke-dasharray: 3 4; stroke-width: 1; opacity: .6; }
 .mi-trend-dates { display: flex; justify-content: space-between; gap: 12px; color: var(--ink-muted); font-size: 14px; }

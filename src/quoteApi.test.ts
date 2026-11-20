@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createQuoteHandler } from '../api/quotes'
+import { createQuoteHandler, yahooSnapshotExpiry } from '../api/quotes'
 
 const NOW = Date.parse('2026-08-25T06:00:00Z')
 const state = vi.hoisted(() => ({ resolveSymbol: vi.fn<(symbol: string) => Promise<string | null>>() }))
-vi.mock('../api/nseSymbolChanges', () => ({ createNseSymbolResolver: () => state.resolveSymbol }))
+vi.mock('../api/_nseSymbolChanges', () => ({ createNseSymbolResolver: () => state.resolveSymbol }))
 
 beforeEach(() => { state.resolveSymbol.mockReset().mockResolvedValue(null) })
 
@@ -112,18 +112,33 @@ describe('GET /api/quotes', () => {
     expect(body.errors[0].message).toContain('HTTP 503')
   })
 
-  it('reuses a recent batch but fetches a new provider response after one second', async () => {
+  it('reuses a recent batch but fetches a new provider response after four seconds, just under the 5s polling beat', async () => {
     let now = NOW
     const fetcher = vi.fn<typeof fetch>(async () => yahooResponse())
     const handler = createQuoteHandler({ fetcher, now: () => now })
     const request = () => handler(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS'))
     await request()
-    now += 999
+    now += 3_999
     await request()
     expect(fetcher).toHaveBeenCalledTimes(1)
     now += 1
     await request()
     expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('shares NSE quotes for a minute while the market is shut, but not into the next open', async () => {
+    const closedAt = Date.parse('2026-08-25T10:00:00Z') / 1000
+    const fetcher = vi.fn<typeof fetch>(async (url) => yahooResponse(new URL(String(url)).searchParams.get('symbols')!, 1309.8, closedAt))
+    let now = Date.parse('2026-08-25T11:00:00Z')
+    const handler = createQuoteHandler({ fetcher, now: () => now })
+    const request = (symbols = 'RELIANCE.NS') => handler(new Request(`http://localhost/api/quotes?symbols=${symbols}`))
+    expect((await request()).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=60, must-revalidate')
+    now += 59_999
+    await request()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect((await request('AAPL')).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=4, must-revalidate')
+    now = Date.parse('2026-08-26T03:44:30Z')
+    expect((await request('TCS.NS')).headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=4, must-revalidate')
   })
 
   it('returns normalized quotes with the provider market timestamp', async () => {
@@ -136,7 +151,7 @@ describe('GET /api/quotes', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=1, must-revalidate')
+    expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=4, must-revalidate')
     expect(fetcher).toHaveBeenCalledTimes(1)
     expect(String(fetcher.mock.calls[0]?.[0])).toContain('symbols=RELIANCE.NS')
     expect(state.resolveSymbol).not.toHaveBeenCalled()
@@ -391,5 +406,34 @@ describe('GET /api/quotes', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Request at most 25 symbols.',
     })
+  })
+})
+
+describe('Yahoo snapshot timing', () => {
+  const headers = (cacheControl: string | null, age: string | null) => new Headers({ ...(cacheControl ? { 'cache-control': cacheControl } : {}), ...(age ? { age } : {}) })
+
+  it('derives when the shared snapshot can next change from its lifetime and age', () => {
+    expect(yahooSnapshotExpiry(headers('public, max-age=300, stale-while-revalidate=120', '118'), 1_000)).toBe(1_000 + 182_000)
+    expect(yahooSnapshotExpiry(headers('public, max-age=300', null), 1_000)).toBe(301_000)
+  })
+
+  it('gives no time for expired, unbounded or missing lifetimes', () => {
+    expect(yahooSnapshotExpiry(headers('public, max-age=300', '305'), 1_000)).toBeNull()
+    expect(yahooSnapshotExpiry(headers('public, max-age=86400', '0'), 1_000)).toBeNull()
+    expect(yahooSnapshotExpiry(headers('no-store', null), 1_000)).toBeNull()
+    expect(yahooSnapshotExpiry(headers(null, '10'), 1_000)).toBeNull()
+  })
+
+  it('passes the expiry to the app only for a complete Yahoo answer', async () => {
+    const at = Date.parse('2026-11-19T05:00:00Z')
+    const withAge = async (input: string | URL | Request) => {
+      const response = yahooResponse(new URL(String(input)).searchParams.get('symbols')!.split(',')[0], 1309.8, Math.floor(at / 1000) - 60)
+      return new Response(response.body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300', age: '100' } })
+    }
+    const complete = await (await createQuoteHandler({ fetcher: vi.fn<typeof fetch>(withAge), now: () => at })(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS'))).json()
+    expect(complete.nextUpdateAt).toBe(new Date(at + 200_000).toISOString())
+    const partial = await (await createQuoteHandler({ fetcher: vi.fn<typeof fetch>(withAge), now: () => at })(new Request('http://localhost/api/quotes?symbols=RELIANCE.NS,TCS.NS'))).json()
+    expect(partial.errors).toHaveLength(1)
+    expect(partial.nextUpdateAt).toBeUndefined()
   })
 })

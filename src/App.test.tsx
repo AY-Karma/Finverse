@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useEffect, useState } from 'react'
+import { act, useEffect, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -10,7 +10,7 @@ import type { View } from './useStore'
 const state = vi.hoisted(() => ({
   positions: [] as Position[], settings: {} as Settings, liveQuotes: {}, setSettings: vi.fn(), monitorEffect: vi.fn(), monitorCleanup: vi.fn(), overviewRender: vi.fn(),
 }))
-vi.mock('./useStore', () => ({ useStore: () => state }))
+vi.mock('./useStore', () => ({ useStore: () => state, IdleWhenHidden: ({ children }: { children: ReactNode }) => children }))
 vi.mock('./theme', () => ({ applyTheme: vi.fn() }))
 vi.mock('./views/Overview', () => ({ Overview: ({ onGoTo }: { onGoTo: (view: View, anchor?: string) => void }) => {
   state.overviewRender()

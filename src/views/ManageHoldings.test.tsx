@@ -32,6 +32,32 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('keeps scheme details open when an inside action replaces its clicked control', async () => {
+    state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const schemes = container.querySelector<HTMLDetailsElement>('.fund-review')!
+      await act(async () => schemes.querySelector('summary')!.click())
+      for (const label of ['Edit', 'Cancel', 'Save changes']) {
+        const action = document.createElement('button')
+        action.textContent = label
+        schemes.querySelector('.fund-scheme-content')!.append(action)
+        action.addEventListener('click', () => action.replaceWith(document.createElement('span')))
+        await act(async () => action.click())
+        expect(action.isConnected).toBe(false)
+        expect(schemes.open, `${label} must keep scheme details open`).toBe(true)
+      }
+      await act(async () => schemes.querySelector('summary')!.click())
+      expect(schemes.open).toBe(false)
+      await act(async () => schemes.querySelector('summary')!.click())
+      await act(async () => document.body.click())
+      expect(schemes.open).toBe(false)
+    } finally { await act(async () => root.unmount()); container.remove() }
+  })
+
   it('collapses source and scheme boxes only after an outside click, preserving inside actions', async () => {
     state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
     const container = document.createElement('div')
@@ -72,7 +98,8 @@ describe('holdings management', () => {
     try {
       await act(async () => root.render(<ManageHoldings onRequestImport={onRequestImport} reviewOpen={false} onReviewListings={vi.fn()} />))
       expect(container.querySelectorAll('.imported-portfolio')).toHaveLength(1)
-      expect(container.querySelector('.imported-portfolio-copy')?.textContent).toContain('2 holdings · 2 source files')
+      expect(container.querySelector('.imported-portfolio-copy')?.textContent).toBe('Imported portfolio2 holdings')
+      expect(container.querySelector('.import-source-files > summary')?.textContent).toContain('Source files (×2), 2 files')
       expect(container.querySelector<HTMLDetailsElement>('.import-source-files')?.open).toBe(false)
       const actions = container.querySelectorAll('.import-source-files .folio-review-actions')
       expect(actions).toHaveLength(2)
@@ -252,7 +279,7 @@ describe('holdings management', () => {
       state.positions = [{ ...position, exchangeSource: 'explicit' }]
       await render()
       expect(trigger.textContent).toContain('No listings need review.')
-      expect(trigger.querySelector('.listing-review-action')?.textContent).toBe('View listings')
+      expect(trigger.querySelector('.listing-review-action')).toBeNull()
       expect(trigger.textContent).not.toContain('0 inferred')
 
       state.settings.hideValues = true
@@ -311,7 +338,7 @@ describe('holdings management', () => {
       expect(toggle.getAttribute('aria-expanded')).toBe('true')
       expect(actions.textContent).toContain('Restore backup')
       await act(async () => findButton('Export CSV').click())
-      await act(async () => findButton('Backup JSON').click())
+      await act(async () => findButton('Download backup').click())
       expect(state.exportPortfolio.mock.calls).toEqual([['csv'], ['json']])
       await act(async () => findButton('Undo import').click())
       expect(state.undoLastImport).not.toHaveBeenCalled()
@@ -328,7 +355,7 @@ describe('holdings management', () => {
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('keeps import available and disables export and undo when empty', async () => {
+  it('keeps import available and hides export and undo when empty', async () => {
     state.folios = []
     state.positions = []
     state.undoImportFolioId = null
@@ -338,7 +365,7 @@ describe('holdings management', () => {
       await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
       const buttons = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')]
       expect(buttons.map((button) => [button.textContent || button.getAttribute('aria-label'), button.disabled])).toEqual([
-        ['Import holdings', false], ['More holdings actions', false], ['Export CSV', true], ['Backup JSON', false], ['Undo import', true], ['Restore backup', false],
+        ['Import holdings', false], ['More holdings actions', false], ['Download backup', false], ['Restore backup', false],
       ])
     } finally { await act(async () => root.unmount()) }
   })

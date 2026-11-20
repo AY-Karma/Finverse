@@ -5,6 +5,12 @@ const MAX_CACHE_ENTRIES = 128
 const MAX_CACHE_BYTES = 16 * 1024 * 1024
 const FAILURE_CACHE_MS = 15_000
 
+/** Lets Vercel's CDN share a successful public response; browsers still revalidate through the app's own caches. */
+export function cdnCache(seconds: number, staleSeconds = 0): Record<string, string> {
+  const expiry = staleSeconds > 0 ? `stale-while-revalidate=${staleSeconds}` : 'must-revalidate'
+  return { 'Vercel-CDN-Cache-Control': `public, s-maxage=${Math.max(1, Math.floor(seconds))}, ${expiry}` }
+}
+
 interface CachedResponse {
   body: string
   status: number
@@ -26,8 +32,15 @@ export function createRequestBudget(now: () => number = Date.now) {
     cache.delete(key)
   }
 
+  /**
+   * A replayed entry keeps its original headers, so its edge lifetime must shrink to what is left of this cache's own:
+   * otherwise the CDN could hold a copy for a whole extra window beyond the lifetime the response was built for.
+   */
   function restore(entry: CachedResponse): Response {
-    return new Response(entry.body, { status: entry.status, headers: entry.headers })
+    const remaining = Math.max(1, Math.ceil((entry.expiresAt - now()) / 1000))
+    const headers = entry.headers.map(([name, value]): [string, string] => name.toLowerCase() === 'vercel-cdn-cache-control'
+      ? [name, value.replace(/s-maxage=(\d+)/, (_match, seconds) => `s-maxage=${Math.min(Number(seconds), remaining)}`)] : [name, value])
+    return new Response(entry.body, { status: entry.status, headers })
   }
 
   return async (
@@ -40,12 +53,10 @@ export function createRequestBudget(now: () => number = Date.now) {
       windowStart = timestamp
       requests = 0
     }
-    requests += 1
     const reject = () => new Response(JSON.stringify({ error: 'Request budget exceeded. Try again shortly.' }), {
       status: 429,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '60' },
     })
-    if (requests > MAX_REQUESTS_PER_WINDOW) return reject()
     for (const [storedKey, entry] of cache) {
       if (entry.expiresAt <= timestamp) remove(storedKey)
     }
@@ -54,6 +65,8 @@ export function createRequestBudget(now: () => number = Date.now) {
     const existing = pending.get(key)
     if (existing) return restore(await existing)
     if (pending.size >= MAX_ACTIVE) return reject()
+    // Only provider calls spend the budget; cached and shared in-flight responses are free.
+    if (++requests > MAX_REQUESTS_PER_WINDOW) return reject()
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(new DOMException('Request deadline exceeded.', 'TimeoutError')), 9_000)

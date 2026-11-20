@@ -1,5 +1,6 @@
 # Project guidance docs - kept locally, not part of commit history
 /AGENTS.md
+/CLAUDE.md
 /Design.md
 .agents
 .docs

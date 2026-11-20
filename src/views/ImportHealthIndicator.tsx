@@ -20,7 +20,7 @@ export function ImportHealthIndicator({ importedAt, reviewedAt, showLabel = fals
   const reviewed = reviewedAt != null && reviewedAt >= importedAt
   const label = reviewed ? status.label.replace('import', 'folio') : status.label
   const description = reviewed ? status.description.replace('Imported', 'Holdings confirmed unchanged') : status.description
-  const visibleLabel = freshness === 'healthy' ? reviewed ? 'Recently reviewed' : 'Recent import'
+  const visibleLabel = freshness === 'healthy' ? reviewed ? 'Fresh' : 'Recent import'
     : freshness === 'aging' ? 'Review soon' : freshness === 'old' ? 'Update suggested' : 'Date unknown'
 
   return <span className={`import-health${showLabel ? ' import-health--label' : ''}`} data-status={freshness} role="img" tabIndex={0}

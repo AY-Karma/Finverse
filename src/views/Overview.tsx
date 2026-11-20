@@ -1,6 +1,8 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, quoteKey } from '../valuation'
+import { combinedPositionMembers, computePortfolioStats, effectivePrice as livePriceOf, formatCurrency, formatPercent, gainTone, hasSupportedValuationCurrency, isLiveQuote, positionPnl, positionPnlPct, positionValue, quoteKey, signedCurrency } from '../valuation'
 import { useStore } from '../useStore'
+import { numberFormatter } from '../formatters'
+import { privateValue } from '../privacy'
 import { portfolioDataLabels } from '../portfolioDataLabels'
 import { investmentWorkspace } from '../investmentWorkspace'
 import { hasVerifiedNsePricing, needsInstrumentReview } from '../instruments'
@@ -8,7 +10,7 @@ import { getFolioFreshness } from '../importFreshness'
 import type { LiveQuote, Position } from '../types'
 import type { View } from '../useStore'
 import { MarketRefreshStatus } from './MarketRefreshStatus'
-import { quoteRefreshIssueText } from '../live'
+import { quoteRefreshIssueText, resolveYahooSymbol } from '../live'
 import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
 import { DitherBar } from './DitherBar'
@@ -206,14 +208,15 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
   const live = settings.allowExternalData ? snapshot.quotes : EMPTY_QUOTES
   const refreshCoolingDown = refreshAvailableAt > Date.now()
   const unmappedBse = positions.filter((position) => position.exchange === 'BSE' && !hasVerifiedNsePricing(position) && hasSupportedValuationCurrency(position))
-  const importedPriceIds = new Set(unmappedBse.map((position) => position.id))
+  const importedPriceIds = new Set(positions
+    .filter((position) => position.type !== 'mutual-fund' && hasSupportedValuationCurrency(position) && !resolveYahooSymbol(position))
+    .map((position) => position.id).concat(unmappedBse.map((position) => position.id)))
   const mappingNotice = unmappedBse.length ? hideValues
     ? 'Some holdings use imported prices. An NSE match is needed for live updates.'
     : `${unmappedBse.length} BSE holding${unmappedBse.length === 1 ? ' uses' : 's use'} imported prices. An NSE match is needed for live updates.` : null
   const marketDataIssue = [mappingNotice, quoteRefreshIssueText(marketDataResult)].filter(Boolean).join(' ') || null
 
-  const MASK = '••••••'
-  const mask = (s: string) => (hideValues ? MASK : s)
+  const mask = (s: string) => privateValue(s, hideValues)
 
   const equityCount = positions.filter((p) => p.type !== 'mutual-fund').length
   const mfCount = positions.filter((p) => p.type === 'mutual-fund').length
@@ -248,6 +251,8 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
     ? investmentWorkspace.readSnapshot({ folios: sessionFolios, holdings: sessionHoldings, quotes: live }) : null,
   [sessionFolios, sessionHoldings, live])
   const sessionSnapshot = scopedSession ?? snapshot
+  const listingsNeedConfirmation = !fundSession && sessionSnapshot.positions.some((position) => position.type !== 'mutual-fund')
+    && !sessionSnapshot.positions.some((position) => position.type !== 'mutual-fund' && resolveYahooSymbol(position))
 
   // Hooks are all called unconditionally — no early return may happen above these.
   const ledgerRows: LedgerRow[] = useMemo(
@@ -311,7 +316,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
   const dailyMove = dataLabels.sessionValue
   const dailyMoveText = dailyMove == null
     ? '—'
-    : `${dailyMove >= 0 ? '+' : ''}${formatCurrency(dailyMove)}`
+    : signedCurrency(dailyMove)
   const dailyMoveDirection = dailyMove == null || dailyMove === 0 ? '' : dailyMove > 0 ? 'up' : 'down'
   const sessionDate = sessionSnapshot.dailyChangeDate
     ? SESSION_DATE_FORMAT.format(new Date(`${sessionSnapshot.dailyChangeDate}T00:00:00+05:30`)).replace(',', '') : null
@@ -425,7 +430,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
             {mask(dailyMove == null ? '—' : dailyMoveText)}
           </div>
           <div className="score-foot score-session-basis" title={hideValues ? undefined : dataLabels.coverageLabel}>
-            {sessionDate ? <time dateTime={sessionSnapshot.dailyChangeDate!}>{sessionDate}</time> : fundSession ? 'Awaiting published NAVs' : 'Awaiting updates'}
+            {sessionDate ? <time dateTime={sessionSnapshot.dailyChangeDate!}>{sessionDate}</time> : fundSession ? 'Awaiting published NAVs' : listingsNeedConfirmation ? 'Confirm listings for live prices' : 'Awaiting updates'}
             {!hideValues && dataLabels.sessionTotal > 0 && (mfCount > 0 || dataLabels.isPartialSession || dataLabels.sessionTotal < sessionSnapshot.positions.length) && <span>{sessionSnapshot.dailyChangeCount} of {dataLabels.sessionTotal} {fundSession ? 'published NAVs' : mfCount > 0 ? 'stocks + ETFs' : dataLabels.sessionHoldings}</span>}
           </div>
         </div>
@@ -433,7 +438,6 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
         <MarketIndexTicker allowed={settings.allowExternalData} indexIds={settings.marketIndices} />
       </div>
 
-      {/* Panels */}
       <div className="span-grid">
         <div className="panel panel--ledger">
           {scopePositions.length === 0 ? <>{renderLedgerHeader()}<div className="ledger-empty">
@@ -497,7 +501,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
               </thead>
               <tbody>
                 {visibleLedgerRows.map((r) => {
-                  const pnlUp = r.pnl != null && r.pnl >= 0
+                  const pnlTone = gainTone(r.pnl)
                   const fund = r.position.type === 'mutual-fund'
                   const open = fund && expandedFundId === r.id
                   return (
@@ -513,8 +517,8 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
                         <LastTrade price={r.ltp} dayMove={r.dayMove} hideValues={hideValues} imported={r.importedPrice} />
                       </td>
                       <td>{mask(r.ltp == null ? 'Unpriced' : formatCurrency(r.value))}</td>
-                      <td className={r.pnl != null ? (pnlUp ? 'up' : 'down') : 'muted'}>
-                        {r.pnl != null ? mask(`${pnlUp ? '+' : ''}${formatCurrency(r.pnl)}`) : '—'}
+                      <td className={r.pnl != null ? pnlTone : 'muted'}>
+                        {r.pnl != null ? mask(signedCurrency(r.pnl)) : '—'}
                       </td>
                     </tr>
                     {open && <tr className="trow--nested"><td colSpan={6}><FundDetails fund={r.position} members={combinedMembers.get(r.id) ?? []} live={live} hideValues={hideValues} /></td></tr>}
@@ -526,7 +530,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
             </div>
             <div className="ledger-mobile-list">
               {visibleLedgerRows.map((row) => {
-                const pnlUp = row.pnl != null && row.pnl >= 0
+                const pnlTone = gainTone(row.pnl)
                 const fund = row.position.type === 'mutual-fund'
                 const open = fund && expandedFundId === row.id
                 const Row = fund ? 'button' : 'div'
@@ -542,8 +546,8 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
                       </span>
                       <span className="ledger-mobile-primary ledger-mobile-primary--right">
                         <span className="ledger-mobile-value">{mask(row.ltp == null ? 'Unpriced' : formatCurrency(row.value))}{row.importedPrice && !hideValues && <span className="muted"> · Imported</span>}</span>
-                        <span className={`ledger-mobile-secondary ${hideValues || row.pnl == null ? '' : pnlUp ? 'up' : 'down'}`}>
-                          {row.pnl == null ? 'P&L unavailable' : mask(`${pnlUp ? '+' : ''}${formatCurrency(row.pnl)}`)}
+                        <span className={`ledger-mobile-secondary ${hideValues ? '' : pnlTone}`}>
+                          {row.pnl == null ? 'P&L unavailable' : mask(signedCurrency(row.pnl))}
                         </span>
                       </span>
                     </Row>
@@ -588,7 +592,7 @@ function MFLedger({
   const [page, setPage] = useState(0)
   const hasImportedXirr = rows.some((position) => position.xirr != null
     || membersOf.get(position.id)?.some((member) => member.xirr != null))
-  const mask = (s: string) => (hideValues ? '••••••' : s)
+  const mask = (s: string) => privateValue(s, hideValues)
 
   const sorted = useMemo(() => {
     if (!sort) return rows
@@ -596,14 +600,14 @@ function MFLedger({
     return [...rows].sort((a, b) => {
       const num = (x: PositionLike) =>
         sort.field === 'value'
-          ? valueOf(x, live)
+          ? positionValue(x, live)
           : sort.field === 'units'
             ? x.quantity
             : sort.field === 'invested'
               ? x.invested
               : sort.field === 'xirr'
                 ? x.xirr ?? -Infinity
-              : mfReturnPct(x, live) ?? -Infinity
+              : positionPnlPct(x, live) ?? -Infinity
       switch (sort.field) {
         case 'scheme':
           return (a.name || a.ticker).localeCompare(b.name || b.ticker) * dir
@@ -676,8 +680,8 @@ function MFLedger({
       </thead>
       <tbody>
         {visibleRows.map((p) => {
-          const value = valueOf(p, live)
-          const returns = mfReturnPct(p, live)
+          const value = positionValue(p, live)
+          const returns = positionPnlPct(p, live)
           const members = membersOf.get(p.id) ?? []
           const expandable = members.length > 1
           const open = expandedId === p.id
@@ -726,8 +730,8 @@ function MFLedger({
     </div>
     <div className="ledger-mobile-list">
       {visibleRows.map((fund) => {
-        const value = valueOf(fund, live)
-        const returns = mfReturnPct(fund, live)
+        const value = positionValue(fund, live)
+        const returns = positionPnlPct(fund, live)
         const members = membersOf.get(fund.id) ?? []
         const open = expandedId === fund.id
         return (
@@ -755,7 +759,7 @@ function MFLedger({
 }
 
 function FundDetails({ fund, members, live, hideValues }: { fund: Position; members: Position[]; live: Record<string, LiveQuote>; hideValues: boolean }) {
-  const mask = (text: string) => hideValues ? '••••••' : text
+  const mask = (text: string) => privateValue(text, hideValues)
   return <div className="ledger-mobile-detail ledger-fund-detail">
     <div className="ledger-mobile-detail-wide"><span>Scheme</span><strong>{mask(fund.name || fund.ticker)}</strong></div>
     <div><span>Invested</span><strong>{mask(formatCost(fund.invested, hasSupportedValuationCurrency(fund)))}</strong></div>
@@ -776,7 +780,7 @@ function LedgerMembers({
   live: Record<string, LiveQuote>
   hideValues: boolean
 }) {
-  const mask = (s: string) => (hideValues ? '••••••' : s)
+  const mask = (s: string) => privateValue(s, hideValues)
   const anyFolio = members.some((m) => (m.folio ?? '').trim() !== '')
   const hasFundEntries = members.some((m) => m.type === 'mutual-fund')
   return (
@@ -799,15 +803,15 @@ function LedgerMembers({
           {members.map((m) => {
             const v = positionValue(m, live)
             const pnl = positionPnl(m, live)
-            const up = pnl != null && pnl >= 0
+            const pnlTone = gainTone(pnl)
             return (
               <tr key={m.id}>
                 <td data-label="Qty">{mask(fmtUnits(m.quantity))}</td>
                 <td data-label="Buy">{mask(formatCost(m.buyPrice, hasSupportedValuationCurrency(m)))}</td>
                 <td data-label="Invested">{mask(formatCost(m.invested, hasSupportedValuationCurrency(m)))}</td>
                 <td data-label="Value">{mask(livePriceOf(m, live) == null ? 'Unpriced' : formatCurrency(v))}</td>
-                <td data-label="P&L" className={pnl != null ? (up ? 'up' : 'down') : 'muted'}>
-                  {pnl != null ? mask(`${up ? '+' : ''}${formatCurrency(pnl)}`) : '—'}
+                <td data-label="P&L" className={pnl != null ? pnlTone : 'muted'}>
+                  {pnl != null ? mask(signedCurrency(pnl)) : '—'}
                 </td>
                 {hasFundEntries && <td data-label="XIRR" className={m.xirr == null ? 'muted' : m.xirr >= 0 ? 'up' : 'down'}>{m.xirr == null ? '—' : mask(formatPercent(m.xirr))}</td>}
                 {anyFolio && <td data-label="Folio" className="muted">{mask((m.folio ?? '').trim() || '—')}</td>}
@@ -822,17 +826,10 @@ function LedgerMembers({
 
 type PositionLike = ReturnType<typeof useStore>['positions'][number]
 
+// Cached: toLocaleString with options builds a new formatter on every call, which ran for every ledger row on every poll.
+const unitsFormat = numberFormatter({ maximumFractionDigits: 2 })
 function fmtUnits(n: number): string {
-  return n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
-}
-
-function valueOf(p: PositionLike, live: Record<string, LiveQuote>): number {
-  return positionValue(p, live)
-}
-
-/** General return: (current value − invested) ÷ invested × 100. */
-function mfReturnPct(p: PositionLike, live: Record<string, LiveQuote>): number | null {
-  return positionPnlPct(p, live)
+  return unitsFormat.format(n)
 }
 
 function dailyPriceMove(position: Position, live: Record<string, LiveQuote>): { delta: number | null; pct: number | null } {
@@ -850,20 +847,17 @@ function moveTrend(move: number | null): string {
   return move == null || move === 0 ? 'muted' : move > 0 ? 'up' : 'down'
 }
 
-function signedPrice(value: number): string {
-  return `${value > 0 ? '+' : ''}${formatCurrency(value)}`
-}
-
+/** Zero is neither a gain nor a loss. */
 function LastTrade({ price, dayMove, hideValues, imported = false }: { price: number | null; dayMove: number | null; hideValues: boolean; imported?: boolean }) {
   const trend = moveTrend(dayMove)
   return (
     <span className="last-trade">
       <span className={`ltp ltp--${trend}`}>
         {!hideValues && dayMove != null && dayMove !== 0 && <span className="ltp-arrow" aria-hidden="true">{dayMove > 0 ? '▲' : '▼'}</span>}
-        {hideValues ? '••••••' : price == null ? '—' : formatCurrency(price)}
+        {privateValue(price == null ? '—' : formatCurrency(price), hideValues)}
       </span>
       <span className={`last-trade-move ${imported ? 'last-trade-source' : ''} ${hideValues ? 'muted' : trend}`} aria-label={hideValues ? 'Day move hidden' : imported ? 'Price source' : 'Day move'}>
-        {hideValues ? '••••••' : imported ? 'Imported' : dayMove == null ? '—' : signedPrice(dayMove)}
+        {privateValue(imported ? 'Imported' : dayMove == null ? '—' : signedCurrency(dayMove), hideValues)}
       </span>
     </span>
   )

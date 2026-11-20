@@ -15,6 +15,14 @@ describe('settings persistence', () => {
     expect(loadSettings()).toMatchObject({ allowExternalData: true, mode: 'light', hideValues: true })
     expect(JSON.parse(localStorage.getItem('finverse:settings')!).allowExternalData).toBe(true)
   })
+
+  it('keeps keyboard focus outlines on unless explicitly disabled', () => {
+    localStorage.removeItem('finverse:settings')
+    expect(loadSettings().focusRings).toBe(true)
+    localStorage.setItem('finverse:settings', JSON.stringify({ focusRings: false }))
+    expect(loadSettings().focusRings).toBe(false)
+    expect(JSON.parse(localStorage.getItem('finverse:settings')!).focusRings).toBe(false)
+  })
   it.each(['custom', 'cobalt'])('migrates the saved %s accent to fixed blue and removes custom colors', (accent) => {
     localStorage.setItem('finverse:settings', JSON.stringify({ ...loadSettings(), accent, customAccent: '#123abc' }))
     const settings = loadSettings()
@@ -32,7 +40,7 @@ describe('settings persistence', () => {
   it('removes retired connection settings and browser data while preserving preferences and portfolios', () => {
     const preferences = {
       currency: 'INR', allowExternalData: true, density: 'compact', accent: 'cobalt',
-      mode: 'light', hideValues: true, marketIndices: ['nifty-bank', 'nifty-50'],
+      mode: 'light', hideValues: true, focusRings: false, marketIndices: ['nifty-bank', 'nifty-50'],
     }
     localStorage.setItem('finverse:settings', JSON.stringify({
       ...preferences, accent: 'custom', customAccent: '#7c6cff', provider: 'openai', apiKey: 'retired-key', model: 'retired-model',
@@ -70,7 +78,7 @@ describe('settings persistence', () => {
         const preferences = loadSettings()
         expect(preferences).toEqual({
           currency: 'INR', allowExternalData: true, density: 'comfortable',
-          accent: 'cobalt', mode: 'dark', hideValues: false, marketIndices: ['nifty-bank', 'nifty-50'],
+          accent: 'cobalt', mode: 'dark', hideValues: false, focusRings: true, marketIndices: ['nifty-bank', 'nifty-50'],
         })
         expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
       }, raw).not.toThrow()
@@ -83,7 +91,7 @@ describe('settings persistence', () => {
     vi.stubGlobal('sessionStorage', { removeItem: blocked })
     expect(loadSettings()).toEqual({
       currency: 'INR', allowExternalData: true, density: 'comfortable',
-      accent: 'cobalt', mode: 'dark', hideValues: false, marketIndices: ['nifty-bank', 'nifty-50'],
+      accent: 'cobalt', mode: 'dark', hideValues: false, focusRings: true, marketIndices: ['nifty-bank', 'nifty-50'],
     })
     expect(saveSettings(loadSettings())).toBe(false)
   })

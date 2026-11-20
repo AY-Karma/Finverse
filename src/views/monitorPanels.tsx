@@ -4,6 +4,7 @@ import type { MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
 import { privateValue, visibleQuotes } from '../privacy'
 import { dateFormatter, numberFormatter } from '../formatters'
+import { signedPercent } from '../valuation'
 
 type PanelProps = { controller: MonitorController }
 export type RuleRequest = { holdingId: string; revision: number }
@@ -203,21 +204,16 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
     <div className="mp-rule-list">
       {availableRules.map((rule) => {
         const observation = observations.get(rule.id)!
-        const state = controller.hideValues ? rule.active ? 'Active' : 'Paused' : observation.state
+        const triggered = !controller.hideValues && observation.state === 'Active' && observation.matched
+        const badge = !rule.active ? 'Paused' : triggered ? 'Triggered' : !controller.hideValues && observation.state !== 'Active' ? observation.state : null
         const position = controller.positions.find((holding) => holding.id === rule.holdingId)
+        const quote = !controller.hideValues && observation.state === 'Active' ? observation.quote : undefined
+        const distance = observation.distance
         return <article className={`mp-rule-row${rule.active ? '' : ' mp-rule-paused'}`} key={rule.id}>
         <div className="mp-row-main">
           <div className="mp-rule-summary">
             <strong>{privateValue(position?.name || position?.ticker || rule.holding, controller.hideValues)}</strong>
-            <span className={`mp-kind mp-rule-state mp-rule-state--${state.toLowerCase()}`}>{state}</span>
-          </div>
-          <div className="mp-rule-controls">
-            <p className="mp-rule-condition" aria-label={`${privateValue(rule.holding, controller.hideValues)}: ${conditionLabel(rule)}`}>
-              {!controller.hideValues && <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d={rule.condition === 'price_above' ? 'M4 17l6-6 4 4 6-10M14 5h6v6' : rule.condition === 'price_below' ? 'M4 7l6 6 4-4 6 10M14 19h6v-6' : 'M3 12h4l3-7 4 14 3-7h4'} />
-              </svg>}
-              {conditionLabel(rule)}
-            </p>
+            {badge && <span className={`mp-kind mp-rule-state mp-rule-state--${badge.toLowerCase()}`}>{badge}</span>}
             <details className="mp-rule-menu" onBlur={(event) => {
               if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute('open')
             }} onKeyDown={(event) => {
@@ -241,12 +237,17 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
               </div>
             </details>
           </div>
-          {!controller.hideValues && observation.quote && <p className="mp-rule-observation">
-            {rule.condition === 'daily_move' ? `${observation.quote.changePct! > 0 ? '+' : ''}${observation.quote.changePct!.toFixed(2)}% day move` : numberFormatter({ style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(observation.quote.price)}
-            {' · '}{observation.matched ? 'Condition met' : observation.distance === 0 ? 'At watch level' : observation.distance !== undefined ? `${observation.distance.toFixed(2)}${rule.condition === 'daily_move' ? ' pts' : '%'} to level` : 'Distance unavailable'}
-            <br />{observation.quote.source === 'nav' ? 'Published NAV' : observation.quote.source === 'nse-close' ? 'NSE close' : 'Yahoo Finance'} · {dateFormatter({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(observation.quote.at)} IST
-          </p>}
-          {!controller.hideValues && observation.state === 'Waiting' && <p className="mp-rule-observation">{controller.allowExternalData ? 'Waiting for a recent provider observation.' : 'Waiting for market data to be enabled.'}</p>}
+          <p className="mp-rule-condition" data-condition={rule.condition}>
+            {!controller.hideValues && <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={rule.condition === 'price_above' ? 'M4 17l6-6 4 4 6-10M14 5h6v6' : rule.condition === 'price_below' ? 'M4 7l6 6 4-4 6 10M14 19h6v-6' : 'M3 12h4l3-7 4 14 3-7h4'} />
+            </svg>}
+            <span>{conditionLabel(rule)}</span>
+            {quote && <span className="mp-rule-observation" title={`${quote.source === 'nav' ? 'Published NAV' : quote.source === 'nse-close' ? 'NSE close' : 'Yahoo Finance'} · ${dateFormatter({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(quote.at)} IST`}>
+              {rule.condition === 'daily_move' ? `${signedPercent(quote.changePct!)} today` : `${numberFormatter({ style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(quote.price)} now`}
+              {!triggered && distance !== undefined && <span className="mp-rule-gap" data-near={distance < 2}>{distance === 0 ? 'at level' : `${distance.toFixed(1)}${rule.condition === 'daily_move' ? ' pts' : '%'} away`}</span>}
+            </span>}
+          </p>
+          {!controller.hideValues && observation.state === 'Waiting' && !controller.allowExternalData && <p className="mp-rule-wait">Market data is paused.</p>}
         </div>
       </article>})}
       {unavailableRules.map((rule) => <article className="mp-rule-row mp-rule-paused" key={rule.id}>
@@ -290,7 +291,7 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
           {condition === 'daily_move' ? 'Move threshold (%)' : 'Price threshold (₹)'}
           <input type="number" required min="0.01" step="0.01" value={controller.hideValues ? '' : threshold} onChange={(event) => setThreshold(event.target.value)} />
         </label>
-        <p className="mp-muted">{condition === 'daily_move' ? 'Checks the size of either an upward or downward daily move.' : controller.allowExternalData ? 'Uses a fresh provider quote only to suggest a starting level. Enter a value if no quote is available.' : 'External market data is off, so enter a price level manually.'} No background notification is sent.</p>
+        <p className="mp-muted">{condition === 'daily_move' ? 'Checks the size of either an upward or downward daily move.' : controller.allowExternalData ? 'Uses a fresh provider quote only to suggest a starting level. Enter a value if no quote is available.' : 'Market data is paused, so enter a price level manually.'} No background notification is sent.</p>
         {error && <p role="alert">{error}</p>}
         <div className="mp-actions">
           <button type="submit" disabled={workspaceReadOnly}>Save rule</button>

@@ -7,9 +7,8 @@ import { PRIVATE_VALUE_MASK } from '../privacy'
 import type { Position, Settings } from '../types'
 import { ResearchView } from './ResearchView'
 
-const state = vi.hoisted(() => ({ positions: [] as Position[], liveQuotes: {}, settings: {} as Settings, resolvePath: vi.fn(), history: vi.fn() }))
+const state = vi.hoisted(() => ({ positions: [] as Position[], liveQuotes: {}, settings: {} as Settings, history: vi.fn() }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
-vi.mock('../research', async (original) => ({ ...await original<typeof import('../research')>(), resolveScreenerCompanyPath: state.resolvePath }))
 vi.mock('../marketData', () => ({ marketData: { history: state.history } }))
 vi.mock('./HistoryPanel', () => ({ HistoryPanel: ({ position, active }: { position: Position; active: boolean }) => <div className="history-panel" data-history-holding={position.id} data-active={String(active)} /> }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -22,13 +21,12 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/app/research')
   state.settings = { ...loadSettings(), allowExternalData: false }
   state.positions = [position]
-  state.resolvePath.mockResolvedValue(null)
   state.history.mockResolvedValue([])
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); state.resolvePath.mockReset(); state.history.mockReset() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); state.history.mockReset() })
 async function render(active = true) { await act(async () => root.render(<ResearchView active={active} onRequestImport={vi.fn()} />)) }
 async function click(text: string) {
   const button = [...container.querySelectorAll('button')].find((item) => item.textContent?.trim() === text)
@@ -46,7 +44,6 @@ describe('research desk', () => {
     const importButton = welcome.querySelector<HTMLButtonElement>('button')!
     await act(async () => importButton.click())
     expect(onRequestImport).toHaveBeenCalledOnce()
-    expect(state.resolvePath).not.toHaveBeenCalled()
     expect(state.history).not.toHaveBeenCalled()
   })
 
@@ -69,27 +66,18 @@ describe('research desk', () => {
     expect(container.querySelector('.history-panel')?.getAttribute('data-active')).toBe('false')
   })
 
-  it('renders a bounded list and resolves only the selected company, cancelling abandoned requests', async () => {
+  it('renders a bounded list without sending holdings to third-party lookups', async () => {
     state.settings.allowExternalData = true
     state.positions = Array.from({ length: 5000 }, (_, index) => ({ ...position, id: String(index), ticker: `HOLD${index}`, name: `Holding ${String(index).padStart(4, '0')}` }))
-    const signals: AbortSignal[] = []
-    state.resolvePath.mockImplementation((_ticker: string, signal: AbortSignal) => {
-      signals.push(signal)
-      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
-    })
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
     await render()
     expect(container.querySelectorAll('.rd-holding')).toHaveLength(24)
-    expect(state.resolvePath).toHaveBeenCalledTimes(1)
-    expect(state.history).not.toHaveBeenCalled()
     await click('Next')
-    expect(signals[0].aborted).toBe(true)
-    expect(state.resolvePath).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('Page 2 of 209')
-    state.settings.allowExternalData = false
-    await render()
-    expect(signals.every((signal) => signal.aborted)).toBe(true)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(state.history).not.toHaveBeenCalled()
     expect(container.querySelector('img[src^="https:"]')).toBeNull()
-    expect(container.querySelectorAll('.rd-holding')).toHaveLength(24)
   })
 
   it('keeps missing valuations unknown and withholds incomplete portfolio weights', async () => {
@@ -98,7 +86,6 @@ describe('research desk', () => {
     expect(container.querySelector('.rd-metrics dd')?.textContent).toBe('Unpriced')
     expect(container.querySelectorAll('.rd-metrics dd')[1].textContent).toBe('Unavailable')
     expect(container.textContent).toContain('Portfolio weight needs complete prices in one currency')
-    expect(state.resolvePath).not.toHaveBeenCalled()
     expect(state.history).not.toHaveBeenCalled()
   })
 
@@ -120,22 +107,21 @@ describe('research desk', () => {
     expect(container.querySelector('.rd-avatar img')).toBeNull()
     expect(container.querySelector('a[href*="TCS"], a[href*="Tata"]')).toBeNull()
     expect(container.querySelector<HTMLInputElement>('[aria-label="Search research holdings"]')?.disabled).toBe(true)
+    expect(container.querySelector('.history-panel')).toBeNull()
     state.settings.hideValues = false
     await render()
     expect(container.textContent).toContain(position.name)
     expect(container.querySelector('.rd-avatar img')).not.toBeNull()
+    expect(container.querySelector('.history-panel')).not.toBeNull()
   })
 
-  it('hides an open Sources dossier and cancels its lookup when masking changes', async () => {
+  it('hides an open Sources dossier when masking changes', async () => {
     state.settings.allowExternalData = true
-    state.resolvePath.mockImplementation(() => new Promise(() => {}))
     await render()
-    const signal = state.resolvePath.mock.lastCall![1] as AbortSignal
     await click('Sources')
     expect(container.querySelector('.rd-source')).not.toBeNull()
     state.settings.hideValues = true
     await render()
-    expect(signal.aborted).toBe(true)
     expect(container.textContent).not.toMatch(/Tata Consultancy|TCS/)
     expect(container.querySelector('.rd-source, .rd-avatar img')).toBeNull()
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Sources')

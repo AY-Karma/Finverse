@@ -1,4 +1,4 @@
-import { fetchLatestNseClose, type NseCloseState } from './nseClosingPrices.js'
+import { fetchLatestNseClose, type NseCloseState } from './_nseClosingPrices.js'
 import {
   MAX_MARKET_SYMBOLS,
   isMarketSymbol,
@@ -6,12 +6,14 @@ import {
   type QuoteErrorPayload,
   type QuotesPayload,
 } from '../src/marketDataProtocol.js'
-import { createRequestBudget, readBoundedText } from './requestBudget.js'
-import { createNseSymbolResolver } from './nseSymbolChanges.js'
-import { getMarketCalendarInfo } from '../src/marketCalendar.js'
+import { cdnCache, createRequestBudget, readBoundedText } from './_requestBudget.js'
+import { createNseSymbolResolver } from './_nseSymbolChanges.js'
+import { getMarketCalendarInfo, isRegularMarketOpen, isSpecialMarketOpen } from '../src/marketCalendar.js'
 
 const UPSTREAM_TIMEOUT_MS = 4_000
 const YAHOO_SYMBOL_LIMIT = 20
+// Yahoo's spark snapshots last 300s; anything far beyond that is not a snapshot lifetime we understand.
+const MAX_SNAPSHOT_SECONDS = 600
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000
 const BSE_QUOTES_DISABLED = 'Delayed BSE quotes are disabled. Use a verified NSE pricing mapping.'
 
@@ -43,16 +45,25 @@ const RESPONSE_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 }
 
-const CACHE_HEADERS = {
-  ...RESPONSE_HEADERS,
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=1, must-revalidate',
-}
+// Just under the app's 5s beat: each beat reads the provider afresh, while identical requests landing together share one read.
+const LIVE_CACHE_MS = 4_000
+const CLOSED_CACHE_MS = 60_000
 
-function json(data: unknown, status: number, cache = false): Response {
+function json(data: unknown, status: number, cacheMs = 0): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: cache ? CACHE_HEADERS : RESPONSE_HEADERS,
+    headers: cacheMs ? { ...RESPONSE_HEADERS, ...cdnCache(cacheMs / 1000) } : RESPONSE_HEADERS,
   })
+}
+
+function sessionOpen(at: number): boolean {
+  return isRegularMarketOpen(new Date(at)) || isSpecialMarketOpen(new Date(at))
+}
+
+/** Indian listings cannot move while NSE is shut, unless a session opens within the longer cache window. */
+function quoteCacheMs(symbols: string[], at: number): number {
+  const indian = symbols.every((symbol) => symbol.endsWith('.NS') || symbol.endsWith('.BO'))
+  return indian && !sessionOpen(at) && !sessionOpen(at + CLOSED_CACHE_MS) ? CLOSED_CACHE_MS : LIVE_CACHE_MS
 }
 
 function parseSymbols(request: Request): { symbols: string[] } | { error: string } {
@@ -83,12 +94,26 @@ function movement(price: number, previousClose: number | null) {
   return { change, changePct: rounded((change / previousClose) * 100) }
 }
 
+/**
+ * When Yahoo's shared snapshot for this request can next change: its max-age minus its current age.
+ * Null when the copy is already past its lifetime (Yahoo is revalidating) or the headers are missing.
+ */
+export function yahooSnapshotExpiry(headers: Headers, now: number): number | null {
+  const maxAge = /(?:^|,)\s*max-age=(\d+)/i.exec(headers.get('cache-control') ?? '')
+  const age = Number(headers.get('age') ?? 0)
+  if (!maxAge || !Number.isFinite(age) || age < 0) return null
+  const remaining = Number(maxAge[1]) - age
+  return remaining > 0 && remaining <= MAX_SNAPSHOT_SECONDS ? now + remaining * 1000 : null
+}
+
+interface YahooChunkResult { quotes: MarketQuotePayload[]; error?: string; freshUntil?: number | null }
+
 async function fetchYahooQuoteChunk(
   symbols: string[],
   fetcher: typeof fetch,
   signal: AbortSignal,
   now: number,
-): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
+): Promise<YahooChunkResult> {
   const url = new URL('https://query1.finance.yahoo.com/v7/finance/spark')
   url.searchParams.set('symbols', symbols.join(','))
   url.searchParams.set('range', '1d')
@@ -129,17 +154,17 @@ async function fetchYahooQuoteChunk(
       })
     }
     return quotes.length > 0
-      ? { quotes }
+      ? { quotes, freshUntil: yahooSnapshotExpiry(response.headers, now) }
       : { quotes, error: 'Quote provider returned no usable prices.' }
   } catch {
     return { quotes: [], error: 'Quote provider could not be reached.' }
   }
 }
 
-async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal: AbortSignal, now: number): Promise<{ quotes: MarketQuotePayload[]; error?: string }> {
+async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal: AbortSignal, now: number): Promise<YahooChunkResult> {
   const chunks: string[][] = []
   for (let start = 0; start < symbols.length; start += YAHOO_SYMBOL_LIMIT) chunks.push(symbols.slice(start, start + YAHOO_SYMBOL_LIMIT))
-  const results: Awaited<ReturnType<typeof fetchYahooQuoteChunk>>[] = []
+  const results: YahooChunkResult[] = []
   let cursor = 0
   await Promise.all(Array.from({ length: Math.min(2, chunks.length) }, async () => {
     while (cursor < chunks.length && !signal.aborted) {
@@ -148,7 +173,10 @@ async function fetchYahooQuotes(symbols: string[], fetcher: typeof fetch, signal
     }
   }))
   const errors = [...new Set(results.flatMap((result) => result.error ? [result.error] : []))]
-  return { quotes: results.flatMap((result) => result.quotes), ...(errors.length ? { error: errors.join(' ') } : {}) }
+  // The whole response can only change once every chunk's snapshot can, so the earliest expiry wins; any unknown makes it unknown.
+  const expiries = results.map((result) => result?.freshUntil ?? null)
+  const freshUntil = expiries.length && expiries.every((value) => value !== null) ? Math.min(...expiries as number[]) : null
+  return { quotes: results.flatMap((result) => result.quotes), freshUntil, ...(errors.length ? { error: errors.join(' ') } : {}) }
 }
 
 async function nseFallbackQuotes(
@@ -194,7 +222,8 @@ export function createQuoteHandler(
     const parsed = parseSymbols(request)
     if ('error' in parsed) return json({ error: parsed.error }, 400)
 
-    return budget(parsed.symbols.join(','), 1_000, async (signal) => {
+    const cacheMs = quoteCacheMs(parsed.symbols, now())
+    return budget(parsed.symbols.join(','), cacheMs, async (signal) => {
       const started = Date.now()
       const fetchedAt = now()
       const yahoo = await fetchYahooQuotes(parsed.symbols.filter((symbol) => !symbol.endsWith('.BO')), fetcher, signal, fetchedAt)
@@ -254,13 +283,16 @@ export function createQuoteHandler(
           symbol,
           message: symbol.endsWith('.BO') ? BSE_QUOTES_DISABLED : stale.has(symbol) ? `The provider quote is older than the last completed NSE session (${completedDate}).` : yahoo.error ?? 'No quote returned by the provider.',
         }))
+      // Only a complete, straight-from-Yahoo answer can say when Yahoo will next have something new.
+      const nextUpdateAt = !errors.length && quotes.every((quote) => quote.source === 'yahoo' && !('resolvedSymbol' in quote)) ? yahoo.freshUntil : null
       const payload: QuotesPayload = {
         provider: providerFor(quotes),
         fetchedAt: new Date(fetchedAt).toISOString(),
         quotes,
         errors,
+        ...(nextUpdateAt ? { nextUpdateAt: new Date(nextUpdateAt).toISOString() } : {}),
       }
-      return json(payload, quotes.length > 0 ? 200 : 502, quotes.length > 0)
+      return json(payload, quotes.length > 0 ? 200 : 502, quotes.length > 0 ? cacheMs : 0)
     })
   }
 }

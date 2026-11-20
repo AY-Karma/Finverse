@@ -5,7 +5,7 @@ import { isEventDate, isOfficialEventUrl } from './marketEventsProtocol'
 import type { MarketStory } from './marketStories'
 import { holdingIdentity } from './monitor'
 import type { StoryEdition } from './recapSchedule'
-import { formatCurrency, quoteKey } from './valuation'
+import { quoteKey, signedCurrency } from './valuation'
 
 export type WeeklyStoryContent = {
   kind: 'sectors'
@@ -62,7 +62,7 @@ function sectorStory(snapshot: InvestmentSnapshot, histories: HoldingPriceHistor
   return {
     id: `weekly-sectors:${edition.key}`, kind: 'weekly-sectors', eyebrow: 'Weekly sector drivers',
     title: `${leader.label} ${net < 0 ? 'weighed on the week.' : 'led the week.'}`,
-    metric: `${net > 0 ? '+' : ''}${formatCurrency(net)}`, metricLabel: 'Net price move in classified stocks', tone: tone(net), rows: [],
+    metric: signedCurrency(net), metricLabel: 'Net price move in classified stocks', tone: tone(net), rows: [],
     weekly: { kind: 'sectors', sectors: ranked, net, covered: rows.length, total: uniqueMarketHoldings(stocks).length, from: opening, through: closing },
     note: `Current stock quantities at matching ${opening} and ${closing} closes. These are contributions from your stocks, not sector indices.`,
     actionLabel: 'Explore sector movements', target: 'insights', from: opening, through: closing,

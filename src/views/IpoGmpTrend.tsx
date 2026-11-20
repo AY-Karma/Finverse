@@ -8,6 +8,9 @@ const money = numberFormatter({ style: 'currency', currency: 'INR', maximumFract
 const day = dateFormatter({ day: 'numeric', month: 'short', timeZone: 'UTC' })
 const dateLabel = (date: string) => day.format(new Date(`${date}T00:00:00Z`))
 const DAY_MS = 86_400_000
+const PLOT = { width: 360, height: 200, inset: 16 }
+// A zero-length round-capped stroke stays a circle when the SVG is stretched to the container width.
+const dot = (x: number, y: number) => `M${x.toFixed(2)} ${y.toFixed(2)}h0`
 
 function geometry(points: IpoGmpPoint[], width: number, height: number, inset: number) {
   const start = Date.parse(points[0].date), end = Date.parse(points.at(-1)!.date)
@@ -42,10 +45,10 @@ export function IpoGmpTrend({ name, points, sourceUrl, status, onRetry, onClose,
   const selectedIndex = points.findIndex((point) => point.date === selected)
   const activeIndex = selectedIndex < 0 ? points.length - 1 : selectedIndex
   const active = points[activeIndex]
-  const plot = points.length ? geometry(points, 360, 164, 16) : null
+  const plot = points.length ? geometry(points, PLOT.width, PLOT.height, PLOT.inset) : null
   const selectFromPointer = (event: PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
-    const x = Math.max(16, Math.min(344, (event.clientX - rect.left) / rect.width * 360))
+    const x = Math.max(PLOT.inset, Math.min(PLOT.width - PLOT.inset, (event.clientX - rect.left) / rect.width * PLOT.width))
     if (!plot) return
     const index = plot.coordinates.reduce((nearest, point, index) => Math.abs(point.x - x) < Math.abs(plot.coordinates[nearest].x - x) ? index : nearest, 0)
     setSelected(points[index].date)
@@ -66,17 +69,18 @@ export function IpoGmpTrend({ name, points, sourceUrl, status, onRetry, onClose,
     {plot && active ? <>
       <div className="mi-trend-reading" aria-live="polite"><time dateTime={active.date}>{dateLabel(active.date)}</time><strong>{money.format(active.amount)}</strong></div>
       <div className="mi-trend-chart"><div className="mi-trend-scale" aria-hidden="true"><span>{money.format(plot.high)}</span>{plot.high !== plot.low && <span>{money.format(plot.low)}</span>}</div><div className="mi-trend-series"><div className="mi-trend-plot" role="slider" tabIndex={0} aria-label={`${name} daily GMP`} aria-valuemin={0} aria-valuemax={points.length - 1} aria-valuenow={activeIndex} aria-valuetext={`${dateLabel(active.date)}, GMP ${money.format(active.amount)}`} onKeyDown={selectFromKeyboard} onPointerDown={selectFromPointer} onPointerMove={(event) => { if (event.pointerType === 'mouse' || event.buttons === 1) selectFromPointer(event) }}>
-        <svg viewBox="0 0 360 164" preserveAspectRatio="none" fill="none" data-tone={plot.tone} aria-hidden="true">
-          <path className="mi-trend-grid" d="M16 16H344M16 82H344M16 148H344" />
+        <svg viewBox={`0 0 ${PLOT.width} ${PLOT.height}`} preserveAspectRatio="none" fill="none" data-tone={plot.tone} aria-hidden="true">
+          <path className="mi-trend-grid" d={`M${PLOT.inset} ${PLOT.inset}H${PLOT.width - PLOT.inset}M${PLOT.inset} ${PLOT.height / 2}H${PLOT.width - PLOT.inset}M${PLOT.inset} ${PLOT.height - PLOT.inset}H${PLOT.width - PLOT.inset}`} />
           <path d={plot.line} stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
-          {plot.coordinates.map((point, index) => <circle key={points[index].date} cx={point.x} cy={point.y} r="2.5" fill="currentColor" />)}
-          <path className="mi-trend-cursor" d={`M${plot.coordinates[activeIndex].x} 16V148`} />
-          <circle cx={plot.coordinates[activeIndex].x} cy={plot.coordinates[activeIndex].y} r="5" fill="var(--surface-1)" stroke="currentColor" strokeWidth="2" />
+          <path d={plot.coordinates.map((point) => dot(point.x, point.y)).join('')} stroke="currentColor" strokeWidth="5" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+          <path className="mi-trend-cursor" d={`M${plot.coordinates[activeIndex].x} ${PLOT.inset}V${PLOT.height - PLOT.inset}`} />
+          <path d={dot(plot.coordinates[activeIndex].x, plot.coordinates[activeIndex].y)} stroke="currentColor" strokeWidth="12" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+          <path d={dot(plot.coordinates[activeIndex].x, plot.coordinates[activeIndex].y)} stroke="var(--surface-1)" strokeWidth="8" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
         </svg>
       </div>
       <div className="mi-trend-dates"><time dateTime={points[0].date}>{dateLabel(points[0].date)}</time>{points.length > 1 && <time dateTime={points.at(-1)!.date}>{dateLabel(points.at(-1)!.date)}</time>}</div>
       </div></div>
-      <p className="mi-trend-source">{points.length === 1 ? 'One reported day' : 'Reported days only'}{sourceUrl && <> · <a href={sourceUrl} target="_blank" rel="noopener noreferrer">GMP Today <ActionIcon name="external" /></a></>}</p>
+      <p className="mi-trend-source">{points.length === 1 ? 'One reported day' : 'Reported days only'}{sourceUrl && <> · <a href={sourceUrl} target="_blank" rel="noopener noreferrer">Xflot <ActionIcon name="external" /></a></>}</p>
       {status === 'error' && <div className="mi-trend-message" role="status"><span>Showing saved history.</span><button className="mp-text-button" type="button" onClick={onRetry}>Retry</button></div>}
     </> : <div className="mi-trend-message" role="status"><p>{status === 'loading' ? 'Loading daily GMP…' : status === 'error' ? 'Daily GMP could not be loaded.' : 'Daily GMP history is unavailable for this IPO.'}</p>{status === 'error' && <button type="button" className="mp-text-button" onClick={onRetry}>Try again</button>}</div>}
   </section>

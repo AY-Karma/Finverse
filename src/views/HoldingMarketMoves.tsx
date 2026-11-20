@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LiveQuote, Position } from '../types'
 import { marketData } from '../marketData'
 import { calculateHoldingMarketMoves, holdingMovePeriod, holdingMoveToday, uniqueMarketHoldings, type HoldingMoveRange, type HoldingPriceHistories, type HoldingMarketMove } from '../holdingMarketMoves'
-import { formatCurrency, formatPercent, hasSupportedValuationCurrency, quoteKey } from '../valuation'
+import { formatCurrency, formatPercent, hasSupportedValuationCurrency, quoteKey, signedCurrency } from '../valuation'
 import { DitherBar } from './DitherBar'
 import { MovementCalculationHelp } from './MovementCalculationHelp'
 import './holdingMarketMoves.css'
@@ -59,7 +59,7 @@ export function HoldingMarketMoves({ positions, quotes, allowExternalData, range
 
   const active = state.key === key ? state : { histories: {}, loading: true }
   const result = useMemo(() => calculateHoldingMarketMoves(holdings, quotes, active.histories, period?.from ?? '', today), [holdings, quotes, active.histories, period?.from, today])
-  if (!allowExternalData) return <p className="hint">Enable external market data in Settings to see period moves.</p>
+  if (!allowExternalData) return <p className="hint">Market data is paused because this workspace changed in another tab. Reload to continue.</p>
   if (!period) return <p className="hint">Choose a valid start date through today.</p>
   if (active.loading && !result.rows.length) return <p className="hint" role="status">Loading market prices…</p>
   return <>
@@ -91,11 +91,11 @@ export function HoldingMarketMoveResults({ result, from, compact = false }: {
       {largest.length > 0 ? <ol className="holding-move-ranked-list" aria-label="Largest period contributions by amount">
         {largest.map((row) => <li className="holding-move-ranked-row" key={row.key}>
           <span className="holding-move-identity"><span className="holding-move-name" title={row.label}>{row.label}</span><span className="holding-move-pct">{formatPercent(row.changePct)}</span></span>
-          <strong className={row.change > 0 ? 'up' : 'down'}>{row.change > 0 ? '+' : ''}{formatCurrency(row.change)}</strong>
+          <strong className={row.change > 0 ? 'up' : 'down'}>{signedCurrency(row.change)}</strong>
           <DitherBar className="holding-move-ranked-track" segments={[{ value: Math.abs(row.change), color: row.change > 0 ? 'green' : 'red' }]} scale={maximum} />
         </li>)}
       </ol> : <p className="hint">No rise or fall over this period.</p>}
-      {others.length > 0 && <div className="holding-move-remainder"><span>Other holdings <small>{others.length}</small></span><strong className={remainingChange > 0 ? 'up' : remainingChange < 0 ? 'down' : undefined}>{remainingChange > 0 ? '+' : ''}{formatCurrency(remainingChange)}</strong></div>}
+      {others.length > 0 && <div className="holding-move-remainder"><span>Other holdings <small>{others.length}</small></span><strong className={remainingChange > 0 ? 'up' : remainingChange < 0 ? 'down' : undefined}>{signedCurrency(remainingChange)}</strong></div>}
     </> : <div className="contribution-columns">{column('Positive moves', result.rows.filter((row) => row.change > 0).sort((a, b) => b.change - a.change), true)}{column('Negative moves', result.rows.filter((row) => row.change < 0).sort((a, b) => a.change - b.change), false)}</div>}
     <details className="holding-move-details" onToggle={(event) => { if (event.target === event.currentTarget) setDetailsOpen(event.currentTarget.open) }}>
       <summary>All holding moves <span>{result.coveredCount}</span></summary>
