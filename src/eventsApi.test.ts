@@ -60,6 +60,15 @@ describe('company events API', () => {
     expect(second.events[0].symbol).toBe('OTHER')
   })
 
+  it('bounds the meeting calendar to the same 90-day window as corporate actions', async () => {
+    const fetcher = provider()
+    await createEventsHandler({ fetcher, now: () => NOW })(request())
+    const calendar = new URL(fetcher.mock.calls.map(([url]) => url.toString()).find((url) => url.includes('event-calendar'))!)
+    expect(calendar.searchParams.get('index')).toBe('equities')
+    expect(calendar.searchParams.get('from_date')).toMatch(/^\d{2}-\d{2}-\d{4}$/)
+    expect(calendar.searchParams.get('to_date')).toMatch(/^\d{2}-\d{2}-\d{4}$/)
+  })
+
   it('rechecks filings every fifteen minutes while retaining slower calendars and identity references', async () => {
     let time = NOW
     const fetcher = provider()

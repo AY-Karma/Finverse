@@ -532,7 +532,7 @@ export function InteractiveTrendChart({
         {areaPath && (ditherColor
           ? <DitherAreaFill points={ditherPoints} x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} color={ditherColor} />
           : <path d={areaPath} fill={`url(#trend-area-${chartId})`} className="interactive-trend-area" />)}
-        {references.map((line) => <g key={line.label} className="interactive-trend-reference">
+        {references.map((line) => <g key={`${line.label}-${line.value}`} className="interactive-trend-reference">
           <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} className="interactive-trend-reference-underlay" />
           <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} stroke={line.color} className="interactive-trend-reference-line" />
         </g>)}
@@ -559,7 +559,7 @@ export function InteractiveTrendChart({
         const label = `${line.label} ${valueFormatter(line.value)}`
         const width = Math.min(plotWidth - 8, Math.max(100, label.length * 6.4 + 22))
         const y = clamp(yAt(line.value) - 30, PLOT_TOP + 2, PLOT_TOP + plotHeight - 26)
-        return <g key={line.label} className="interactive-trend-reference-label" pointerEvents="none">
+        return <g key={`${line.label}-${line.value}`} className="interactive-trend-reference-label" pointerEvents="none">
           <title>{`${line.label}: ${valueFormatter(line.value)}`}</title>
           <rect x={plotLeft + 4} y={y} width={width} height="24" rx="5" />
           <circle cx={plotLeft + 15} cy={y + 12} r="3" fill={line.color} />
@@ -611,6 +611,6 @@ export function InteractiveTrendChart({
         </g>
       })}
     </svg>
-    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{references.map((line) => <span key={line.label}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(line.value)}</b></span>)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />{differenceLabel}<b>{differenceFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
+    {hovered && <div className="interactive-trend-tooltip" style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}><strong>{DATE_FORMATTER.format(new Date(hovered.at))}{visibleTimeSpan < 2 * DAY_MS ? ` · ${TIME_FORMATTER.format(new Date(hovered.at))}` : ''}</strong>{lines.map((line) => typeof hovered[line.key] === 'number' ? <span key={line.key}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(hovered[line.key] as number)}</b></span> : null)}{references.map((line) => <span key={`${line.label}-${line.value}`}><i style={{ background: line.color }} />{line.label}<b>{valueFormatter(line.value)}</b></span>)}{primaryLine && secondaryLine && typeof hovered[primaryLine.key] === 'number' && typeof hovered[secondaryLine.key] === 'number' && <span className="interactive-trend-tooltip-difference"><i />{differenceLabel}<b>{differenceFormatter((hovered[primaryLine.key] as number) - (hovered[secondaryLine.key] as number))}</b></span>}</div>}
   </div>
 }

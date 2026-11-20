@@ -116,11 +116,12 @@ describe('Monitor IPOs', () => {
     setFeed([selected])
     await render(true, { onWatch, onUnwatch })
     await click('View Company watchable IPO details')
-    expect(container.textContent).toContain('Overview reminder on 9 Nov')
+    expect(container.querySelector('.mi-watch-action button')?.getAttribute('title')).toBe('Overview reminds you on 9 Nov')
     await click('Watch last day')
     expect(onWatch).toHaveBeenCalledExactlyOnceWith(selected)
     await render(true, { onWatch, onUnwatch, watchedIds: [selected.id] })
-    await click('Stop watching last day')
+    expect(container.querySelector('.mi-watch-action button')?.getAttribute('aria-pressed')).toBe('true')
+    await click('Watching last day')
     expect(onUnwatch).toHaveBeenCalledExactlyOnceWith(selected.id)
     await render(true, { onWatch, onUnwatch, watchReadOnly: true })
     const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find((element) => element.textContent === 'Watch last day')!
@@ -400,17 +401,37 @@ describe('Monitor IPOs', () => {
     expect(region!.textContent).toContain('100')
     const researchLinks = [...region!.querySelectorAll<HTMLAnchorElement>('.mi-links a')]
     expect(researchLinks.map((link) => link.href)).toEqual([
+      'https://www.xflot.com/ipo/one',
       'https://www.investorgain.com/report/ipo-gmp-live/331/',
       'https://www.chittorgarh.com/',
     ])
     expect(researchLinks.every((link) => link.target === '_blank' && link.rel.includes('noopener') && link.rel.includes('noreferrer'))).toBe(true)
     expect(region!.querySelector('.mi-issue-source')?.getAttribute('href')).toBe('https://www.xflot.com/ipo/one')
-    expect(region!.querySelectorAll('.mi-timeline li')).toHaveLength(2)
-    expect(region!.querySelector('.mi-timeline')!.textContent).not.toContain('not announced')
-    expect(region!.textContent).toContain('Allotment / listing dates unavailable')
+    const stages = [...region!.querySelectorAll('.mi-timeline li')]
+    expect(stages.map((stage) => stage.querySelector('.mi-step-label')?.firstChild?.textContent)).toEqual(['Opens', 'Closes', 'Allotment', 'Listing'])
+    expect(stages.slice(2).map((stage) => stage.getAttribute('data-unknown'))).toEqual(['true', 'true'])
+    expect(stages.slice(2).map((stage) => stage.querySelector('strong')?.textContent)).toEqual(['TBA', 'TBA'])
     await click('View Company one IPO details')
     expect(container.querySelector('[role="region"][aria-label="Company one IPO details"]')).toBeNull()
     expect(rowButtons()[0].getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('counts down to future stages beside their labels', async () => {
+    const istDay = (offset: number) => new Date(Date.now() + 19_800_000 + offset * 86_400_000).toISOString().slice(0, 10)
+    setFeed([issue('soon', { openDate: istDay(-2), closeDate: istDay(0), allotmentDate: istDay(1), listingDate: istDay(3) })])
+    await render()
+    await click('View Company soon IPO details')
+    const labels = [...container.querySelectorAll('.mi-step-label')].map((label) => (label.querySelector('.mi-due-long') ?? label.querySelector('.mi-step-due'))?.textContent?.trim() ?? '')
+    expect(labels).toEqual(['', '(today)', '(in 1 day)', '(in 3 days)'])
+  })
+
+  it('marks missing dates TBA only while an issue is still open or upcoming', async () => {
+    setFeed([issue('closed', { status: 'CLOSED', closeDate: '2026-11-06', allotmentDate: null, listingDate: null })])
+    await render()
+    await click('Recent')
+    await click('View Company closed IPO details')
+    const dates = [...container.querySelectorAll('.mi-timeline strong')].map((date) => date.textContent)
+    expect(dates.slice(2)).toEqual(['Not reported', 'Not reported'])
   })
 
   it('distinguishes a reported zero premium from missing GMP', async () => {
@@ -432,19 +453,16 @@ describe('Monitor IPOs', () => {
     expect(container.querySelector('a[href="https://www.xflot.com/"]')).not.toBeNull()
     await click('View Company zero IPO details')
     const region = container.querySelector<HTMLElement>('[role="region"][aria-label="Company zero IPO details"]')!
-    expect(region.textContent).toContain('Page updated')
-    expect(region.textContent).toContain('Quote time unavailable')
-    expect(region.textContent).not.toContain('Reported 7 Nov')
+    expect(region.querySelector('.mi-gmp-note')).toBeNull()
   })
 
-  it('keeps unavailable milestones concise instead of creating empty timeline stages', async () => {
+  it('replaces the timeline with one line when no dates are announced', async () => {
     setFeed([issue('unknown-dates', { openDate: null, closeDate: null, allotmentDate: null, listingDate: null })])
     await render()
     await click('View Company unknown-dates IPO details')
     const region = container.querySelector<HTMLElement>('[role="region"][aria-label="Company unknown-dates IPO details"]')!
     expect(region.querySelector('.mi-timeline')).toBeNull()
-    expect(region.querySelectorAll('.mi-unannounced')).toHaveLength(1)
-    expect(region.textContent).toContain('Allotment / listing dates unavailable')
+    expect(region.querySelector('.mi-unannounced')?.textContent).toBe('Dates to be announced')
   })
 
   it('offers a retry when the first request fails', async () => {
@@ -511,7 +529,6 @@ describe('Monitor IPOs', () => {
     const details = container.querySelector('[aria-label="Company bonfiglioli IPO details"]')!
     expect(details.textContent).toContain('Daily reported GMP')
     expect(details.textContent).not.toContain('05:30')
-    expect(details.querySelector('a[href="https://www.xflot.com/ipo/bonfiglioli-transmissions"]')).not.toBeNull()
   })
 
   it('prepares trend data for every visible row when a long recent list is expanded', async () => {

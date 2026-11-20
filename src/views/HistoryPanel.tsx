@@ -20,6 +20,7 @@ const RANGES: { label: string; days: number }[] = [
 
 const LINE_COLOR = 'var(--holding-chart-line)'
 const COST_LINE_COLOR = 'var(--holding-chart-cost)'
+const WATCH_LINE_COLOR = 'var(--chart-benchmark)'
 
 type HistoryChartRow = {
   at: number
@@ -64,7 +65,7 @@ interface HistoryResult {
   error: string | null
 }
 
-export function HistoryPanel({ position, active = true }: { position: Position; active?: boolean }) {
+export function HistoryPanel({ position, active = true, watchLevels = [] }: { position: Position; active?: boolean; watchLevels?: { value: number; label: string; color?: string }[] }) {
   const { settings } = useStore()
   const [rangeDays, setRangeDays] = useState(366)
   const [retryAttempt, setRetryAttempt] = useState(0)
@@ -220,11 +221,10 @@ export function HistoryPanel({ position, active = true }: { position: Position; 
                         valueFormatter={formatPrice}
                         yAxisLabel={`${isMf ? 'NAV' : 'Price'} (${nativeCurrency})`}
                         appearance="price"
-                        referenceLines={costComparison ? [{
-                          value: costComparison.buy,
-                          color: COST_LINE_COLOR,
-                          label: 'Avg cost',
-                        }] : undefined}
+                        referenceLines={[
+                          ...(costComparison ? [{ value: costComparison.buy, color: COST_LINE_COLOR, label: 'Avg cost' }] : []),
+                          ...watchLevels.map((level) => ({ ...level, color: level.color ?? WATCH_LINE_COLOR })),
+                        ]}
                       />
                     ) : (
                       <p className="hint muted history-empty">Not enough data in this range yet.</p>

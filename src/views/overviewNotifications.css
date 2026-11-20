@@ -14,9 +14,6 @@
 .overview-notice-link { display: grid; flex: 1; min-width: 0; gap: 4px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: 400 14px/1.5 var(--font-body); overflow-wrap: anywhere; }
 .overview-notice-link span { color: var(--ink-muted); }
 .overview-notice-done { min-height: 44px; padding: 4px; border: 0; background: transparent; color: var(--ink); font: 400 14px/1.5 var(--font-body); }
-.mi-watch-action { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; padding: 12px 0; border-bottom: 1px solid var(--hairline); }
-.mi-watch-action button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
-.mi-watch-action span { color: var(--ink-muted); font-size: 14px; }
 .ipo-watch-rules { padding: 16px 20px; border-top: 1px solid var(--hairline); }
 .ipo-watch-rules h3 { margin: 0 0 8px; font-size: 15px; }
 .ipo-watch-rule { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; font-size: 14px; }

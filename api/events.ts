@@ -107,7 +107,7 @@ export function createEventsHandler(dependencies: Partial<Dependencies> = {}) {
     let cacheTtl = CACHE_MS
     return budget([...selected].sort().join(','), () => cacheTtl, async () => {
       const sources: { kind: FeedKind; label: string; path: string; from: string; to: string }[] = [
-        { kind: 'calendar', label: 'NSE meetings', path: '/api/event-calendar', from: today, to: until },
+        { kind: 'calendar', label: 'NSE meetings', path: `/api/event-calendar?index=equities&from_date=${queryDate(today)}&to_date=${queryDate(until)}`, from: today, to: until },
         { kind: 'actions', label: 'NSE corporate actions', path: `/api/corporates-corporateActions?index=equities&from_date=${queryDate(today)}&to_date=${queryDate(until)}`, from: today, to: until },
         { kind: 'filings', label: 'NSE filings', path: `/api/corporate-announcements?index=equities&from_date=${queryDate(since)}&to_date=${queryDate(today)}`, from: since, to: today },
       ]

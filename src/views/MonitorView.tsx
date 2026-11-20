@@ -64,7 +64,7 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
       <div className="mp-monitor-content">
         <MonitorAlerts controller={controller} onOpenHolding={setContextId} />
         <MonitorNewsPanel initialQuery={initialQuery} selectedIdentity={newsSelection.identity} selectedRevision={newsSelection.revision} reading={controller.reading} onReadingChange={controller.updateReading} onOpenHolding={openIdentity} readOnly={workspaceReadOnly} />
-        <MonitorDevelopments events={feed.events} onOpenHolding={setContextId} />
+        <MonitorDevelopments events={feed.events} issues={feed.issues} onOpenHolding={setContextId} />
       </div>
       {controller.positions.length > 0 && <aside className="mp-monitor-sidebar" aria-label="Upcoming events, IPOs and watch rules">
         <MonitorAgenda controller={controller} feed={feed} loading={loading} onRemind={remind} onOpenHolding={setContextId} onRetry={refreshEvents} reminderRequest={reminderRequest} />

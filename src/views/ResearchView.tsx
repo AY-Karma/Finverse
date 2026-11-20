@@ -14,6 +14,8 @@ import { ResearchSourceIcon } from './ResearchSourceIcon'
 import { ActionIcon } from './ActionIcon'
 import { HiddenValuesState } from './HiddenValuesState'
 import { useResearchNavigation } from './useResearchNavigation'
+import { useMonitor } from '../useMonitor'
+import { ResearchWatchRules } from './ResearchWatchRules'
 import './research.css'
 
 const PAGE_SIZE = 24
@@ -28,6 +30,7 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
   onGoTo?: (view: View, position?: Position) => void; active?: boolean; onUrlChange?: (url: string) => void
 }) {
   const { positions, liveQuotes, settings } = useStore()
+  const monitor = useMonitor()
   const hide = settings.hideValues
   const mask = (text: string) => privateValue(text, hide)
   const { navigation, updateNavigation, returnToHoldings } = useResearchNavigation(active, onUrlChange)
@@ -54,6 +57,9 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
   const value = selected && effectivePrice(selected, quotes) != null ? positionValue(selected, quotes) : null
   const pnl = selected ? positionPnl(selected, quotes) : null
   const pnlPct = selected ? positionPnlPct(selected, quotes) : null
+  const watchLevels = useMemo(() => !selected || selected.identityIssue || !hasSupportedValuationCurrency(selected) ? [] : monitor.rules
+    .filter((rule) => rule.holdingId === selected.id && rule.active && !rule.unresolved && rule.condition !== 'daily_move')
+    .map((rule) => ({ value: rule.threshold, label: rule.condition === 'price_above' ? 'Alert above' : 'Alert below', color: rule.condition === 'price_above' ? 'var(--pct-up)' : 'var(--pct-down)' })), [monitor.rules, selected])
   const weight = singleCurrency && pricedCount === positions.length && totalValue > 0 && value != null ? value / totalValue * 100 : null
 
   useEffect(() => {
@@ -120,8 +126,8 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
           }}><ActionIcon name={tab.id} />{tab.label}</button>)}</div>
           <div className="rd-tab-content" id="rd-tab-panel" role="tabpanel" aria-labelledby={`rd-tab-${navigation.tab}`} tabIndex={0}>
             {navigation.tab === 'overview' && <>
-              <section className="rd-section"><div className="rd-section-head"><h3>Your holding</h3><span className="rd-basis">{basis}</span></div><dl className="rd-metrics"><Metric label="Holding value" value={amount(value, 'Unpriced')} /><Metric label="Unrealized return" value={privateValue(pnlPct == null ? 'Unavailable' : formatPercent(pnlPct), settings.hideValues)} movement={!settings.hideValues && pnl != null ? pnl >= 0 ? 'up' : 'down' : ''} /><Metric label="Portfolio weight" value={privateValue(weight == null ? 'Unavailable' : `${weight.toFixed(1)}%`, settings.hideValues)} /><Metric label="Invested amount" value={amount(selected.invested)} /><Metric label={selected.type === 'mutual-fund' ? 'Units held' : 'Quantity held'} value={privateValue(numberFormatter({ maximumFractionDigits: 4 }).format(selected.quantity), settings.hideValues)} /><Metric label={selected.type === 'mutual-fund' ? 'NAV per unit' : 'Price per unit'} value={amount(effectivePrice(selected, quotes))} /></dl>{weight == null && <p className="rd-footnote">Portfolio weight needs complete prices in one currency.</p>}<p className="rd-footnote">Values shown in INR. Unrealized return is since purchase, not today.</p></section>
-              {!hide && <section className="rd-section rd-history"><HistoryPanel position={selected} active={active} /></section>}
+              <section className="rd-section"><div className="rd-section-head"><h3>Your holding</h3><span className="rd-basis">{basis}</span></div><dl className="rd-metrics"><Metric label="Holding value" value={amount(value, 'Unpriced')} /><Metric label="Unrealized return" value={privateValue(pnlPct == null ? 'Unavailable' : formatPercent(pnlPct), settings.hideValues)} movement={!settings.hideValues && pnl != null ? pnl >= 0 ? 'up' : 'down' : ''} /><Metric label="Portfolio weight" value={privateValue(weight == null ? 'Unavailable' : `${weight.toFixed(1)}%`, settings.hideValues)} /><Metric label="Invested amount" value={amount(selected.invested)} /><Metric label={selected.type === 'mutual-fund' ? 'Units held' : 'Quantity held'} value={privateValue(numberFormatter({ maximumFractionDigits: 4 }).format(selected.quantity), settings.hideValues)} /><Metric label={selected.type === 'mutual-fund' ? 'NAV per unit' : 'Price per unit'} value={amount(effectivePrice(selected, quotes))} /></dl>{weight == null && <p className="rd-footnote">Portfolio weight needs complete prices in one currency.</p>}<p className="rd-footnote">Values shown in INR. Unrealized return is since purchase, not today.</p><ResearchWatchRules controller={monitor} position={selected} /></section>
+              {!hide && <section className="rd-section rd-history"><HistoryPanel position={selected} active={active} watchLevels={watchLevels} /></section>}
               <section className="rd-section"><div className="rd-section-head"><div><h3>A starting point for your review</h3><p>{selected.type === 'mutual-fund' ? 'Understand the mandate, costs and risk before comparing returns.' : selected.type === 'etf' ? 'Understand what it tracks and the cost of holding it.' : 'Follow the evidence, then revisit your reason to own.'}</p></div></div><ol className="rd-review-guide">{questions.slice(0, 3).map((question, index) => <li key={question.id}><span>{String(index + 1).padStart(2, '0')}</span>{question.text}</li>)}</ol><button type="button" className="btn btn--secondary" onClick={() => updateNavigation({ tab: 'sources' })}><ActionIcon name="research" />Start my research</button>
               <details className="rd-sources-preview"><summary>Source shortcuts</summary><SourceList links={links.slice(0, 2)} hidden={hide} /><p className="rd-footnote">Sources open in a new tab and receive the investment name or symbol.</p></details></section>
             </>}

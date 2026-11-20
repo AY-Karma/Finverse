@@ -108,38 +108,56 @@ function dateContext(issue: IpoIssue): string {
 
 type IpoWatchActions = { watchedIds?: string[]; onWatch?: (issue: IpoIssue) => void; onUnwatch?: (id: string) => void; watchReadOnly?: boolean }
 
+const istDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' })
+
+/** Countdown for a future stage; the short form keeps narrow timelines on one line. */
+function DueIn({ date, today }: { date: string; today: string }) {
+  const days = Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000)
+  if (days < 0) return null
+  if (days === 0) return <span className="mi-step-due"> (today)</span>
+  return <span className="mi-step-due"> <span className="mi-due-long">(in {days} {days === 1 ? 'day' : 'days'})</span><span className="mi-due-short" aria-hidden="true">({days}d)</span></span>
+}
+
+function gmpTiming(gmp: NonNullable<IpoIssue['gmp']>): string {
+  if (gmp.asOfDate) return `As of ${shortDate(gmp.asOfDate)}. Daily reported GMP`
+  if (gmp.observedAt) return `Reported ${updated.format(gmp.observedAt)} IST`
+  if (gmp.sourceUpdatedAt) return `Page updated ${updated.format(gmp.sourceUpdatedAt)} IST · Quote time unavailable`
+  return 'Quote time unavailable'
+}
+
 function IssueDetails({ issue, id, historyStatus, onRetryHistory, watchedIds, onWatch, onUnwatch, watchReadOnly }: { issue: IpoIssue; id: string; historyStatus?: 'loading' | 'ready' | 'error'; onRetryHistory: () => void } & IpoWatchActions) {
   const gmp = issue.gmp
-  const milestones = ([['Opens', issue.openDate], ['Closes', issue.closeDate], ['Allotment', issue.allotmentDate], ['Listing', issue.listingDate]] as const)
-    .filter((entry): entry is readonly [typeof entry[0], string] => entry[1] !== null)
-  const missingDates = !issue.allotmentDate && !issue.listingDate ? 'Allotment / listing dates unavailable'
-    : !issue.allotmentDate ? 'Allotment date unavailable' : !issue.listingDate ? 'Listing date unavailable' : null
-  const hasFacts = issue.lotSize !== null || gmp?.sources !== null && gmp?.sources !== undefined || gmp?.rangeLow !== null && gmp?.rangeLow !== undefined && gmp.rangeHigh !== null
+  const today = istDate.format(Date.now())
+  const stages = [['Opens', issue.openDate], ['Closes', issue.closeDate], ['Allotment', issue.allotmentDate], ['Listing', issue.listingDate]] as const
+  const hasDates = stages.some(([, date]) => date !== null)
+  const minimum = issue.lotSize !== null && issue.priceMax !== null ? issue.lotSize * issue.priceMax : null
+  const range = gmp && gmp.rangeLow !== null && gmp.rangeHigh !== null ? `${money.format(gmp.rangeLow)}–${money.format(gmp.rangeHigh)}` : null
+  const watching = watchedIds?.includes(issue.id)
 
   return <div id={id} className="mi-details" role="region" aria-label={`${issue.name} IPO details`}>
-    {onWatch && (issue.status === 'OPEN' || issue.status === 'UPCOMING') && <div className="mi-watch-action">
-      <button type="button" className="mp-text-button" disabled={watchReadOnly || !issue.closeDate} onClick={() => watchedIds?.includes(issue.id) ? onUnwatch?.(issue.id) : onWatch(issue)}><ActionIcon name="bell" />{watchedIds?.includes(issue.id) ? 'Stop watching last day' : 'Watch last day'}</button>
-      <span>{issue.closeDate ? `Overview reminder on ${shortDate(issue.closeDate)}` : 'Closing date not announced'}</span>
-    </div>}
-    {hasFacts && <dl className="mi-facts">
-      {issue.lotSize !== null && <div><dt>Lot size</dt><dd>{integer.format(issue.lotSize)} shares</dd></div>}
-      {gmp?.rangeLow !== null && gmp?.rangeLow !== undefined && gmp.rangeHigh !== null && <div><dt>GMP range</dt><dd>{money.format(gmp.rangeLow)}–{money.format(gmp.rangeHigh)}</dd></div>}
-      {gmp?.sources !== null && gmp?.sources !== undefined && <div><dt>Reporting sources</dt><dd>{gmp.sources === 0 ? 'None today' : integer.format(gmp.sources)}</dd></div>}
+    {hasDates ? <ol className="mi-timeline" aria-label="IPO timeline">
+      {stages.map(([label, date]) => <li key={label} data-done={date !== null && date < today} data-unknown={date === null}>
+        <span className="mi-step-dot" aria-hidden="true" /><span className="mi-step-label">{label}{date && <DueIn date={date} today={today} />}</span><strong>{date ? shortDate(date) : issue.status === 'OPEN' || issue.status === 'UPCOMING' ? 'TBA' : 'Not reported'}</strong>
+      </li>)}
+    </ol> : <p className="mi-unannounced">Dates to be announced</p>}
+    {(issue.lotSize !== null || range) && <dl className="mi-facts">
+      {minimum !== null ? <div><dt>Min. investment</dt><dd>{money.format(minimum)}<span>[{integer.format(issue.lotSize!)} shares]</span></dd></div>
+        : issue.lotSize !== null && <div><dt>Lot size</dt><dd>{integer.format(issue.lotSize)} shares</dd></div>}
+      {range && <div><dt>GMP range</dt><dd>{range}</dd></div>}
     </dl>}
-    {milestones.length > 0 && <ol className="mi-timeline" aria-label="IPO timeline">
-      {milestones.map(([label, date]) => <li key={label}><span>{label}</span><strong>{shortDate(date)}</strong></li>)}
-    </ol>}
-    {missingDates && <p className="mi-unannounced">{missingDates}</p>}
-    <div className="mi-detail-context">{gmp && <p className="mi-gmp-note">
-      {issue.status === 'LISTED' && 'Historical GMP · '}<a href={gmp.sourceUrl} target="_blank" rel="noopener noreferrer">{gmp.source}</a>
-      {gmp.asOfDate ? ` · As of ${shortDate(gmp.asOfDate)}. Daily reported GMP.` : gmp.observedAt ? ` · Reported ${updated.format(gmp.observedAt)} IST.` : gmp.sourceUpdatedAt ? ` · Page updated ${updated.format(gmp.sourceUpdatedAt)} IST. Quote time unavailable.` : ' · Quote time unavailable.'}
-      {issue.status === 'LISTED' && ' Pre-listing quote, not the listed stock price.'}
-    </p>}<a className="mi-issue-source" href={issue.sourceUrl} target="_blank" rel="noopener noreferrer">Issue source <ActionIcon name="external" /></a></div>
+    {gmp && issue.status === 'LISTED' && <p className="mi-gmp-note">Historical GMP · {gmpTiming(gmp)}. Pre-listing quote, not the listed stock price.</p>}
     {!gmp && historyStatus === 'error' && <div className="mi-history-retry" role="status"><span>Historical GMP could not be loaded.</span><button type="button" className="mp-text-button" onClick={onRetryHistory}>Try again</button></div>}
-    <nav className="mi-links" aria-label="Explore IPO research">
-      <a href="https://www.investorgain.com/report/ipo-gmp-live/331/" target="_blank" rel="noopener noreferrer"><span><strong>InvestorGain</strong><span>Browse GMP tracker</span></span><ActionIcon name="external" /></a>
-      <a href="https://www.chittorgarh.com/" target="_blank" rel="noopener noreferrer"><span><strong>Chittorgarh</strong><span>Browse IPO research</span></span><ActionIcon name="external" /></a>
-    </nav>
+    <div className="mi-detail-actions">
+      {onWatch && (issue.status === 'OPEN' || issue.status === 'UPCOMING') && <div className="mi-watch-action">
+        <button type="button" aria-pressed={watching} disabled={watchReadOnly || !issue.closeDate} title={issue.closeDate ? `Overview reminds you on ${shortDate(issue.closeDate)}` : undefined} onClick={() => watching ? onUnwatch?.(issue.id) : onWatch(issue)}><ActionIcon name="bell" />{watching ? 'Watching last day' : 'Watch last day'}</button>
+        {!issue.closeDate && <span>Closing date not announced</span>}
+      </div>}
+      <nav className="mi-links" aria-label="Explore IPO research">
+        <a className="mi-issue-source" href={issue.sourceUrl} target="_blank" rel="noopener noreferrer">Issue page<ActionIcon name="external" /></a>
+        <a href="https://www.investorgain.com/report/ipo-gmp-live/331/" target="_blank" rel="noopener noreferrer">InvestorGain<ActionIcon name="external" /></a>
+        <a href="https://www.chittorgarh.com/" target="_blank" rel="noopener noreferrer">Chittorgarh<ActionIcon name="external" /></a>
+      </nav>
+    </div>
   </div>
 }
 
