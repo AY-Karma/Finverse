@@ -371,7 +371,7 @@ it('replaces duplicate risk cards with peak duration and exact eligible down-ses
   expect(sessions.querySelector('.risk-observation')?.textContent).toBe('50.0%')
   expect(sessions.querySelector('.risk-session-ratio')?.getAttribute('aria-label')).toBe('2 lower closes and 2 higher or unchanged closes')
   expect(duration.querySelector('.risk-status')?.textContent).toBe('Good')
-  expect(duration.querySelector('.risk-track canvas')).not.toBeNull()
+  expect(duration.querySelector('.risk-track .segment-bar i')).not.toBeNull()
   expect(duration.querySelector('.risk-track')?.getAttribute('aria-label')).toBe('Time below peak: 8 days, Good. Bar scale 0 to 180 days.')
   expect(sessions.querySelector('.risk-status')?.textContent).toBe('To watch')
   expect(container.querySelector('.risk-history-basis')?.textContent).toContain('30 Sept 2026')

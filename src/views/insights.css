@@ -1,7 +1,7 @@
 .insights-page {
-  --insight-dither-positive: var(--semantic-success);
-  --insight-dither-negative: var(--semantic-danger);
-  --insight-dither-blue: #8eb8ff;
+  --insight-positive: var(--semantic-success);
+  --insight-negative: var(--semantic-danger);
+  --insight-blue: #8eb8ff;
 }
 
 .insights-overview-summary { position: relative; z-index: 5; display: grid; margin-bottom: var(--sp-lg); }
@@ -112,8 +112,8 @@
 }
 
 [data-mode='light'] .insights-page {
-  --insight-dither-positive: #08712f;
-  --insight-dither-blue: #275dba;
+  --insight-positive: #08712f;
+  --insight-blue: #275dba;
 }
 
 .insights-summary-chevron {
@@ -148,7 +148,7 @@
 .comparison-building { width: 176px; height: 96px; margin-bottom: 5px; overflow: visible; }
 .comparison-building-ground { stroke: var(--hairline-strong); stroke-dasharray: 2 5; }
 .comparison-building-outline { stroke: var(--ink-subtle); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.comparison-building-floor { stroke: var(--insight-dither-blue); stroke-width: 1.5; stroke-linejoin: round; }
+.comparison-building-floor { stroke: var(--insight-blue); stroke-width: 1.5; stroke-linejoin: round; }
 .comparison-building[data-building='true'] .comparison-building-floor { animation: comparison-floor-build 2.4s cubic-bezier(.77, 0, .175, 1) infinite; }
 .comparison-building[data-building='true'] .comparison-building-floor:nth-of-type(2) { animation-delay: 80ms; }
 .comparison-building[data-building='true'] .comparison-building-floor:nth-of-type(3) { animation-delay: 160ms; }
@@ -205,8 +205,8 @@
   .insights-page .allocation-tile { transition: none; }
 }
 
-.insights-page .allocation-detail .up { color: var(--insight-dither-positive); }
-.insights-page .allocation-detail .down { color: var(--insight-dither-negative); }
+.insights-page .allocation-detail .up { color: var(--insight-positive); }
+.insights-page .allocation-detail .down { color: var(--insight-negative); }
 
 .insights-page .contribution-row {
   padding: 5px 7px;
@@ -220,8 +220,8 @@
   outline: 1px solid var(--hairline-strong);
 }
 
-.insights-page .contribution-row .up { color: var(--insight-dither-positive); }
-.insights-page .contribution-row .down { color: var(--insight-dither-negative); }
+.insights-page .contribution-row .up { color: var(--insight-positive); }
+.insights-page .contribution-row .down { color: var(--insight-negative); }
 .insights-page .contribution-track { height: 12px; border-radius: 2px; }
 
 @media (max-width: 768px) {

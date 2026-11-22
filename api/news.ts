@@ -1,4 +1,5 @@
 import { createRequestBudget, readBoundedText } from './_requestBudget.js'
+import { createNewsQueryResolver } from './_newsQuery.js'
 
 const HEADERS = {
   'Cache-Control': 'no-store',
@@ -18,6 +19,8 @@ const FINISHED_PERIOD_CACHE_MS = 21_600_000
 
 interface NewsHandlerDependencies {
   fetcher: typeof fetch
+  /** Turns ETF tickers into searchable index names; injectable so tests control the reference lookup. */
+  resolveQuery: (query: string) => Promise<string>
 }
 
 const SEARCH_MARKETS = {
@@ -129,6 +132,7 @@ export function createNewsHandler(
 ): (request: Request) => Promise<Response> {
   const fetcher = dependencies.fetcher ?? fetch
   const budget = createRequestBudget()
+  const resolveQuery = dependencies.resolveQuery ?? createNewsQueryResolver(fetcher)
 
   return async (request: Request) => {
     if (request.method !== 'GET') return new Response('Method not allowed.', { status: 405 })
@@ -153,7 +157,7 @@ export function createNewsHandler(
       urls = [googleSearch('Indian stock market NSE BSE')]
     } else if (source === 'search' && query.length > 0 && query.length <= 120) {
       const market = SEARCH_MARKETS[region]
-      const searchQuery = `${query} ${market.suffix}`
+      const searchQuery = `${await resolveQuery(query)} ${market.suffix}`
       const bing = new URL('https://www.bing.com/news/search')
       bing.searchParams.set('q', searchQuery)
       bing.searchParams.set('format', 'RSS')

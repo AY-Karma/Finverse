@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-export type ResearchTab = 'overview' | 'sources'
-export interface ResearchNavigation {
+type ResearchTab = 'overview' | 'sources'
+interface ResearchNavigation {
   holding: string
   query: string
   asset: string

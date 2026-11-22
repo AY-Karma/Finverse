@@ -96,6 +96,16 @@ describe('company event loading', () => {
     expect(fetcher.mock.calls[0][0]).toBe('/api/events?symbols=INFY')
   })
 
+  it('uses the verified NSE match of an imported BSE holding for events', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => response())
+    const bseHolding: Position = { ...position, id: 'infy-bse', ticker: '500209', exchange: 'BSE', providerSymbol: '500209.BO', identityVersion: 2,
+      pricingListing: { exchange: 'NSE', isin: 'INE009A01021', providerSymbol: 'INFY.NS', type: 'stock', source: 'nse-master', verifiedAt: NOW } }
+    const feed = await createMarketEventsLoader(fetcher, () => NOW)([bseHolding])
+    expect(fetcher.mock.calls[0][0]).toBe('/api/events?symbols=INFY')
+    expect(feed.events).toEqual([expect.objectContaining({ holdingId: 'infy-bse', symbol: 'INFY' })])
+    expect(feed.issues).toEqual([])
+  })
+
   it('does not request unsupported venues, inferred listings, funds or conflicting mappings', async () => {
     const fetcher = vi.fn<typeof fetch>()
     const feed = await createMarketEventsLoader(fetcher, () => NOW)([

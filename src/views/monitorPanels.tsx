@@ -4,7 +4,12 @@ import type { MonitorController } from '../useMonitor'
 import { useStore } from '../useStore'
 import { privateValue, visibleQuotes } from '../privacy'
 import { dateFormatter, numberFormatter } from '../formatters'
+import type { Position } from '../types'
 import { signedPercent } from '../valuation'
+import { watchSecurityKey } from '../watchSecurity'
+import { fetchWatchQuote } from '../watchSecuritySearch'
+import { ActionIcon } from './ActionIcon'
+import { WatchSecurityPicker, type WatchTarget } from './WatchSecurityPicker'
 
 type PanelProps = { controller: MonitorController }
 export type RuleRequest = { holdingId: string; revision: number }
@@ -117,18 +122,22 @@ export function ReminderAction({ controller, onAdded, request }: PanelProps & { 
 }
 
 export function RulesPanel({ controller, request }: PanelProps & { request?: RuleRequest }) {
-  const { liveQuotes, workspaceReadOnly } = useStore()
+  const { workspaceReadOnly } = useStore()
   const dialog = useRef<HTMLDialogElement>(null)
+  const suggestion = useRef({ id: 0, edited: false })
   const [editing, setEditing] = useState<MonitorRule | null>(null)
-  const [holdingId, setHoldingId] = useState('')
+  const [target, setTarget] = useState<WatchTarget | null>(null)
   const [condition, setCondition] = useState<RuleCondition>('price_above')
   const [threshold, setThreshold] = useState('')
   const [error, setError] = useState('')
-  const quotes = useMemo(() => visibleQuotes(controller.allowExternalData, liveQuotes), [controller.allowExternalData, liveQuotes])
+  const quotes = useMemo(() => visibleQuotes(controller.allowExternalData, controller.quotes), [controller.allowExternalData, controller.quotes])
   const observations = useMemo(() => monitorRuleObservations(controller.rules, controller.positions, quotes, controller.now, controller.allowExternalData), [controller.rules, controller.positions, quotes, controller.now, controller.allowExternalData])
-  const selected = controller.positions.find((position) => position.id === holdingId)
-  const availableRules = controller.rules.filter((rule) => !rule.unresolved && controller.positions.some((position) => position.id === rule.holdingId))
-  const unavailableRules = controller.rules.filter((rule) => rule.unresolved || !controller.positions.some((position) => position.id === rule.holdingId))
+  const targetPosition = target?.kind === 'holding' ? controller.positions.find((position) => position.id === target.holdingId) : undefined
+  const targetIsFund = target?.kind === 'security' ? target.security.kind === 'fund' : targetPosition?.type === 'mutual-fund'
+  const ruleAvailable = (rule: MonitorRule) => !!rule.security || (!rule.unresolved && controller.positions.some((position) => position.id === rule.holdingId))
+  const availableRules = controller.rules.filter(ruleAvailable)
+  const unavailableRules = controller.rules.filter((rule) => !ruleAvailable(rule))
+  const ruleName = (rule: MonitorRule, position?: Position) => rule.security ? rule.holding : privateValue(position?.name || position?.ticker || rule.holding, controller.hideValues)
   const remainingRules = Math.max(0, MAX_RULES - controller.rules.length)
 
   useEffect(() => {
@@ -141,13 +150,25 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
     open(null, request.holdingId)
   }, [request?.revision])
 
-  function defaultThreshold(id: string, nextCondition: RuleCondition) {
-    if (controller.hideValues) return ''
-    if (nextCondition === 'daily_move') return '3'
-    const position = controller.positions.find((item) => item.id === id)
-    if (!position) return ''
-    const observation = monitorRuleObservation({ id: '', holding: '', holdingId: id, instrumentIdentity: holdingIdentity(position), active: true, condition: nextCondition, threshold: 1 }, controller.positions, quotes, controller.now, controller.allowExternalData)
-    return observation.quote ? String(Math.round(observation.quote.price * 100) / 100) : ''
+  const roundedPrice = (price: number) => String(Math.round(price * 100) / 100)
+
+  /** Suggests a starting level from a fresh quote, unless the user has already typed one. */
+  function suggestThreshold(next: WatchTarget | null, nextCondition: RuleCondition) {
+    const current = suggestion.current = { id: suggestion.current.id + 1, edited: false }
+    if (controller.hideValues || !next) return setThreshold('')
+    if (nextCondition === 'daily_move') return setThreshold('3')
+    if (next.kind === 'holding') {
+      const position = controller.positions.find((item) => item.id === next.holdingId)
+      const observation = position && monitorRuleObservation({ id: '', holding: '', holdingId: position.id, instrumentIdentity: holdingIdentity(position), active: true, condition: nextCondition, threshold: 1 }, controller.positions, quotes, controller.now, controller.allowExternalData)
+      return setThreshold(observation?.quote ? roundedPrice(observation.quote.price) : '')
+    }
+    const known = quotes[watchSecurityKey(next.security)]
+    if (known) return setThreshold(roundedPrice(known.price))
+    setThreshold('')
+    if (!controller.allowExternalData) return
+    void fetchWatchQuote(next.security).then((quote) => {
+      if (quote && suggestion.current === current && !current.edited) setThreshold(roundedPrice(quote.price))
+    }).catch(() => {})
   }
 
   function conditionLabel(rule: MonitorRule) {
@@ -160,11 +181,15 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
   }
 
   function open(rule: MonitorRule | null = null, requestedId?: string) {
-    const id = rule?.holdingId ?? requestedId ?? controller.positions[0]?.id ?? ''
+    const next: WatchTarget | null = rule?.security ? { kind: 'security', security: rule.security }
+      : rule || requestedId ? { kind: 'holding', holdingId: rule?.holdingId ?? requestedId! } : null
     setEditing(rule)
-    setHoldingId(id)
+    setTarget(next)
     setCondition(rule?.condition ?? 'price_above')
-    setThreshold(rule ? (controller.hideValues ? '' : String(rule.threshold)) : defaultThreshold(id, 'price_above'))
+    if (rule) {
+      suggestion.current = { id: suggestion.current.id + 1, edited: true }
+      setThreshold(controller.hideValues ? '' : String(rule.threshold))
+    } else suggestThreshold(next, 'price_above')
     setError('')
     if (!dialog.current?.open) dialog.current?.showModal()
   }
@@ -172,21 +197,21 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const value = Number(threshold)
-    const position = controller.positions.find((item) => item.id === holdingId)
-    if (!position) {
-      setError('Choose a holding currently in your portfolio.')
+    if (!target || (target.kind === 'holding' && !targetPosition)) {
+      setError('Choose a security from the list.')
       return
     }
     if (!Number.isFinite(value) || value <= 0) {
       setError('Enter a threshold greater than zero.')
       return
     }
-    if (hasDuplicateMonitorRule(controller.rules, { instrumentIdentity: holdingIdentity(position), condition, threshold: value }, editing?.id)) {
-      setError('A watch rule with this holding, condition and threshold already exists.')
+    const instrumentIdentity = target.kind === 'security' ? watchSecurityKey(target.security) : holdingIdentity(targetPosition!)
+    if (hasDuplicateMonitorRule(controller.rules, { instrumentIdentity, condition, threshold: value }, editing?.id)) {
+      setError('A watch rule with this security, condition and threshold already exists.')
       return
     }
-    if (!controller.saveRule({ id: editing?.id, holdingId, condition, threshold: value })) {
-      setError(!editing && remainingRules === 0 ? 'Remove a watch rule before adding another.' : 'Could not save this rule. Check the holding and threshold.')
+    if (!controller.saveRule({ id: editing?.id, ...(target.kind === 'security' ? { security: target.security } : { holdingId: target.holdingId }), condition, threshold: value })) {
+      setError(!editing && remainingRules === 0 ? 'Remove a watch rule before adding another.' : 'Could not save this rule. Check the security and threshold.')
       return
     }
     setError('')
@@ -194,12 +219,13 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
   }
 
   return <section className="mp-rules-panel">
-    <div className="mp-section-head">
-      <div className="mp-rule-heading">
-        <h2>Your watch rules</h2>
+    <div className="mp-section-head mp-feature-head">
+      <div className="mp-feature-title mp-rule-heading">
+        <span className="mp-heading-mark" aria-hidden="true"><ActionIcon name="activity" /></span>
+        <h2>Watch rules</h2>
         {remainingRules <= 10 && <span className="mp-rule-capacity" aria-label={`${remainingRules} watch rules available`}>{remainingRules} left</span>}
       </div>
-      <button type="button" disabled={controller.hideValues || workspaceReadOnly || !controller.positions.length || controller.rules.length >= MAX_RULES} title={controller.hideValues ? 'Turn off masking to add a watch rule.' : undefined} onClick={() => open()}>+ New rule</button>
+      <button type="button" disabled={controller.hideValues || workspaceReadOnly || controller.rules.length >= MAX_RULES} title={controller.hideValues ? 'Turn off masking to add a watch rule.' : undefined} onClick={() => open()}>+ New rule</button>
     </div>
     <div className="mp-rule-list">
       {availableRules.map((rule) => {
@@ -212,7 +238,7 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
         return <article className={`mp-rule-row${rule.active ? '' : ' mp-rule-paused'}`} key={rule.id}>
         <div className="mp-row-main">
           <div className="mp-rule-summary">
-            <strong>{privateValue(position?.name || position?.ticker || rule.holding, controller.hideValues)}</strong>
+            <strong>{ruleName(rule, position)}</strong>
             {badge && <span className={`mp-kind mp-rule-state mp-rule-state--${badge.toLowerCase()}`}>{badge}</span>}
             <details className="mp-rule-menu" onBlur={(event) => {
               if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute('open')
@@ -221,7 +247,7 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
               event.currentTarget.removeAttribute('open')
               event.currentTarget.querySelector('summary')?.focus()
             }}>
-              <summary aria-label={`Manage ${privateValue(rule.holding, controller.hideValues)} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} title="Manage rule">
+              <summary aria-label={`Manage ${ruleName(rule)} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} title="Manage rule">
                 <svg className="mp-rule-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
               </summary>
               <div className="mp-rule-menu-actions">
@@ -233,7 +259,7 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
                   event.currentTarget.closest('details')?.removeAttribute('open')
                   controller.toggleRule(rule.id)
                 }}>{rule.active ? 'Pause' : 'Resume'}</button>
-                <button type="button" disabled={workspaceReadOnly} aria-label={`Delete ${privateValue(rule.holding, controller.hideValues)} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} onClick={() => controller.deleteRule(rule.id)}>Delete</button>
+                <button type="button" disabled={workspaceReadOnly} aria-label={`Delete ${ruleName(rule)} ${controller.hideValues ? 'watch rule' : `${conditionLabel(rule)} rule`}`} onClick={() => controller.deleteRule(rule.id)}>Delete</button>
               </div>
             </details>
           </div>
@@ -259,37 +285,31 @@ export function RulesPanel({ controller, request }: PanelProps & { request?: Rul
         </div>
       </article>)}
     </div>
-    {!controller.rules.length && <p className="mp-empty">{controller.positions.length ? 'Add a watch rule to follow a price or daily move.' : 'Import your holdings to add watch rules.'}</p>}
-    <p className="mp-muted">Checked while Monitor is open.</p>
+    {!controller.rules.length && <p className="mp-empty">Add a watch rule to follow a price or daily move.</p>}
+    <p className="mp-rules-note">Checked while Monitor is open.</p>
     <dialog className="mp-dialog" ref={dialog} aria-labelledby="mp-rule-title">
       <form className="mp-form" onSubmit={submit}>
         <div className="mp-section-head">
           <h2 id="mp-rule-title">{editing ? 'Edit watch rule' : 'Create a watch rule'}</h2>
           <button className="mp-icon-button" type="button" aria-label="Close rule form" onClick={() => dialog.current?.close()}>×</button>
         </div>
-        <label className="mp-field">
-          Holding
-          <select autoFocus required value={holdingId} onChange={(event) => {
-            setHoldingId(event.target.value)
-            setThreshold(defaultThreshold(event.target.value, condition))
-          }}>
-            {!selected && <option value="">Choose a holding</option>}
-            {controller.positions.map((position) => <option value={position.id} key={position.id}>{privateValue(position.name || position.ticker, controller.hideValues)}</option>)}
-          </select>
-        </label>
+        <WatchSecurityPicker label="Security" positions={controller.positions} target={target} hideValues={controller.hideValues} onSelect={(next) => {
+          setTarget(next)
+          suggestThreshold(next, condition)
+        }} />
         <label className="mp-field">
           Condition
           <select value={condition} onChange={(event) => {
             const next = event.target.value as RuleCondition
             setCondition(next)
-            setThreshold(defaultThreshold(holdingId, next))
+            suggestThreshold(target, next)
           }}>
             {Object.entries(conditions).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
           </select>
         </label>
         <label className="mp-field">
-          {condition === 'daily_move' ? 'Move threshold (%)' : 'Price threshold (₹)'}
-          <input type="number" required min="0.01" step="0.01" value={controller.hideValues ? '' : threshold} onChange={(event) => setThreshold(event.target.value)} />
+          {condition === 'daily_move' ? 'Move threshold (%)' : `${targetIsFund ? 'NAV' : 'Price'} threshold (₹)`}
+          <input type="number" required min="0.01" step="0.01" value={controller.hideValues ? '' : threshold} onChange={(event) => { suggestion.current.edited = true; setThreshold(event.target.value) }} />
         </label>
         <p className="mp-muted">{condition === 'daily_move' ? 'Checks the size of either an upward or downward daily move.' : controller.allowExternalData ? 'Uses a fresh provider quote only to suggest a starting level. Enter a value if no quote is available.' : 'Market data is paused, so enter a price level manually.'} No background notification is sent.</p>
         {error && <p role="alert">{error}</p>}

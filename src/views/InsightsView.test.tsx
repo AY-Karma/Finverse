@@ -41,6 +41,9 @@ async function renderInsights(backcast: PortfolioBackcastHistory['points'], hist
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
 }
 
+const figure = (kind: 'portfolio' | 'benchmark' | 'result') => container.querySelector(`.comparison-metric--${kind} strong`)?.textContent
+const verdict = () => container.querySelector('.comparison-metric--result small')?.textContent
+
 const exposurePositions: Position[] = [
   { ticker: 'ALPHA', type: 'stock', sector: 'Technology' },
   { ticker: 'BETA', type: 'stock', sector: 'Technology' },
@@ -230,9 +233,30 @@ it('keeps session totals and contributors on stocks and ETFs until same-session 
 it('rebases both comparison returns on the first shared date when the benchmark has a holiday', async () => {
   state.benchmark.mockResolvedValueOnce([{ date: '2026-09-08', close: 100 }, { date: '2026-09-09', close: 110 }])
   await renderInsights([100, 200, 220].map((value, index) => ({ at: Date.parse(`2026-09-0${7 + index}T00:00:00+05:30`), value, invested: 100 })))
-  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('0.0 pts')
+  expect(figure('portfolio')).toBe('rose 10.0%')
+  expect(figure('benchmark')).toBe('rose 10.0%')
+  expect(verdict()).toBe('In line with NIFTY 50')
+})
+
+it('narrows the comparison to the chosen period and rebases both returns on its first day', async () => {
+  const day = 24 * 60 * 60 * 1000
+  const start = Date.now() - 100 * day
+  const dates = [0, 80, 100].map((offset) => new Date(start + offset * day + 5.5 * 3600000).toISOString().slice(0, 10))
+  state.benchmark.mockResolvedValueOnce(dates.map((date, index) => ({ date, close: [100, 120, 110][index] })))
+  await renderInsights([0, 80, 100].map((offset, index) => ({ at: start + offset * day, value: [100, 150, 135][index], invested: 100 })))
+  expect(figure('portfolio')).toBe('rose 35.0%')
+  expect(figure('benchmark')).toBe('rose 10.0%')
+  const periods = [...container.querySelectorAll<HTMLButtonElement>('.comparison-periods button')]
+  expect(periods.map((button) => button.textContent)).toEqual(['1M', '3M', 'All'])
+  await act(async () => periods[1].click())
+  expect(container.querySelector('.comparison-periods .scope-btn--active')?.textContent).toBe('3M')
+  expect(figure('portfolio')).toBe('fell 10.0%')
+  expect(figure('benchmark')).toBe('fell 8.3%')
+  expect(figure('result')).toBe('1.7 pts behind')
+  expect(verdict()).toBe('You fell more than NIFTY 50')
+  const chart = state.chart.mock.lastCall![0] as { rows: unknown[]; fitAll?: boolean }
+  expect(chart.rows).toHaveLength(2)
+  expect(chart.fitAll).toBe(true)
 })
 
 it('keeps the benchmark line continuous across a market holiday without inventing a close', async () => {
@@ -253,10 +277,10 @@ it('keeps benchmark totals visible when portfolio history extends beyond the lat
   state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 105 }])
   await renderInsights([200, 220, 240].map((value, index) => ({ at: Date.parse(`2026-09-${28 + index}T00:00:00+05:30`), value, invested: 100 })))
   expect(container.querySelector('[data-chart="portfolio,benchmark"]')).not.toBeNull()
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+5.0%')
-  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('+5.0 pts')
-  expect(container.querySelector('.insight-chart-metric--portfolio small')?.textContent).toBe('Compared through 29 Sept 2026')
+  expect(figure('benchmark')).toBe('rose 5.0%')
+  expect(figure('portfolio')).toBe('rose 10.0%')
+  expect(figure('result')).toBe('5.0 pts ahead')
+  expect(verdict()).toBe('You gained more than NIFTY 50')
   expect(Number(container.querySelector('[data-chart="portfolio,benchmark"]')?.getAttribute('data-latest-portfolio'))).toBeCloseTo(20)
   expect(state.benchmark).toHaveBeenCalledTimes(1)
 })
@@ -264,22 +288,22 @@ it('keeps benchmark totals visible when portfolio history extends beyond the lat
 it('keeps benchmark totals unavailable when the series have no shared dates', async () => {
   state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 105 }])
   await renderInsights([200, 220].map((value, index) => ({ at: Date.UTC(2026, 9, 1 + index), value, invested: 100 })))
-  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('—')
-  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('—')
+  expect(figure('portfolio')).toBe('rose 10.0%')
+  expect(figure('benchmark')).toBe('—')
+  expect(verdict()).toBe('Waiting for benchmark')
 })
 
 it('updates delayed and refreshed quote analytics in the same mounted view without refetching history', async () => {
   state.benchmark.mockResolvedValueOnce([{ date: '2026-09-28', close: 100 }, { date: '2026-09-29', close: 110 }])
   await renderInsights([200, 220].map((value, index) => ({ at: Date.parse(`2026-09-${28 + index}T00:00:00+05:30`), value, invested: 100 })))
   expect(container.querySelector('.insight-panel--performance')).toBeNull()
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
+  expect(figure('benchmark')).toBe('rose 10.0%')
   const position = state.store.snapshot.positions[0]
   state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 240, at: Date.parse('2026-09-30T15:30:00+05:30'), source: 'yahoo' } } }
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
-  expect(container.querySelector('.insight-chart-metric--portfolio strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('+10.0%')
-  expect(container.querySelector('.insight-chart-metric--gap strong')?.textContent).toBe('0.0 pts')
+  expect(figure('portfolio')).toBe('rose 10.0%')
+  expect(figure('benchmark')).toBe('rose 10.0%')
+  expect(verdict()).toBe('In line with NIFTY 50')
   state.store.snapshot = { ...state.store.snapshot, quotes: { [quoteKey(position)]: { price: 180, at: Date.parse('2026-10-01T15:30:00+05:30'), source: 'yahoo' } } }
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(state.build).toHaveBeenCalledTimes(1)
@@ -309,7 +333,7 @@ it('restores a cached benchmark when switching back before another benchmark fin
   await select('NIFTY Next 50')
   await select('NIFTY 50')
   expect(state.benchmark).toHaveBeenCalledTimes(2)
-  expect(container.querySelector('.insight-chart-metric--benchmark strong')?.textContent).toBe('0.0%')
+  expect(figure('benchmark')).toBe('was flat')
 })
 
 it('starts benchmark history while backcast is pending and cancels both when external data is disabled', async () => {
@@ -324,15 +348,6 @@ it('starts benchmark history while backcast is pending and cancels both when ext
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(benchmarkSignal.aborted).toBe(true)
   expect(backcastSignal.aborted).toBe(true)
-})
-
-it('extends both portfolio and benchmark history when navigating to earlier dates', async () => {
-  await renderInsights([100, 110].map((value, index) => ({ at: Date.UTC(2026, 0, 1 + index), value, invested: 100 })))
-  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Earlier benchmark history')!.click())
-  expect(state.build.mock.calls.map((call) => call[2])).toEqual([366, 732])
-  expect(state.benchmark).toHaveBeenCalledTimes(2)
-  const [, from, to] = state.benchmark.mock.lastCall as [string, Date, Date]
-  expect(to.getTime() - from.getTime()).toBe(732 * 24 * 60 * 60 * 1000)
 })
 
 it('does not turn an account addition into benchmark returns', async () => {
@@ -615,40 +630,31 @@ it('keeps unpriced and zero-value imports visible outside weighted allocation ti
   expect(container.querySelector('.allocation-unmapped')).toBeNull()
 })
 
-it('moves the full allocation and composition below movers with its own recoverable holding scope', async () => {
+it('shows the allocation donut beside movers with its own recoverable holding scope', async () => {
   const positions: Position[] = [
     { id: 'equity', ticker: 'EQUITY', name: 'Equity', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 120 },
     { id: 'fund', ticker: 'FUND', name: 'Fund', type: 'mutual-fund', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 80 },
   ]
   await renderInsights([], [], positions)
   const allocation = container.querySelector<HTMLElement>('[aria-label="Allocation mix"]')!
-  expect(allocation.previousElementSibling?.querySelector('.panel-title')?.textContent).toBe('Latest price movers')
+  expect(allocation.querySelector('.alloc-movers .panel-title')?.textContent).toBe('Latest price movers')
   expect(container.querySelector('.risk-profile')).toBeNull()
-  expect(allocation.querySelector('.alloc-summary')?.textContent).toContain('50% in profit')
-  const details = allocation.querySelector<HTMLDetailsElement>('.alloc-more')!
-  expect(details.open).toBe(false)
-  expect(details.querySelector('summary')?.textContent).toBe('Composition details')
-  details.open = true
-  expect(details.querySelector('.alloc-more-content')).not.toBeNull()
   const select = (label: string) => act(async () => [...allocation.querySelectorAll<HTMLButtonElement>('.scope-btn')].find(button => button.textContent?.startsWith(label))!.click())
   const summary = container.querySelector('.insights-summary-current strong')?.textContent
   await select('Equity')
-  expect(allocation.querySelector('.alloc-legend')?.textContent).toContain('EQUITY')
-  expect(allocation.querySelector('.alloc-legend')?.textContent).not.toContain('FUND')
-  expect(allocation.querySelector('.alloc-summary')?.textContent).toContain('100% in profit')
-  expect(allocation.querySelector('.alloc-summary')?.textContent).toContain('100% equity')
+  expect(allocation.querySelector('.alloc-top .sr-only')?.textContent).toContain('EQUITY')
+  expect(allocation.querySelector('.alloc-top .sr-only')?.textContent).not.toContain('FUND')
   expect(container.querySelector('.insights-summary-current strong')?.textContent).toBe(summary)
   expect(container.querySelectorAll('.allocation-tile')).toHaveLength(2)
   await select('Mutual Funds')
-  expect(allocation.querySelector('.alloc-legend')?.textContent).toContain('FUND')
-  expect(allocation.querySelector('.alloc-legend')?.textContent).not.toContain('EQUITY')
+  expect(allocation.querySelector('.alloc-top .sr-only')?.textContent).toContain('FUND')
+  expect(allocation.querySelector('.alloc-top .sr-only')?.textContent).not.toContain('EQUITY')
   await select('All')
-  expect(allocation.querySelector('.alloc-summary')?.textContent).toContain('50% in profit')
   expect(state.build).toHaveBeenCalledTimes(1)
   state.store.settings.hideValues = true
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
   expect(allocation.textContent).toContain('Values are hidden')
-  expect(allocation.querySelector('.alloc-legend, .alloc-summary, .alloc-more')).toBeNull()
+  expect(allocation.querySelector('.alloc-top .sr-only')).toBeNull()
   state.store.settings.hideValues = false
   state.store.snapshot = investmentWorkspace.readSnapshot({ folios: [{ id: 'single', name: 'Single', importedAt: 0, positions: positions.slice(0, 1) }], quotes: {} })
   await act(async () => root!.render(<InsightsView onRequestImport={vi.fn()} />))
@@ -657,5 +663,5 @@ it('moves the full allocation and composition below movers with its own recovera
   expect(allocation.querySelectorAll('.scope-btn')).toHaveLength(3)
   await select('All')
   expect(allocation.querySelector('.alloc-empty')).toBeNull()
-  expect(allocation.querySelector('.alloc-legend')?.textContent).toContain('EQUITY')
+  expect(allocation.querySelector('.alloc-top .sr-only')?.textContent).toContain('EQUITY')
 })

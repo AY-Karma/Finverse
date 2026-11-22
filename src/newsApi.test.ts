@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createNewsHandler } from '../api/news'
 
+const passThrough = async (query: string) => query
+
 const STORY = '<rss><channel><item><title>Reliance rises</title><link>https://example.com/story</link></item></channel></rss>'
 
 afterEach(() => vi.useRealTimers())
@@ -10,7 +12,6 @@ describe('news API', () => {
     const response = await createNewsHandler({ fetcher: vi.fn(async () => new Response(STORY)) })(new Request('http://localhost/api/news?source=wire-et'))
     expect(response.headers.get('Vercel-CDN-Cache-Control')).toBe('public, s-maxage=300, must-revalidate')
   })
-
   it('caches finished briefing periods for hours but keeps the current period on the five-minute edge cache', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-16T06:00:00Z'))
@@ -23,7 +24,6 @@ describe('news API', () => {
     expect(current.headers.get('Cache-Control')).toBe('no-store')
     expect(current.headers.get('Vercel-CDN-Cache-Control')).toBe('public, s-maxage=300, must-revalidate')
   })
-
   it('hedges a slow company provider after 500ms and cancels the losing request', async () => {
     vi.useFakeTimers()
     const fetcher = vi.fn<typeof fetch>((url, options) => {
@@ -32,7 +32,7 @@ describe('news API', () => {
         options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })
       })
     })
-    const pending = createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
+    const pending = createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
 
     await vi.advanceTimersByTimeAsync(499)
     expect(fetcher).toHaveBeenCalledTimes(1)
@@ -45,7 +45,7 @@ describe('news API', () => {
   it('keeps fast primary results without sending a fallback request', async () => {
     vi.useFakeTimers()
     const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
-    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
 
     await vi.advanceTimersByTimeAsync(500)
     expect(response.status).toBe(200)
@@ -63,7 +63,7 @@ describe('news API', () => {
       })
     })
     let settled = false
-    const pending = createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
+    const pending = createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
       .then((response) => { settled = true; return response })
 
     await vi.advanceTimersByTimeAsync(500)
@@ -78,7 +78,7 @@ describe('news API', () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('', { status: 403 }))
       .mockResolvedValueOnce(new Response(STORY, { status: 200 }))
-    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=search&q=RELIANCE'))
 
     expect(response.status).toBe(200)
     expect(await response.text()).toContain('Reliance rises')
@@ -95,7 +95,7 @@ describe('news API', () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('', { status: 403 }))
       .mockResolvedValueOnce(new Response(STORY))
-    const response = await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=search&q=${company}&region=${region}`))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request(`http://localhost/api/news?source=search&q=${company}&region=${region}`))
     const google = new URL(fetcher.mock.calls[0][0].toString())
     const bing = new URL(fetcher.mock.calls[1][0].toString())
 
@@ -110,7 +110,7 @@ describe('news API', () => {
 
   it.each(['DE', 'us', '', 'US%2CIN'])('rejects unsupported region %s before contacting a provider', async (region) => {
     const fetcher = vi.fn<typeof fetch>()
-    const response = await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=search&q=Apple&region=${region}`))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request(`http://localhost/api/news?source=search&q=Apple&region=${region}`))
     expect(response.status).toBe(400)
     expect(await response.text()).toBe('Invalid news region.')
     expect(fetcher).not.toHaveBeenCalled()
@@ -118,7 +118,7 @@ describe('news API', () => {
 
   it('rejects arbitrary upstream URLs', async () => {
     const fetcher = vi.fn<typeof fetch>()
-    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=https://example.com/private'))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=https://example.com/private'))
 
     expect(response.status).toBe(400)
     expect(fetcher).not.toHaveBeenCalled()
@@ -126,7 +126,7 @@ describe('news API', () => {
 
   it('coalesces simultaneous feed requests and briefly caches provider failures', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => new Response('', { status: 503 }))
-    const handler = createNewsHandler({ fetcher })
+    const handler = createNewsHandler({ fetcher, resolveQuery: passThrough })
     const request = () => new Request('http://localhost/api/news?source=wire-et')
     const responses = await Promise.all(Array.from({ length: 20 }, () => handler(request())))
     expect(responses.every((response) => response.status === 502)).toBe(true)
@@ -141,7 +141,7 @@ describe('news API', () => {
       await gate
       return new Response(STORY)
     })
-    const handler = createNewsHandler({ fetcher })
+    const handler = createNewsHandler({ fetcher, resolveQuery: passThrough })
     const pending = Array.from({ length: 20 }, (_, index) => handler(
       new Request(`http://localhost/api/news?source=search&q=S${index}`),
     ))
@@ -156,7 +156,7 @@ describe('news API', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-06T10:00:00Z'))
     const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
-    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=briefing&topic=policy&from=2026-10-01&through=2026-10-31'))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=briefing&topic=policy&from=2026-10-01&through=2026-10-31'))
     expect(response.status).toBe(200)
     const upstream = new URL(fetcher.mock.calls[0][0].toString())
     expect(upstream.hostname).toBe('news.google.com')
@@ -169,7 +169,7 @@ describe('news API', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-06T10:00:00Z'))
     const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
-    const response = await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=briefing&topic=${topic}&from=2026-11-01&through=2026-11-06`))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request(`http://localhost/api/news?source=briefing&topic=${topic}&from=2026-11-01&through=2026-11-06`))
     expect(response.status).toBe(200)
     expect(new URL(fetcher.mock.calls[0][0].toString()).searchParams.get('gl')).toBe('US')
   })
@@ -178,7 +178,7 @@ describe('news API', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-01T10:00:00Z'))
     const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
-    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=briefing&topic=recap&from=2026-10-01&through=2026-10-31'))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=briefing&topic=recap&from=2026-10-01&through=2026-10-31'))
     expect(response.status).toBe(200)
     expect(fetcher).toHaveBeenCalledTimes(1)
     const upstream = new URL(fetcher.mock.calls[0][0].toString())
@@ -200,7 +200,7 @@ describe('news API', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-06T10:00:00Z'))
     const fetcher = vi.fn<typeof fetch>()
-    expect((await createNewsHandler({ fetcher })(new Request(`http://localhost/api/news?source=briefing&${query}`))).status).toBe(400)
+    expect((await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request(`http://localhost/api/news?source=briefing&${query}`))).status).toBe(400)
     expect(fetcher).not.toHaveBeenCalled()
   })
 
@@ -208,7 +208,7 @@ describe('news API', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-06T18:31:00Z'))
     const fetcher = vi.fn<typeof fetch>(async () => new Response(STORY))
-    const response = await createNewsHandler({ fetcher })(new Request('http://localhost/api/news?source=briefing&topic=india&from=2026-11-01&through=2026-11-07'))
+    const response = await createNewsHandler({ fetcher, resolveQuery: passThrough })(new Request('http://localhost/api/news?source=briefing&topic=india&from=2026-11-01&through=2026-11-07'))
     expect(response.status).toBe(200)
   })
 })

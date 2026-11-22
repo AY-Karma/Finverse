@@ -7,6 +7,8 @@ export const BLUE_ACCENT = {
   spark: 'rgba(59, 130, 246, 0.14)',
 }
 
+const THEME_COLORS: Record<Mode, string> = { dark: '#000000', default: '#0d0d0c', light: '#f2f2ef' }
+
 export const LIGHT_BLUE_ACCENT = {
   ...BLUE_ACCENT,
   primary: '#2563eb',
@@ -33,7 +35,7 @@ export function applyTheme({ density, mode }: { density: Density; mode: Mode }):
     root.style.setProperty('--spark', accent.spark)
     root.dataset.mode = mode
     const themeColorMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-    if (themeColorMeta) themeColorMeta.content = mode === 'light' ? '#f2f2ef' : '#0d0d0c'
+    if (themeColorMeta) themeColorMeta.content = THEME_COLORS[mode]
   }
   const shouldAnimate = root.dataset.mode && root.dataset.mode !== mode
     && typeof document.startViewTransition === 'function'

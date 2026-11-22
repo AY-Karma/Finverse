@@ -9,15 +9,16 @@
     <meta name="referrer" content="no-referrer" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; form-action 'self'; script-src 'self' 'sha256-VnGUrM12KWVnlLgHOq0kgYbtdZe8UtOr3aQT/5Avfsw='; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://cdn.jsdelivr.net https://eodhd.com; connect-src 'self' https://api.mfapi.in; object-src 'none'"
+      content="default-src 'self'; base-uri 'self'; form-action 'self'; script-src 'self' 'sha256-XASkSadT/HDRsEWqysowxZ6gtt6wBNJrD+ZadhwanQY='; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://cdn.jsdelivr.net https://eodhd.com; connect-src 'self' https://api.mfapi.in; object-src 'none'"
     />
     <title>Finverse</title>
     <meta name="theme-color" content="#0d0d0c" />
     <!-- Reads the saved theme before first paint so light-mode users get a light boot screen. Allowed by its hash in the CSP; edit it only with the hash. -->
-    <script>try{if(JSON.parse(localStorage.getItem('finverse:settings')).mode==='light'){document.documentElement.dataset.mode='light';document.querySelector('meta[name=theme-color]').content='#e6e6e3'}}catch{}</script>
+    <script>try{var m=JSON.parse(localStorage.getItem('finverse:settings')).mode;if(m==='light'||m==='dark'){document.documentElement.dataset.mode=m;document.querySelector('meta[name=theme-color]').content=m==='light'?'#e6e6e3':'#000000'}}catch{}</script>
     <style>
       /* Boot screen: paints with the HTML, before the app's CSS and JS arrive. React replaces it on first render. */
       html:not([data-mode='light']) { background: #0d0d0c; color-scheme: dark; }
+      html[data-mode='dark'], html[data-mode='dark'] .boot { background: #000000; }
       html[data-mode='light'] { background: #f2f2ef; color-scheme: light; }
       body { margin: 0; }
       .boot { position: fixed; inset: 0; display: grid; font-family: system-ui, sans-serif; place-content: center; justify-items: center; gap: 20px; background: #0d0d0c; opacity: 0; animation: boot-in 300ms cubic-bezier(0.23, 1, 0.32, 1) 200ms forwards; }

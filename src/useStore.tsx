@@ -25,7 +25,9 @@ import { nextNavRefreshAt as navRefreshDeadline } from './navRefreshSchedule'
 import { loadCachedQuotes, saveCachedQuotes } from './liveQuoteCache'
 import { BSE_PRICING_NOTICE, hasInrDenomination, normalizePosition } from './instruments'
 import { combinedPositionMembers, hasSupportedValuationCurrency, quoteKey } from './valuation'
-import { loadMonitorState } from './monitor'
+import { loadMonitorState, MONITOR_CHANGED, MONITOR_STORAGE_KEY, saveMonitorState } from './monitor'
+import { applySipEstimates } from './sipHoldings'
+import type { SipPlan } from './sipPlans'
 import { remapMonitorReferences } from './workspaceReferences'
 import { captureWorkspaceRecords, workspaceWritesBlocked, writeWorkspaceRecords } from './workspaceStorage'
 import { latestUndoableAccount, planStatementImport, undoStatementImport, type StatementImportOptions } from './accountStatements'
@@ -84,6 +86,9 @@ interface Store {
   undoLastImport: () => Promise<boolean>
   undoImportFolioId: string | null
   exportPortfolio: (format: 'json' | 'csv') => void
+  sipPlans: SipPlan[]
+  /** Adds SIP estimates to, or removes them from, the holding. Returns false when the workspace cannot be written. */
+  setSipEstimatesAdded: (planId: string, dates: string[], added: boolean) => boolean
   confirmFundScheme: (holdingId: string, candidate: FundSchemeCandidate) => Promise<void>
   confirmInstrument: (holdingId: string, correction: InstrumentCorrection) => Promise<void>
   confirmNsePricing: (holdingId: string, candidate: NsePricingCandidate) => Promise<void>
@@ -116,6 +121,28 @@ function readPersistedFolios(): string | null | undefined {
 
 function readPersistedSettings(): string | null | undefined {
   try { return localStorage.getItem('finverse:settings') } catch { return undefined }
+}
+
+/** Saved SIP plans, kept in step with Monitor saves in this tab, other tabs and restores. */
+function useSavedSipPlans(): SipPlan[] {
+  const read = () => loadMonitorState().state.sipPlans ?? []
+  const [plans, setPlans] = useState<SipPlan[]>(read)
+  useEffect(() => {
+    const reload = () => {
+      const next = read()
+      setPlans((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+    }
+    const onStorage = (event: StorageEvent) => { if (event.key === MONITOR_STORAGE_KEY) reload() }
+    window.addEventListener(MONITOR_CHANGED, reload)
+    window.addEventListener('finverse:monitor-restored', reload)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(MONITOR_CHANGED, reload)
+      window.removeEventListener('finverse:monitor-restored', reload)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [])
+  return plans
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -203,7 +230,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     catch (cause) { setWorkspaceError(cause instanceof Error ? cause.message : 'Preferences could not be changed.') }
   }, [assertCurrentWorkspace])
 
-  const holdings = useMemo(() => investmentWorkspace.prepareHoldings(folios), [folios])
+  const sipPlans = useSavedSipPlans()
+  const importedHoldings = useMemo(() => investmentWorkspace.prepareHoldings(folios), [folios])
+  const holdings = useMemo(() => applySipEstimates(importedHoldings, sipPlans), [importedHoldings, sipPlans])
   const valuation = useMemo(
     () => investmentWorkspace.readSnapshot({ folios, holdings, quotes: settings.allowExternalData ? liveQuotes : EMPTY_QUOTES }),
     [folios, holdings, liveQuotes, settings.allowExternalData],
@@ -438,10 +467,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (cause) { setWorkspaceError(cause instanceof Error ? cause.message : 'The account could not be removed.'); return false }
   }, [persistPortfolioChange, balanceEventHistory])
 
+  const setSipEstimatesAdded = useCallback((planId: string, dates: string[], added: boolean): boolean => {
+    if (workspaceChanged) return false
+    const loaded = loadMonitorState()
+    if (loaded.error) return false
+    const sipPlans = (loaded.state.sipPlans ?? []).map((plan) => plan.id !== planId ? plan : {
+      ...plan,
+      instalments: plan.instalments?.map((item) => {
+        if (item.status !== 'recorded' || item.imported || !dates.includes(item.date)) return item
+        const { added: _added, ...rest } = item
+        return added ? { ...rest, added: true as const } : rest
+      }),
+    })
+    if (!saveMonitorState({ ...loaded.state, sipPlans })) return false
+    window.dispatchEvent(new CustomEvent(MONITOR_CHANGED, { detail: null }))
+    return true
+  }, [workspaceChanged])
+
   const exportPortfolio = useCallback((format: 'json' | 'csv') => {
     setWorkspaceError('')
     try {
-      const content = format === 'json' ? JSON.stringify(createWorkspaceArchive(folios, settings, portfolioHistory), null, 2) : exportPortfolioCsv(positions)
+      const content = format === 'json' ? JSON.stringify(createWorkspaceArchive(folios, settings, portfolioHistory), null, 2) : exportPortfolioCsv(importedHoldings.positions)
       const blob = new Blob([content], { type: format === 'json' ? 'application/json' : 'text/csv' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -452,7 +498,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (cause) {
       setWorkspaceError(cause instanceof Error ? cause.message : 'The backup could not be created.')
     }
-  }, [folios, positions, settings, portfolioHistory])
+  }, [folios, importedHoldings, settings, portfolioHistory])
 
   // Equities and scheduled NAV batches have independent request lifecycles.
   const refreshQuoteGroup = useCallback(async (group: 'equity' | 'nav'): Promise<LiveQuotesResult | null> => {
@@ -698,6 +744,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     undoLastImport,
     undoImportFolioId: latestUndoableAccount(folios)?.id ?? null,
     exportPortfolio,
+    sipPlans,
+    setSipEstimatesAdded,
     confirmFundScheme,
     confirmInstrument,
     confirmNsePricing,
@@ -706,7 +754,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     refreshNow,
   }), [folios, positions, rawPositions, liveQuotes, snapshot, portfolioHistory, marketDataRefreshing,
     marketDataResult, removeFolio, confirmFolioUnchanged, settings, setSettings, previewFile, commitImport, commitImports,
-    undoLastImport, exportPortfolio, confirmFundScheme, confirmInstrument, confirmNsePricing, workspaceChanged, settingsSaveFailed, refreshNow])
+    undoLastImport, exportPortfolio, sipPlans, setSipEstimatesAdded, confirmFundScheme, confirmInstrument, confirmNsePricing, workspaceChanged, settingsSaveFailed, refreshNow])
 
   return <StoreContext.Provider value={value}>
     {!!snapshot.unsupportedCurrencyCount && <div className="folio-save-warning" role="status"><span>Partial INR totals. {snapshot.unsupportedCurrencyCount} holding{snapshot.unsupportedCurrencyCount === 1 ? '' : 's'} in unsupported native currencies excluded. Original amounts remain in exports.</span></div>}

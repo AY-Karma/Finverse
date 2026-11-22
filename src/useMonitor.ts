@@ -3,9 +3,15 @@ import { useStore } from './useStore'
 import { privateValue } from './privacy'
 import { emptyMonitorReadingState, parseMonitorReadingState, type MonitorReadingState } from './monitorReading'
 import type { IpoIssue } from './ipoProtocol'
+import { parseWatchSecurity, watchSecurityKey, type WatchSecurity } from './watchSecurity'
+import { useWatchQuotes } from './useWatchQuotes'
+import { MAX_SIP_PLANS, istToday, parseSipPlan, settleSipPlan, usesEquityCalendar, type SipPlan } from './sipPlans'
+import { reconcileSipImports } from './sipHoldings'
+import { dismissFollowNotice, EMPTY_FOLLOWS, toggleCompanyFollow, toggleFollowedDay, type MonitorFollows } from './monitorFollows'
+import { fetchSchemeNavs } from './live'
 import {
   evaluateMonitorRules, hasDuplicateMonitorRule, holdingIdentity, loadMonitorState, reconcileMonitorRules, saveMonitorState, validReminderDate,
-  MONITOR_STORAGE_KEY, parseIpoWatch,
+  MONITOR_CHANGED, MONITOR_STORAGE_KEY, parseIpoWatch,
   type AlertState, type MonitorAlert, type RuleCondition,
 } from './monitor'
 
@@ -19,10 +25,9 @@ function persistedMonitor(): string | null | undefined {
 }
 
 let latestLocalRevision: string | null | undefined
-const MONITOR_CHANGED = 'finverse:monitor-changed'
 
 export function useMonitor() {
-  const { positions, liveQuotes, settings, refreshNow, marketDataRefreshing, marketDataResult, workspaceReadOnly } = useStore()
+  const { positions, folios, liveQuotes, settings, refreshNow, marketDataRefreshing, marketDataResult, workspaceReadOnly } = useStore()
   const [loaded] = useState(() => ({ ...loadMonitorState(), raw: persistedMonitor() }))
   const persistedRevision = useRef(loaded.raw)
   const [state, setState] = useState(loaded.state)
@@ -34,6 +39,7 @@ export function useMonitor() {
   const [storageError, setStorageError] = useState(loaded.error)
   const [refreshing, setRefreshing] = useState(false)
   const [now, setNow] = useState(Date.now)
+  const [refreshRevision, setRefreshRevision] = useState(0)
 
   const setStatusMessage = useCallback((message: string) => {
     setStatus((current) => ({ message, revision: current.revision + 1 }))
@@ -47,6 +53,41 @@ export function useMonitor() {
     setState(restored.state)
     setStorageError(restored.error)
   }, [])
+
+  // Records due SIP instalments once their NAV is published; rechecked every 30 minutes while any are waiting.
+  const sipToday = istToday(now)
+  const dueSips = (state.sipPlans ?? []).filter((plan) => !plan.paused && plan.start <= sipToday)
+  const dueSipKey = dueSips.map((plan) => `${plan.id}:${plan.schemeCode}:${plan.start}`).join(',')
+  const sipCheck = Math.floor(now / (30 * 60_000))
+  useEffect(() => {
+    if (!dueSipKey || workspaceReadOnly || !settings.allowExternalData) return
+    const controller = new AbortController()
+    void (async () => {
+      for (const plan of dueSips) {
+        const navs = await fetchSchemeNavs(plan.schemeCode, plan.start, sipToday, controller.signal)
+        if (!navs?.length || controller.signal.aborted) continue
+        setState((current) => {
+          let changed = false
+          const sipPlans = (current.sipPlans ?? []).map((item) => {
+            if (item.id !== plan.id) return item
+            const fund = positions.find((position) => position.mfScheme?.code === item.schemeCode)
+            const settled = settleSipPlan(item, sipToday, navs, usesEquityCalendar(item.schemeName, fund?.category))
+            changed ||= settled !== item
+            return settled
+          })
+          return changed ? { ...current, sipPlans } : current
+        })
+      }
+    })().catch(() => {})
+    return () => controller.abort()
+  }, [dueSipKey, sipToday, sipCheck, workspaceReadOnly, settings.allowExternalData])
+
+  // A later import that contains recorded instalments takes over from their estimates.
+  useEffect(() => {
+    if (workspaceReadOnly || !state.sipPlans?.length || !folios) return
+    const reconciled = reconcileSipImports(state.sipPlans, folios)
+    if (reconciled !== state.sipPlans) setState((current) => current.sipPlans === state.sipPlans ? { ...current, sipPlans: reconciled } : current)
+  }, [state.sipPlans, folios, workspaceReadOnly])
 
   function persistState(next: typeof state): boolean {
     if (!saveMonitorState(next)) return false
@@ -96,6 +137,9 @@ export function useMonitor() {
   }, [reloadMonitor])
 
   const rules = useMemo(() => reconcileMonitorRules(state.rules, positions), [state.rules, positions])
+  const watchedSecurities = useMemo(() => state.rules.flatMap((rule) => rule.security && rule.active ? [rule.security] : []), [state.rules])
+  const watchQuotes = useWatchQuotes(watchedSecurities, settings.allowExternalData && !workspaceReadOnly, now, refreshRevision)
+  const quotes = useMemo(() => ({ ...liveQuotes, ...watchQuotes }), [liveQuotes, watchQuotes])
   const reading = useMemo(() => state.reading ?? emptyMonitorReadingState(), [state.reading])
 
   useEffect(() => {
@@ -109,8 +153,8 @@ export function useMonitor() {
 
   useEffect(() => {
     if (workspaceReadOnly) return
-    setState((current) => evaluateMonitorRules(current, positions, liveQuotes, now, settings.allowExternalData))
-  }, [positions, liveQuotes, rules, now, settings.allowExternalData, workspaceReadOnly])
+    setState((current) => evaluateMonitorRules(current, positions, quotes, now, settings.allowExternalData))
+  }, [positions, quotes, rules, now, settings.allowExternalData, workspaceReadOnly])
 
   useEffect(() => {
     if (workspaceReadOnly) return
@@ -128,19 +172,21 @@ export function useMonitor() {
     else setStorageError('')
   }, [state, workspaceReadOnly, reloadMonitor, setStatusMessage])
 
-  function saveRule(input: { id?: string; holdingId: string; condition: RuleCondition; threshold: number }): boolean {
+  function saveRule(input: { id?: string; holdingId?: string; security?: WatchSecurity; condition: RuleCondition; threshold: number }): boolean {
     if (!canChangeMonitor()) return false
-    const position = positions.find((item) => item.id === input.holdingId)
+    const security = input.security ? parseWatchSecurity(input.security) : null
+    const position = security ? undefined : positions.find((item) => item.id === input.holdingId)
     const existing = input.id ? state.rules.find((rule) => rule.id === input.id) : undefined
-    if (!position || !['price_above', 'price_below', 'daily_move'].includes(input.condition) || !Number.isFinite(input.threshold) || input.threshold <= 0 || (input.id && !existing)) {
-      setStatusMessage('Choose a current holding and enter a positive, finite watch level.')
+    if ((!security && !position) || !['price_above', 'price_below', 'daily_move'].includes(input.condition) || !Number.isFinite(input.threshold) || input.threshold <= 0 || (input.id && !existing)) {
+      setStatusMessage('Choose a security from the list and enter a positive, finite watch level.')
       return false
     }
+    const target = security
+      ? { holdingId: watchSecurityKey(security), holding: security.name, instrumentIdentity: watchSecurityKey(security), security }
+      : { holdingId: position!.id, holding: position!.name || position!.ticker || existing?.holding || 'Holding', instrumentIdentity: holdingIdentity(position!) }
     const rule = {
       id: input.id ?? crypto.randomUUID(),
-      holdingId: position.id,
-      holding: position.name || position.ticker || existing?.holding || 'Holding',
-      instrumentIdentity: holdingIdentity(position),
+      ...target,
       condition: input.condition,
       threshold: input.threshold,
       active: existing?.active ?? true,
@@ -267,6 +313,42 @@ export function useMonitor() {
     return true
   }
 
+  function saveSipPlan(input: SipPlan): boolean {
+    if (!canChangeMonitor()) return false
+    const plan = parseSipPlan(input)
+    const plans = state.sipPlans ?? []
+    const existing = plans.some((item) => item.id === input.id)
+    if (!plan) {
+      setStatusMessage('Check the SIP amount, date, provider and payment method.')
+      return false
+    }
+    if (plans.some((item) => item.schemeCode === plan.schemeCode && item.id !== plan.id)) {
+      setStatusMessage('This fund already has SIP tracking. Edit its existing setup.')
+      return false
+    }
+    if (!existing && plans.length >= MAX_SIP_PLANS) {
+      setStatusMessage(`You can track up to ${MAX_SIP_PLANS} SIPs.`)
+      return false
+    }
+    setState((current) => {
+      const saved = current.sipPlans ?? []
+      return { ...current, sipPlans: existing ? saved.map((item) => item.id === plan.id ? plan : item) : [...saved, plan] }
+    })
+    return true
+  }
+
+  function deleteSipPlan(id: string): boolean {
+    if (!canChangeMonitor() || !state.sipPlans?.some((plan) => plan.id === id)) return false
+    setState((current) => ({ ...current, sipPlans: (current.sipPlans ?? []).filter((plan) => plan.id !== id) }))
+    return true
+  }
+
+  function updateFollows(change: (follows: MonitorFollows) => MonitorFollows, message = '') {
+    if (!canChangeMonitor()) return
+    setState((current) => ({ ...current, follows: change(current.follows ?? EMPTY_FOLLOWS) }))
+    if (message) setStatusMessage(message)
+  }
+
   function toggleRule(id: string) {
     if (!canChangeMonitor()) return
     setState((current) => ({ ...current, rules: current.rules.map((rule) => rule.id === id ? { ...rule, active: !rule.active } : rule) }))
@@ -304,6 +386,7 @@ export function useMonitor() {
       return
     }
     setRefreshing(true)
+    setRefreshRevision((revision) => revision + 1)
     try {
       const result = await refreshNow()
       setNow(Date.now())
@@ -328,6 +411,18 @@ export function useMonitor() {
     if (marketDataResult?.failed && !marketDataResult.updated) setStatusMessage('Latest quotes could not be reached. Showing previous provider observations where available.')
   }, [marketDataResult, settings.allowExternalData])
 
+  // New alerts go to Overview's notifications; Monitor only announces them, so its layout never shifts.
+  const knownAlerts = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const open = state.alerts.filter((alert) => alert.state === 'open')
+    const known = knownAlerts.current
+    knownAlerts.current = new Set(open.map((alert) => alert.id))
+    const fresh = known ? open.filter((alert) => !known.has(alert.id)) : []
+    if (!fresh.length) return
+    setStatusMessage(fresh.length > 1 ? `${fresh.length} watch alerts added to notifications.`
+      : settings.hideValues ? 'A watch alert was added to notifications.' : `${fresh[0].holding}: ${fresh[0].title}. Added to notifications.`)
+  }, [state.alerts, settings.hideValues, setStatusMessage])
+
   const redact = (item: MonitorAlert): MonitorAlert => !settings.hideValues ? item : ({
     ...item,
     holding: privateValue(item.holding, true),
@@ -345,7 +440,10 @@ export function useMonitor() {
     allowExternalData: settings.allowExternalData,
     alerts: state.alerts.map(redact),
     rules,
+    quotes,
     ipoWatches: state.ipoWatches ?? [],
+    sipPlans: state.sipPlans ?? [],
+    follows: state.follows ?? EMPTY_FOLLOWS,
     reading,
     events: [...state.events].sort((a, b) => a.date.localeCompare(b.date)).map((event) => settings.hideValues
       ? { ...event, holding: privateValue(event.holding, true), title: privateValue(event.title, true) }
@@ -370,6 +468,14 @@ export function useMonitor() {
     addReminder,
     addIpoWatch,
     deleteIpoWatch,
+    saveSipPlan,
+    toggleCompanyFollow: (company: { identity: string; name: string }) => {
+      const following = (state.follows ?? EMPTY_FOLLOWS).companies.some((item) => item.identity === company.identity)
+      updateFollows((follows) => toggleCompanyFollow(follows, company, Date.now()), following ? `Stopped notifying ${company.name} filings.` : `New ${company.name} filings will appear in notifications.`)
+    },
+    toggleFollowedDay: (day: string) => updateFollows((follows) => toggleFollowedDay(follows, day, today(Date.now()))),
+    dismissFollowNotice: (id: string) => updateFollows((follows) => dismissFollowNotice(follows, id)),
+    deleteSipPlan,
     toggleReminder,
     deleteInactiveReminder,
   }

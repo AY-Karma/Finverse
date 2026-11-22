@@ -2,7 +2,7 @@ import type { Position } from './types'
 import { listingIdentity } from './instruments'
 import { effectivePrice } from './valuation'
 
-export interface StatementHolding {
+interface StatementHolding {
   key: string
   label: string
   quantity: number
@@ -12,7 +12,7 @@ export interface StatementHolding {
   weight: number | null
 }
 
-export interface StatementChange {
+interface StatementChange {
   key: string
   kind: 'added' | 'removed' | 'quantity' | 'valuation'
   before: StatementHolding | null
@@ -20,7 +20,7 @@ export interface StatementChange {
   weightChange: number | null
 }
 
-export interface StatementComparison {
+interface StatementComparison {
   changes: StatementChange[]
   beforeComplete: boolean
   afterComplete: boolean

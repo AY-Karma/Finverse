@@ -5,9 +5,8 @@ import { validateWorkspaceArchive } from './workspaceArchive'
 import { remapMonitorReferences } from './workspaceReferences'
 import { captureWorkspaceRecords, writeWorkspaceRecords } from './workspaceStorage'
 
-export { migrateFolioIdentities }
 
-const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false }
+const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'cobalt', mode: 'default', hideValues: false }
 const EMPTY_MONITOR = { version: 1, rules: [], events: [], alerts: [] }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

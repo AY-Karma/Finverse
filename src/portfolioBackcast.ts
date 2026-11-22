@@ -24,7 +24,7 @@ export interface PortfolioBackcastHistory {
   holdingsTotal: number
 }
 
-export interface PortfolioBackcast extends PortfolioBackcastHistory {
+interface PortfolioBackcast extends PortfolioBackcastHistory {
   /** Share of the currently priced INR value represented by these holdings. */
   coveragePct: number
   /** Same India-calendar date; individual provider observation times can differ. */

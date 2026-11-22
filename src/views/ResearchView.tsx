@@ -1,6 +1,6 @@
 import { numberFormatter, dateFormatter } from '../formatters'
 import { useEffect, useMemo, useRef } from 'react'
-import type { Position } from '../types'
+import type { Mode, Position } from '../types'
 import type { View } from '../useStore'
 import { useStore } from '../useStore'
 import { assetTypeLabel, instrumentLabel } from '../instruments'
@@ -50,6 +50,9 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const page = Math.min(Math.floor(navigation.page), pageCount - 1)
   const visibleRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const searchText = navigation.query.trim()
+  const filtersApplied = navigation.asset !== 'all' || navigation.group !== 'all'
+  const noMatches = rows.length > 0 && filtered.length === 0
   const selected = navigation.holding ? positions.find((position) => position.id === navigation.holding) : visibleRows[0]?.position
   const pricedCount = rows.filter((row) => row.value != null).length
   const marketPricedCount = positions.filter((position) => quotes[quoteKey(position)] != null).length
@@ -104,19 +107,23 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
     </div>
     <div className="rd-workspace">
       <aside className="rd-list-panel" aria-label="Research holdings">
-        <div className="rd-list-head"><strong>Your investments</strong><span>{mask(`${visibleRows.length} of ${filtered.length} shown`)}</span></div>
+        <div className="rd-list-head"><strong>Your investments</strong><span>{noMatches ? 'No matches' : mask(`${visibleRows.length} of ${filtered.length} shown`)}</span></div>
         <div className="rd-holding-list" ref={listRef}>
           {visibleRows.map(({ position }) => <button type="button" className="rd-holding" key={position.id} data-holding-id={position.id} aria-current={selected?.id === position.id ? 'true' : undefined} onClick={() => openHolding(position)}>
             <Avatar position={position} mode={settings.mode} hidden={hide} /><span className="rd-holding-copy"><strong>{mask(position.name || position.ticker)}</strong><span>{mask(position.type === 'mutual-fund' ? position.category || 'Mutual fund' : `${instrumentLabel(position)} · ${position.exchange || 'NSE'} · ${assetTypeLabel(position.type)}`)}</span></span><span className="rd-row-arrow" aria-hidden="true">›</span>
           </button>)}
-          {!visibleRows.length && <div className="rd-list-empty"><strong>No matching investments</strong><p>Try another name or clear the filters.</p><button type="button" className="btn btn--secondary" onClick={() => updateNavigation({ query: '', asset: 'all', group: 'all', page: 0 })}>Clear filters</button></div>}
+          {!visibleRows.length && <div className="rd-list-empty">
+            <strong>{searchText && !hide ? <>No holdings match “{searchText}”</> : 'No holdings match these filters'}</strong>
+            <p>Research covers the investments in your portfolio.</p>
+            <button type="button" className="btn btn--secondary" onClick={() => updateNavigation({ query: '', asset: 'all', group: 'all', page: 0 })}>{searchText && !filtersApplied ? 'Clear search' : 'Clear search and filters'}</button>
+          </div>}
         </div>
         {pageCount > 1 && <nav className="rd-pagination" aria-label="Research pages"><button type="button" disabled={page === 0} onClick={() => updateNavigation({ page: page - 1 })}>Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" disabled={page === pageCount - 1} onClick={() => updateNavigation({ page: page + 1 })}>Next</button></nav>}
         <p className="rd-list-foot">Research guidance, not a buy or sell signal.</p>
       </aside>
       <article className="rd-dossier" aria-label="Selected investment dossier">
         <button className="workspace-action rd-back" type="button" onClick={() => openHolding(null)}><ActionIcon name="holdings" />All holdings</button>
-        {!selected ? <div className="rd-detail-empty"><SearchIcon /><h2>{navigation.holding ? 'Holding no longer available' : 'Choose an investment'}</h2><p>{navigation.holding ? 'The holding may have been removed. Choose another investment from your holdings.' : 'Open a holding to explore its sources and review your investment.'}</p>{navigation.holding && <button type="button" className="btn btn--secondary" onClick={() => openHolding(null)}><ActionIcon name="holdings" />Return to holdings</button>}</div> : <>
+        {!selected ? <div className="rd-detail-empty"><SearchIcon /><h2>{navigation.holding ? 'Holding no longer available' : noMatches ? 'Nothing to open yet' : 'Choose an investment'}</h2><p>{navigation.holding ? 'The holding may have been removed. Choose another investment from your holdings.' : noMatches ? 'Clear the search to choose one of your holdings.' : 'Open a holding to explore its sources and review your investment.'}</p>{navigation.holding && <button type="button" className="btn btn--secondary" onClick={() => openHolding(null)}><ActionIcon name="holdings" />Return to holdings</button>}</div> : <>
           <header className="rd-dossier-head"><Avatar position={selected} mode={settings.mode} hidden={hide} /><div><div className="rd-identity">{mask(`${assetTypeLabel(selected.type)}${selected.type !== 'mutual-fund' ? ` · ${selected.exchange || 'NSE'}` : ''}`)}</div><h2 ref={headingRef} tabIndex={-1}>{mask(selected.name || selected.ticker)}</h2><p>{mask(`${selected.type === 'mutual-fund' ? selected.amc || 'Fund house not recorded' : selected.ticker}${selected.isin ? ` · ${selected.isin}` : ''}`)}</p></div></header>
           <div className="rd-tabs" role="tablist" aria-label="Investment research sections">{tabs.map((tab) => <button type="button" role="tab" id={`rd-tab-${tab.id}`} aria-selected={navigation.tab === tab.id} aria-controls="rd-tab-panel" tabIndex={navigation.tab === tab.id ? 0 : -1} key={tab.id} onClick={() => updateNavigation({ tab: tab.id })} onKeyDown={(event) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -143,8 +150,8 @@ export function ResearchView({ onRequestImport, onGoTo, active = true, onUrlChan
 function Metric({ label, value, movement = '' }: { label: string; value: string; movement?: string }) {
   return <div><dt>{label}</dt><dd className={movement}>{value}</dd></div>
 }
-function Avatar({ position, mode, hidden }: { position: Position; mode: 'light' | 'dark'; hidden: boolean }) {
-  return <span className="rd-avatar" aria-hidden="true">{hidden ? <ActionIcon name="holdings" /> : <img src={monogramTile(position.type === 'mutual-fund' ? position.amc || position.name : position.ticker, position.type === 'etf' ? 'ETF' : undefined, mode)} alt="" />}</span>
+function Avatar({ position, mode, hidden }: { position: Position; mode: Mode; hidden: boolean }) {
+  return <span className="rd-avatar" aria-hidden="true">{hidden ? <ActionIcon name="holdings" /> : <img src={monogramTile(position.type === 'mutual-fund' ? position.amc || position.name : position.ticker, position.type === 'etf' ? 'ETF' : undefined, mode === 'light' ? 'light' : 'dark')} alt="" />}</span>
 }
 function SourceList({ links, hidden }: { links: ResearchLink[]; hidden: boolean }) {
   if (hidden) return <HiddenValuesState />

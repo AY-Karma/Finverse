@@ -43,4 +43,39 @@ describe('verified NSE listing reference API', () => {
     const unavailable = createNseListingsHandler({ fetcher: vi.fn(async () => new Response('', { status: 503 })) })
     expect((await unavailable(request())).status).toBe(502)
   })
+
+  describe('search', () => {
+    const names = 'SYMBOL,NAME OF COMPANY,SERIES,ISIN NUMBER\nTCS,Tata Consultancy Services,EQ,INE467B01029\nTATAMOTORS,Tata Motors Limited,EQ,INE155A01022\nM&M,Mahindra & Mahindra Limited,EQ,INE101A01026\nOLD,Old series,BE,INE009A01021\n'
+    const funds = 'Symbol,Underlying Asset,SecurityName,ISINNumber\nTATAGOLD,Gold,TATA GOLD ETF,INF277K01Z77\nNIFTYBEES,Nifty 50,NIPINDETFNIFTYBEES,INF204KB14I2\n'
+    const search = (q: string) => new Request(`http://localhost/api/nseListings?q=${encodeURIComponent(q)}`)
+
+    it('matches company names and symbols from both masters, symbol and prefix first, without exposing search text', async () => {
+      const handle = createNseListingsHandler({ fetcher: fetcher(names, funds) })
+      const response = await handle(search('tata'))
+      expect(response.headers.get('vercel-cdn-cache-control')).toBe('public, s-maxage=3600, stale-while-revalidate=86400')
+      expect((await response.json()).results).toEqual([
+        { providerSymbol: 'TATAGOLD.NS', isin: 'INF277K01Z77', type: 'etf', name: 'TATA GOLD ETF' },
+        { providerSymbol: 'TATAMOTORS.NS', isin: 'INE155A01022', type: 'stock', name: 'Tata Motors Limited' },
+        { providerSymbol: 'TCS.NS', isin: 'INE467B01029', type: 'stock', name: 'Tata Consultancy Services' },
+      ])
+      expect((await (await handle(search('m&m'))).json()).results.map((item: { providerSymbol: string }) => item.providerSymbol)).toEqual(['M&M.NS'])
+      expect((await (await handle(search('nifty 50'))).json()).results.map((item: { providerSymbol: string }) => item.providerSymbol)).toEqual(['NIFTYBEES.NS'])
+      expect((await (await handle(search('old series'))).json()).results).toEqual([])
+    })
+
+    it('rejects links, free text and oversized queries before fetching, and never mixes modes', async () => {
+      const fetch = fetcher(names, funds)
+      const handle = createNseListingsHandler({ fetcher: fetch })
+      for (const query of ['a', 'https://example.com', 'tata/motors', 'x'.repeat(41), 'tata<script>']) expect((await handle(search(query))).status).toBe(400)
+      expect((await handle(new Request('http://localhost/api/nseListings?q=tata&isins=INE467B01029'))).status).toBe(400)
+      expect(fetch).not.toHaveBeenCalled()
+    })
+
+    it('drops symbols assigned to conflicting securities and fails closed when a master is unavailable', async () => {
+      const conflict = names + 'TATAX,First issuer,EQ,INE000000001\nTATAX,Second issuer,EQ,INE000000002\n'
+      expect((await (await createNseListingsHandler({ fetcher: fetcher(conflict, funds) })(search('tatax'))).json()).results).toEqual([])
+      const down = createNseListingsHandler({ fetcher: vi.fn(async () => new Response('', { status: 503 })) })
+      expect((await down(search('tata'))).status).toBe(502)
+    })
+  })
 })

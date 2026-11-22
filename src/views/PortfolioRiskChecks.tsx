@@ -4,9 +4,9 @@ import type { PortfolioBackcastHistory } from '../portfolioBackcast'
 import { dateFormatter, numberFormatter } from '../formatters'
 import { privateValue } from '../privacy'
 import { signedPercent } from '../valuation'
-import type { DitherColor } from '../components/dither-kit/palette'
+import type { ChartColor } from '../chartPalette'
 import { RiskHelp } from './RiskHelp'
-import { DitherBar } from './DitherBar'
+import { SegmentBar } from './SegmentBar'
 import './portfolioRiskChecks.css'
 
 export function PortfolioRiskChecks({ history, hideValues, pricedCount, loading, coverage }: {
@@ -26,7 +26,7 @@ export function PortfolioRiskChecks({ history, hideValues, pricedCount, loading,
 }
 
 type RiskStatus = 'lower' | 'watch' | 'high'
-const RISK_COLORS: Record<RiskStatus | 'hidden', DitherColor> = { lower: 'green', watch: 'orange', high: 'red', hidden: 'grey' }
+const RISK_COLORS: Record<RiskStatus | 'hidden', ChartColor> = { lower: 'green', watch: 'orange', high: 'red', hidden: 'grey' }
 
 function riskStatus(value: number, watchAt: number, highAt: number): RiskStatus {
   if (value >= highAt) return 'high'
@@ -182,7 +182,7 @@ function RiskProfile({ risk, history, hideValues, coverage, historyStart, histor
                 <span className="risk-track-zone risk-track-zone--lower" style={{ width: `${row.watchAt / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--watch" style={{ width: `${(row.highAt - row.watchAt) / row.scaleMax * 100}%` }} />
                 <span className="risk-track-zone risk-track-zone--high" style={{ width: `${(row.scaleMax - row.highAt) / row.scaleMax * 100}%` }} />
-                <DitherBar segments={[{ value: hideValues ? 0 : row.value ?? 0, color: RISK_COLORS[displayedStatus] }]} scale={row.scaleMax} />
+                <SegmentBar segments={[{ value: hideValues ? 0 : row.value ?? 0, color: RISK_COLORS[displayedStatus] }]} scale={row.scaleMax} />
               </div>}
 
             </article>

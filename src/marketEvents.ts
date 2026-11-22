@@ -1,9 +1,8 @@
-import { normalizePosition } from './instruments'
+import { BSE_PRICING_NOTICE, hasVerifiedNsePricing, normalizePosition } from './instruments'
 import { holdingIdentity } from './monitor'
 import { MAX_EVENT_SYMBOLS, isEventDate, isEventSymbol, isOfficialEventUrl, type MarketEventPayload, type MarketEventsPayload, type MarketEventIssue } from './marketEventsProtocol'
 import type { Position } from './types'
 
-export type { MarketEventKind } from './marketEventsProtocol'
 export interface MarketEvent extends MarketEventPayload { holdingId: string; instrumentIdentity: string; holdingName: string }
 export interface MarketEventsFeed { events: MarketEvent[]; issues: MarketEventIssue[]; fetchedAt: number; sourceFailed?: boolean }
 type Options = { signal?: AbortSignal; forceRefresh?: boolean }
@@ -26,6 +25,17 @@ function payloadEvent(value: unknown): value is MarketEventPayload {
     && (row.kind === 'filing' ? row.dateLabel === 'Published' && typeof row.publishedAt === 'number' && Number.isFinite(row.publishedAt) && row.publishedAt > 0
       : row.kind === 'meeting' || row.kind === 'results' ? row.dateLabel === 'Meeting date' : row.dateLabel === 'Ex-date')
     && typeof row.sourceUrl === 'string' && row.sourceUrl.length <= 2000 && isOfficialEventUrl(row.sourceUrl) && row.source === 'NSE'
+}
+
+/** A verified NSE match (e.g. an imported BSE holding) uses its NSE symbol for events; the imported venue stays as recorded. */
+function eventListing(position: Position): Position {
+  if (!hasVerifiedNsePricing(position)) return position
+  const listing = position.pricingListing!
+  return {
+    ...position, exchange: 'NSE', exchangeSource: 'explicit', currency: 'INR',
+    ticker: listing.providerSymbol.replace(/\.NS$/, ''), providerSymbol: listing.providerSymbol,
+    identityIssue: position.identityIssue === BSE_PRICING_NOTICE ? undefined : position.identityIssue,
+  }
 }
 
 function eligible(position: Position): boolean {
@@ -84,7 +94,7 @@ export function createMarketEventsLoader(fetcher: typeof fetch = fetch, now: () 
 
   return async (positions: Position[], options: Options = {}): Promise<MarketEventsFeed> => {
     if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('Cancelled', 'AbortError')
-    const normalized = positions.map(normalizePosition)
+    const normalized = positions.map(normalizePosition).map(eventListing)
     const supported = normalized.filter(eligible)
     const symbols = [...new Set(supported.map((position) => position.ticker))].sort()
     const issues = coverageIssues(normalized)

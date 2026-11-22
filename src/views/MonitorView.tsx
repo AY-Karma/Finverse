@@ -10,18 +10,22 @@ import { MonitorNewsPanel } from './MonitorNewsPanel'
 import { MonitorIpos } from './MonitorIpos'
 import { IpoWatchRules } from './IpoWatchRules'
 import { MonitorOnboarding } from './MonitorOnboarding'
-import { MonitorAlerts } from './MonitorAlerts'
-import { MonitorAgenda, MonitorDevelopments } from './MonitorAgenda'
+import { CompanyUpdates } from './CompanyUpdates'
+import { EconomicCalendar } from './EconomicCalendar'
+import { MonitorCalendar, useCalendarTab } from './MonitorCalendar'
 import { MonitorCompanyContext } from './MonitorCompanyContext'
-import { RulesPanel, type ReminderRequest, type RuleRequest } from './monitorPanels'
+import { ReminderAction, RulesPanel, type ReminderRequest, type RuleRequest } from './monitorPanels'
 import './monitor.css'
 import './overviewNotifications.css'
 
 export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestImport: () => void; initialQuery?: string }) {
   const controller = useMonitor()
   const { liveQuotes, workspaceReadOnly } = useStore()
-  const { feed, loading, refresh: refreshEvents } = useMarketEvents(controller.positions, controller.allowExternalData, controller.hideValues, true)
+  const hasPortfolio = controller.positions.length > 0
+  const [tab, setTab] = useCalendarTab(hasPortfolio)
   const [contextId, setContextId] = useState('')
+  // Company events load only while their tab or a company's details are open.
+  const { feed, loading, pending: eventsPending, refresh: refreshEvents } = useMarketEvents(controller.positions, controller.allowExternalData && (tab === 'company' || contextId !== ''), controller.hideValues, true)
   const [ruleRequest, setRuleRequest] = useState<RuleRequest>()
   const [reminderRequest, setReminderRequest] = useState<ReminderRequest>()
   const [newsSelection, setNewsSelection] = useState({ identity: '', revision: 0 })
@@ -46,9 +50,15 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
     })
   }
 
-  if (controller.positions.length === 0) return <div className="mp-page">
+  const calendar = <MonitorCalendar tab={tab} onTab={setTab} hasPortfolio={hasPortfolio} action={tab === 'company' && <ReminderAction controller={controller} request={reminderRequest} />}>
+    {tab === 'ipos' ? <MonitorIpos allowed={controller.allowExternalData} watchedIds={controller.hideValues ? [] : controller.ipoWatches.map((watch) => watch.id)} onWatch={controller.addIpoWatch} onUnwatch={controller.deleteIpoWatch} watchReadOnly={workspaceReadOnly || controller.hideValues} />
+      : tab === 'economy' ? <EconomicCalendar allowed={controller.allowExternalData} now={controller.now} followedDays={controller.follows.days} onToggleDay={controller.toggleFollowedDay} readOnly={workspaceReadOnly} />
+      : <CompanyUpdates controller={controller} feed={feed} loading={loading} pending={eventsPending} onRemind={remind} onOpenHolding={setContextId} onRetry={refreshEvents} />}
+  </MonitorCalendar>
+
+  if (!hasPortfolio) return <div className="mp-page">
     <header className="mp-hero"><div className="mp-hero-main"><h1 className="page-title">Monitor</h1><button className="mp-button" type="button" onClick={onRequestImport}>Import portfolio</button></div></header>
-    <MonitorIpos allowed={controller.allowExternalData} watchedIds={controller.hideValues ? [] : controller.ipoWatches.map((watch) => watch.id)} onWatch={controller.addIpoWatch} onUnwatch={controller.deleteIpoWatch} watchReadOnly={workspaceReadOnly || controller.hideValues} />
+    {calendar}
     {controller.ipoWatches.length > 0 && <div className="mp-panel mp-watch-rules" id="monitor-watch-rules"><IpoWatchRules controller={controller} /></div>}
     <MonitorToast message={controller.statusMessage} revision={controller.statusRevision} />
     <details className="mi-setup"><summary><span>Portfolio news &amp; watches</span><span>How it works <span aria-hidden="true">⌄</span></span></summary><MonitorOnboarding onRequestImport={onRequestImport} /></details>
@@ -56,25 +66,22 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
 
   return <div className="mp-page">
     <header className="mp-hero"><div className="mp-hero-main">
-      <div><h1 className="page-title">Monitor</h1><p>{controller.allowExternalData ? 'Your news, company updates and watches.' : 'Market data paused · reload this tab'}</p></div>
+      <div><h1 className="page-title">Monitor</h1><p>{controller.allowExternalData ? 'Your news, market calendar and watches.' : 'Market data paused · reload this tab'}</p></div>
       <button className="mp-button" type="button" disabled={controller.refreshing || !controller.allowExternalData} onClick={() => { void controller.refresh(); refreshEvents() }}>{controller.refreshing ? 'Refreshing prices…' : 'Refresh prices'}</button>
     </div></header>
-    <nav className="mp-section-links" aria-label="Monitor sections"><a href="#monitor-news-heading">News</a><a href="#monitor-ipos-heading">IPOs</a><a href="#monitor-upcoming-heading">Upcoming</a><a href="#monitor-watch-rules">Watches</a></nav>
-    <div className="mp-content-flow" data-has-portfolio={controller.positions.length > 0}>
+    <nav className="mp-section-links" aria-label="Monitor sections"><a href="#monitor-news-heading">News</a><a href="#monitor-calendar">Calendar</a><a href="#monitor-watch-rules">Watches</a></nav>
+    <div className="mp-content-flow" data-has-portfolio="true">
       <div className="mp-monitor-content">
-        <MonitorAlerts controller={controller} onOpenHolding={setContextId} />
         <MonitorNewsPanel initialQuery={initialQuery} selectedIdentity={newsSelection.identity} selectedRevision={newsSelection.revision} reading={controller.reading} onReadingChange={controller.updateReading} onOpenHolding={openIdentity} readOnly={workspaceReadOnly} />
-        <MonitorDevelopments events={feed.events} issues={feed.issues} onOpenHolding={setContextId} />
+        {calendar}
       </div>
-      {controller.positions.length > 0 && <aside className="mp-monitor-sidebar" aria-label="Upcoming events, IPOs and watch rules">
-        <MonitorAgenda controller={controller} feed={feed} loading={loading} onRemind={remind} onOpenHolding={setContextId} onRetry={refreshEvents} reminderRequest={reminderRequest} />
-        <MonitorIpos allowed={controller.allowExternalData} watchedIds={controller.hideValues ? [] : controller.ipoWatches.map((watch) => watch.id)} onWatch={controller.addIpoWatch} onUnwatch={controller.deleteIpoWatch} watchReadOnly={workspaceReadOnly || controller.hideValues} />
+      <aside className="mp-monitor-sidebar" aria-label="Watch rules">
         <div className="mp-panel mp-watch-rules" id="monitor-watch-rules"><RulesPanel controller={controller} request={ruleRequest} /><IpoWatchRules controller={controller} /></div>
-      </aside>}
+      </aside>
     </div>
     {contextPosition && <MonitorCompanyContext key={contextPosition.id} position={contextPosition} quote={liveQuotes[quoteKey(contextPosition)]} controller={controller} events={feed.events} onClose={() => setContextId('')}
       onWatch={() => { setRuleRequest((current) => ({ holdingId: contextPosition.id, revision: (current?.revision ?? 0) + 1 })); setContextId('') }}
-      onRemind={() => { setReminderRequest((current) => ({ holdingId: contextPosition.id, revision: (current?.revision ?? 0) + 1 })); setContextId('') }}
+      onRemind={() => { setTab('company'); setReminderRequest((current) => ({ holdingId: contextPosition.id, revision: (current?.revision ?? 0) + 1 })); setContextId('') }}
       onNews={() => openNews(holdingIdentity(contextPosition))} />}
     <MonitorToast message={controller.statusMessage} revision={controller.statusRevision} />
   </div>

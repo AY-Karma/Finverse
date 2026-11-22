@@ -142,7 +142,9 @@ describe('workspace settings', () => {
     state.settings = { ...state.settings, mode: 'dark', hideValues: false }
     const render = () => act(async () => root.render(<SettingsView onRequestImport={vi.fn()} />))
     await render()
-    const light = [...container.querySelectorAll<HTMLButtonElement>('.mode-toggle button')].find((button) => button.textContent === 'Light')!
+    const modeButtons = [...container.querySelectorAll<HTMLButtonElement>('.mode-toggle button')]
+    expect(modeButtons.map((button) => button.textContent)).toEqual(['Dark', 'Default', 'Light'])
+    const light = modeButtons.find((button) => button.textContent === 'Light')!
     await act(async () => light.click())
     expect(state.setSettings).toHaveBeenCalledWith({ ...state.settings, mode: 'light' })
     state.settings = state.setSettings.mock.lastCall![0]

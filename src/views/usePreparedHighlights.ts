@@ -16,7 +16,7 @@ export type PreparedHighlights = Record<StoryEdition['id'], EditionData>
 
 const NO_POSITIONS: ReturnType<typeof useStore>['positions'] = []
 const NO_NEWS = { items: [] as MarketBriefingStory[], loading: false, ready: true, failed: false, retry: () => {} }
-const NO_EVENTS = { feed: { events: [], issues: [], fetchedAt: 0 } as MarketEventsFeed, loading: false, ready: true, refresh: () => {} }
+const NO_EVENTS = { feed: { events: [], issues: [], fetchedAt: 0 } as MarketEventsFeed, loading: false, pending: false, ready: true, refresh: () => {} }
 
 /** Prepare available editions outside the viewer so opening it reuses their data. */
 export function usePreparedHighlights(today: string, enabled: boolean): PreparedHighlights {

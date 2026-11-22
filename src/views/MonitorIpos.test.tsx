@@ -423,6 +423,7 @@ describe('Monitor IPOs', () => {
     await click('View Company soon IPO details')
     const labels = [...container.querySelectorAll('.mi-step-label')].map((label) => (label.querySelector('.mi-due-long') ?? label.querySelector('.mi-step-due'))?.textContent?.trim() ?? '')
     expect(labels).toEqual(['', '(today)', '(in 1 day)', '(in 3 days)'])
+    expect([...container.querySelectorAll('.mi-step-label .mi-step-due')].map((due) => due.getAttribute('data-urgency'))).toEqual(['urgent', 'urgent', 'calm'])
   })
 
   it('marks missing dates TBA only while an issue is still open or upcoming', async () => {

@@ -8,7 +8,7 @@ import { quoteKey } from '../valuation'
 import { HoldingMarketMoveResults, HoldingMarketMoves } from './HoldingMarketMoves'
 import { marketData } from '../marketData'
 
-vi.mock('./DitherBar', () => ({ DitherBar: () => <span data-contribution-bar /> }))
+vi.mock('./SegmentBar', () => ({ SegmentBar: () => <span data-contribution-bar /> }))
 vi.mock('../marketData', () => ({ marketData: { history: vi.fn() } }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 

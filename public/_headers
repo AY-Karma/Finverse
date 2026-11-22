@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; script-src 'self' 'sha256-VnGUrM12KWVnlLgHOq0kgYbtdZe8UtOr3aQT/5Avfsw='; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://cdn.jsdelivr.net https://eodhd.com; connect-src 'self' https://api.mfapi.in; object-src 'none'
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; script-src 'self' 'sha256-XASkSadT/HDRsEWqysowxZ6gtt6wBNJrD+ZadhwanQY='; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://cdn.jsdelivr.net https://eodhd.com; connect-src 'self' https://api.mfapi.in; object-src 'none'
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff

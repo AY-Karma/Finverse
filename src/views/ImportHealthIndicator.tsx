@@ -1,11 +1,11 @@
 import { useId } from 'react'
-import type { DitherColor } from '../components/dither-kit/palette'
+import type { ChartColor } from '../chartPalette'
 import { getFolioFreshness, type ImportFreshness } from '../importFreshness'
 import { useFolioReviewTime } from '../useFolioReviewTime'
-import { DitherBar } from './DitherBar'
+import { SegmentBar } from './SegmentBar'
 import './ImportHealthIndicator.css'
 
-const STATUS: Record<ImportFreshness, { label: string; description: string; color: DitherColor }> = {
+const STATUS: Record<ImportFreshness, { label: string; description: string; color: ChartColor }> = {
   healthy: { label: 'Healthy import', description: 'Imported within the last 7 days.', color: 'green' },
   aging: { label: 'Aging import', description: 'Imported over 7 days ago, up to 21 days. Consider updating your holdings.', color: 'yellow' },
   old: { label: 'Old import', description: 'Imported over 21 days ago. Import a recent holdings file.', color: 'red' },
@@ -25,7 +25,7 @@ export function ImportHealthIndicator({ importedAt, reviewedAt, showLabel = fals
 
   return <span className={`import-health${showLabel ? ' import-health--label' : ''}`} data-status={freshness} role="img" tabIndex={0}
     aria-label={showLabel ? visibleLabel : label} aria-describedby={descriptionId} title={`${label}. ${description}`}>
-    <DitherBar className="import-health-texture" segments={[{ value: 1, color: status.color }]} />
+    <SegmentBar className="import-health-texture" segments={[{ value: 1, color: status.color }]} />
     {showLabel && <span className="import-health-label">{visibleLabel}</span>}
     <span className="sr-only" id={descriptionId}>{description}</span>
   </span>

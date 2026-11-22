@@ -1,6 +1,5 @@
 .performance-panel-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
 .performance-comparison > .panel-head { margin-bottom: 16px; }
-.insight-panel--benchmark .insight-chart-metric + .insight-chart-metric { border-left: 0; }
 .exposure-mode { align-self: start; justify-self: start; margin: 0 0 16px; }
 .insight-panel--exposure { grid-template-rows: auto auto minmax(0, 1fr); }
 .contribution-period-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: 12px; }

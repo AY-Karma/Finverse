@@ -12,9 +12,9 @@ it('loads compiled API entrypoints in Node ESM and handles requests without a bu
     mkdirSync(join(directory, 'api'))
     mkdirSync(join(directory, 'src'))
     for (const file of [
-      'api/news', 'api/history', 'api/quotes', 'api/events', 'api/nseListings',
+      'api/news', 'api/_newsQuery', 'api/history', 'api/quotes', 'api/events', 'api/nseListings',
       'api/_nseReference', 'api/_requestBudget', 'api/_nseSymbolChanges', 'api/_nseClosingPrices',
-      'api/ipos', 'src/marketCalendar', 'src/ipoProtocol',
+      'api/ipos', 'api/economicCalendar', 'src/economicCalendarProtocol', 'src/marketCalendar', 'src/ipoProtocol',
       'src/ipoGmpHistoryProtocol', 'src/marketDataProtocol', 'src/marketEventsProtocol', 'src/nsePricingProtocol',
     ]) {
       const compiled = ts.transpileModule(readFileSync(`${file}.ts`, 'utf8'), {
@@ -24,14 +24,14 @@ it('loads compiled API entrypoints in Node ESM and handles requests without a bu
     }
     const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
       globalThis.fetch = () => { throw new Error('Invalid requests must not reach providers') }
-      for (const name of ['news', 'history', 'quotes', 'events', 'nseListings', 'ipos', 'ipos?slug=Bad%20Slug']) {
+      for (const name of ['news', 'history', 'quotes', 'events', 'nseListings', 'ipos', 'ipos?slug=Bad%20Slug', 'economicCalendar']) {
         const { default: entry } = await import('./api/' + name.split('?')[0] + '.js')
-        const response = await entry.fetch(new Request('https://example.com/api/' + name + (name === 'ipos' ? '?unsupported=1' : '')))
+        const response = await entry.fetch(new Request('https://example.com/api/' + name + (name === 'ipos' || name === 'economicCalendar' ? '?unsupported=1' : '')))
         if (response.status !== 400) throw new Error(name + ': HTTP ' + response.status)
         console.log(name + ': 400')
       }
     `], { cwd: directory, encoding: 'utf8', timeout: 10_000 })
-    expect(output.trim().split(/\r?\n/)).toEqual(['news: 400', 'history: 400', 'quotes: 400', 'events: 400', 'nseListings: 400', 'ipos: 400', 'ipos?slug=Bad%20Slug: 400'])
+    expect(output.trim().split(/\r?\n/)).toEqual(['news: 400', 'history: 400', 'quotes: 400', 'events: 400', 'nseListings: 400', 'ipos: 400', 'ipos?slug=Bad%20Slug: 400', 'economicCalendar: 400'])
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
