@@ -22,7 +22,7 @@ function positive(value: unknown): number | null { const parsed = number(value);
 function text(value: unknown): string { return typeof value === 'string' ? value.trim().slice(0, 200) : '' }
 function date(value: unknown): string | null { const parsed = text(value).slice(0, 10); return isIpoDate(parsed) ? parsed : null }
 function today(now: number): string { return new Date(now + 19_800_000).toISOString().slice(0, 10) }
-export function normalizeIpoName(value: string): string { return value.toLowerCase().replace(/\b(?:limited|ltd)\b/g, '').replace(/[^a-z0-9]/g, '') }
+function normalizeIpoName(value: string): string { return value.toLowerCase().replace(/\b(?:limited|ltd)\b/g, '').replace(/[^a-z0-9]/g, '') }
 
 function status(row: Row, at: number): IpoStatus | null {
   const known = text(row.status)
@@ -235,8 +235,8 @@ export function createIpoGmpHistoryHandler(dependencies: Partial<Dependencies> =
   }
 }
 
-export const handleIpoRequest = createIpoHandler()
-export const handleIpoGmpHistoryRequest = createIpoGmpHistoryHandler()
+const handleIpoRequest = createIpoHandler()
+const handleIpoGmpHistoryRequest = createIpoGmpHistoryHandler()
 
 /** One deployed function: `/api/ipos` lists issues; `/api/ipos?slug=<issue>` returns that issue's daily GMP trend. */
 export function handleIpoApiRequest(request: Request): Promise<Response> {

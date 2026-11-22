@@ -3,7 +3,7 @@ import growwIcon from './assets/imports/groww.png'
 import indmoneyIcon from './assets/imports/indmoney.png'
 import angelOneIcon from './assets/imports/angel-one.ico'
 
-export interface ImportSource {
+interface ImportSource {
   id: 'zerodha' | 'groww' | 'indmoney' | 'angel-one'
   name: string
   icon: string

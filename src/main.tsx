@@ -8,6 +8,9 @@ import { entryRoute } from './entryRoute'
 import { recoverWorkspaceWrite } from './workspaceArchive'
 import { migrateWorkspaceIdentities } from './identityMigration'
 import { WorkspaceRestorePanel } from './views/WorkspaceRestore'
+import { loadSampleWorkspace, SAMPLE_WORKSPACE_ENABLED } from './sampleWorkspace'
+import { SampleWorkspaceBar } from './views/SampleWorkspaceBar'
+import { loadView } from './viewModules'
 import './fonts.css'
 import './design.css'
 
@@ -19,7 +22,19 @@ async function renderWorkspace() {
     return
   }
   if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
+  if (SAMPLE_WORKSPACE_ENABLED) {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('sample')) {
+      if (!loadSampleWorkspace()) {
+        try { sessionStorage.setItem('finverse:sample-notice', 'This browser already holds your workspace, so the sample was not loaded. Open this link in a private window.') } catch { /* the notice is optional */ }
+      }
+      params.delete('sample')
+      window.history.replaceState({}, '', `${window.location.pathname}${params.size ? `?${params}` : ''}`)
+    }
+  }
 
+  // The first screen renders only once its code is ready; a failed load is retried from the screen itself.
+  await loadView(route.view).catch(() => {})
   const recovery = await recoverWorkspaceWrite()
   const migration = recovery.error ? { error: recovery.error } : await migrateWorkspaceIdentities()
   root.render(migration.error ?
@@ -34,6 +49,7 @@ async function renderWorkspace() {
     <React.StrictMode>
       <ErrorBoundary>
         <StoreProvider><App initialView={route.view} /></StoreProvider>
+        {SAMPLE_WORKSPACE_ENABLED && <SampleWorkspaceBar />}
       </ErrorBoundary>
     </React.StrictMode>,
   )

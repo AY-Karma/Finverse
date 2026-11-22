@@ -12,7 +12,7 @@ export interface StatementImportOptions {
   allowUndatedReplacement?: boolean
 }
 
-export interface StatementImportPlan {
+interface StatementImportPlan {
   nextFolios: Folio[]
   added: Position[]
   removed: Position[]

@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   previewFile: vi.fn(), commitImport: vi.fn(), commitImports: vi.fn(), removeFolio: vi.fn(),
   exportPortfolio: vi.fn(), undoLastImport: vi.fn(), undoImportFolioId: null as string | null,
   confirmFolioUnchanged: vi.fn(),
+  liveQuotes: {}, refreshNow: vi.fn(), marketDataRefreshing: false, marketDataResult: null, workspaceReadOnly: false,
 }))
 vi.mock('../useStore', () => ({ useStore: () => state }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -32,6 +33,24 @@ beforeEach(() => {
 })
 
 describe('holdings management', () => {
+  it('shows Recurring SIPs as its own setting below Mutual-fund schemes that stays open until its summary closes it', async () => {
+    state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<ManageHoldings onRequestImport={vi.fn()} reviewOpen={false} onReviewListings={vi.fn()} />))
+      const boxes = [...container.querySelectorAll<HTMLDetailsElement>('details.fund-review')]
+      expect(boxes.map((box) => box.querySelector('summary strong')?.textContent)).toEqual(['Mutual-fund schemes', 'Recurring SIPs'])
+      const sips = boxes[1]
+      await act(async () => sips.querySelector('summary')!.click())
+      await act(async () => document.body.click())
+      expect(sips.open).toBe(true)
+      await act(async () => sips.querySelector('summary')!.click())
+      expect(sips.open).toBe(false)
+    } finally { await act(async () => root.unmount()); container.remove() }
+  })
+
   it('keeps scheme details open when an inside action replaces its clicked control', async () => {
     state.positions = [position, { ...position, id: 'fund', type: 'mutual-fund' }]
     const container = document.createElement('div')
@@ -223,7 +242,7 @@ describe('holdings management', () => {
       const rows = [...container.querySelectorAll('.folio-list > .folio-row')]
       expect(rows.map((row) => row.querySelector('.folio-title > .sym')?.nextElementSibling?.getAttribute('data-status'))).toEqual(['healthy', 'aging', 'old'])
       expect(rows.map((row) => row.querySelector('.import-health-label')?.textContent)).toEqual(['Recent import', 'Review soon', 'Update suggested'])
-      expect(rows.every((row) => row.querySelector('.dither-bar') !== null)).toBe(true)
+      expect(rows.every((row) => row.querySelector('.segment-bar') !== null)).toBe(true)
       const importButton = [...container.querySelectorAll<HTMLButtonElement>('.manage-actions button')].find((button) => button.textContent === 'Import holdings')!
       expect(importButton.disabled).toBe(false)
       await act(async () => importButton.click())

@@ -66,5 +66,7 @@ export function useMarketEvents(positions: Position[], allowed: boolean, masked:
     return () => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visibility); controller?.abort() }
   }, [key, monitoredPositions, allowed, masked, revision, autoRefresh])
 
-  return { feed: allowed && !masked && result?.key === key ? result.feed : EMPTY_FEED, loading: allowed && !masked && loading, ready: !allowed || masked || monitoredPositions.length === 0 || result?.key === key, refresh: () => setRevision((value) => value + 1) }
+  // True until the first result for the current holdings arrives, including the render before the request starts.
+  const pending = allowed && !masked && monitoredPositions.length > 0 && result?.key !== key
+  return { feed: allowed && !masked && result?.key === key ? result.feed : EMPTY_FEED, loading: allowed && !masked && loading, pending, ready: !allowed || masked || monitoredPositions.length === 0 || result?.key === key, refresh: () => setRevision((value) => value + 1) }
 }

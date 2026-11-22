@@ -1,4 +1,5 @@
 ﻿import { useEffect, useId, useRef, useState } from 'react'
+import { SkeletonRows } from './SkeletonRows'
 import { dateFormatter, numberFormatter } from '../formatters'
 import type { IpoFeed, IpoIssue } from '../ipoProtocol'
 import { useIpos } from '../useIpos'
@@ -110,12 +111,13 @@ type IpoWatchActions = { watchedIds?: string[]; onWatch?: (issue: IpoIssue) => v
 
 const istDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' })
 
-/** Countdown for a future stage; the short form keeps narrow timelines on one line. */
+/** Countdown for a future stage, coloured by urgency; the short form keeps narrow timelines on one line. */
 function DueIn({ date, today }: { date: string; today: string }) {
   const days = Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000)
   if (days < 0) return null
-  if (days === 0) return <span className="mi-step-due"> (today)</span>
-  return <span className="mi-step-due"> <span className="mi-due-long">(in {days} {days === 1 ? 'day' : 'days'})</span><span className="mi-due-short" aria-hidden="true">({days}d)</span></span>
+  const urgency = days >= 3 ? 'calm' : days === 2 ? 'soon' : 'urgent'
+  if (days === 0) return <span className="mi-step-due" data-urgency={urgency}> (today)</span>
+  return <span className="mi-step-due" data-urgency={urgency}> <span className="mi-due-long">(in {days} {days === 1 ? 'day' : 'days'})</span><span className="mi-due-short" aria-hidden="true">({days}d)</span></span>
 }
 
 function gmpTiming(gmp: NonNullable<IpoIssue['gmp']>): string {
@@ -166,10 +168,11 @@ function IssueRow({ issue, expanded, trendExpanded, onToggle, onToggleTrend, his
   const trendTrigger = useRef<HTMLButtonElement>(null)
   const historyStatus = history?.status
   const statusInDate = issue.status === 'CLOSED' && issue.closeDate || issue.status === 'LISTED' && issue.listingDate
+  const dueDate = issue.status === 'OPEN' ? issue.closeDate : issue.status === 'UPCOMING' ? issue.openDate : null
   return <article className="mi-issue">
     <div className="mi-row" data-expanded={expanded || trendExpanded}>
       <button className="mi-row-toggle" type="button" aria-label={`View ${issue.name} IPO details`} aria-expanded={expanded} aria-controls={expanded ? `${id}-details` : undefined} aria-describedby={`${id}-meta ${id}-price ${id}-gmp`} onClick={onToggle}>
-      <span className="mi-company"><span className="mi-name">{issue.name}</span><span id={`${id}-meta`} className="mi-meta"><span>{issue.board === 'SME' ? 'SME' : 'Mainboard'}</span>{!statusInDate && <span className="mi-status" data-status={issue.status}>{STATUS[issue.status]}</span>}<span>{dateContext(issue)}</span></span></span>
+      <span className="mi-company"><span className="mi-name">{issue.name}</span><span id={`${id}-meta`} className="mi-meta"><span>{issue.board === 'SME' ? 'SME' : 'Mainboard'}</span>{!statusInDate && <span className="mi-status" data-status={issue.status}>{STATUS[issue.status]}</span>}<span>{dateContext(issue)}{dueDate && <DueIn date={dueDate} today={istDate.format(Date.now())} />}</span></span></span>
         <svg className="mi-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
       </button>
       <span className="mi-price" id={`${id}-price`}><span className="mi-inline-label">Price</span><strong>{priceBand(issue)}</strong></span>
@@ -229,17 +232,14 @@ export function MonitorIpos({ allowed, ...watchActions }: { allowed: boolean } &
   const sortingHistory = sortingGmp && periodIssues.some((issue) => { const slug = ipoHistorySlug(issue); return slug && histories[slug]?.status === 'loading' })
   const changePeriod = (next: Period) => { setPeriod(next); setExpanded(null); setShowAll(false) }
 
-  return <section className="mp-panel mi-panel" aria-labelledby="monitor-ipos-heading">
-    <header className="mp-section-head mp-feature-head mi-heading">
-      <div className="mp-feature-title"><span className="mp-heading-mark" aria-hidden="true"><ActionIcon name="holdings" /></span><h2 id="monitor-ipos-heading" tabIndex={-1}>IPOs</h2></div>
-      {allowed && <button className="mi-refresh" type="button" onClick={refresh} disabled={loading} aria-label="Refresh IPOs" title={loading ? 'Updating IPOs' : 'Refresh IPOs'}><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16.5 7a7 7 0 0 0-12-2L2.5 7m0-4v4h4m-3 6a7 7 0 0 0 12 2l2-2m0 4v-4h-4" /></svg></button>}
-    </header>
+  return <div className="mi-panel">
     {!allowed ? <div className="mi-message"><p>Market data is paused for this workspace.</p><button type="button" className="mp-text-button" onClick={() => window.location.reload()}>Reload workspace</button></div> : <>
-      <div className="mi-filters" data-simple={period === 'UPCOMING'}><IpoSelector label="IPO board" options={BOARDS} value={board} onChange={(value) => { setBoard(value); setExpanded(null); setShowAll(false) }} />{period !== 'UPCOMING' && <IpoSelector label="Sort IPOs" options={SORTS} value={sort} onChange={(value) => { setSort(value); setExpanded(null); setShowAll(false) }} />}</div>
+      <div className="mi-filters" data-simple={period === 'UPCOMING'}><IpoSelector label="IPO board" options={BOARDS} value={board} onChange={(value) => { setBoard(value); setExpanded(null); setShowAll(false) }} />{period !== 'UPCOMING' && <IpoSelector label="Sort IPOs" options={SORTS} value={sort} onChange={(value) => { setSort(value); setExpanded(null); setShowAll(false) }} />}
+        <button className="mi-refresh" type="button" onClick={refresh} disabled={loading} aria-label="Refresh IPOs" title={loading ? 'Updating IPOs' : 'Refresh IPOs'}><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16.5 7a7 7 0 0 0-12-2L2.5 7m0-4v4h4m-3 6a7 7 0 0 0 12 2l2-2m0 4v-4h-4" /></svg></button></div>
       <div className="mi-controls"><div className="mi-periods" role="group" aria-label="IPO status">
         {(['OPEN', 'UPCOMING', 'RECENT'] as const).map((value) => <button type="button" key={value} aria-pressed={period === value} onClick={() => changePeriod(value)}>{STATUS[value]}</button>)}
       </div>{period === 'RECENT' && <span className="mi-period-scope">Past 7 days</span>}</div>
-      {loading && !feed && <div className="mi-loading" role="status"><p>Loading IPOs…</p><span /><span /><span /></div>}
+      {loading && !feed && <SkeletonRows rows={3} label="Loading IPOs" className="mi-loading" />}
       {error && !feed && <div className="mi-failure" role="status"><span className="mi-failure-icon" aria-hidden="true"><ActionIcon name="warning" /></span><div><strong>IPOs are unavailable</strong><p>{error}</p></div><button type="button" className="mi-retry" onClick={refresh} disabled={loading}>Try again<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 0 0-11-2L3 7m0-4v4h4m-3 6a6.5 6.5 0 0 0 11 2l2-2m0 4v-4h-4" /></svg></button></div>}
       {feed && <>
         {feed.stale && <p className="mi-availability" role="status">Showing saved IPOs. The latest refresh failed.</p>}
@@ -257,7 +257,7 @@ export function MonitorIpos({ allowed, ...watchActions }: { allowed: boolean } &
         <FeedContext feed={feed} />
       </>}
     </>}
-  </section>
+  </div>
 }
 
 

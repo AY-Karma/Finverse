@@ -65,7 +65,7 @@ interface WorkspaceInput {
   holdings?: PreparedHoldings
 }
 
-interface PreparedHoldings {
+export interface PreparedHoldings {
   folios: Folio[]
   rawPositions: Position[]
   positions: Position[]

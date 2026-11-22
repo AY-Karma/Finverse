@@ -3,9 +3,15 @@ import type { Mode } from '../types'
 import { MARKET_INDEX_CHOICES, normalizeMarketIndexIds } from '../marketIndexSelection'
 import { useStore } from '../useStore'
 import { ManageHoldings } from './ManageHoldings'
-import { ActionIcon } from './ActionIcon'
+import { ActionIcon, type ActionIconName } from './ActionIcon'
 import { SelectControl } from './SelectControl'
 import './settings.css'
+
+const MODE_OPTIONS: { mode: Mode; label: string; icon: ActionIconName }[] = [
+  { mode: 'dark', label: 'Dark', icon: 'moon' },
+  { mode: 'default', label: 'Default', icon: 'contrast' },
+  { mode: 'light', label: 'Light', icon: 'sun' },
+]
 
 const marketIndexOptions = MARKET_INDEX_CHOICES.map((index) => ({ value: index.id, label: index.label, group: index.region }))
 
@@ -59,7 +65,7 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
             <SettingRow label="Appearance" className="setting-row--appearance">
               <div className="settings-control mode-toggle" role="group" aria-label="Appearance mode" data-selected-mode={settings.mode}>
                 <span className="mode-toggle-thumb" aria-hidden="true" />
-                {(['dark', 'light'] as Mode[]).map((modeOption) => (
+                {MODE_OPTIONS.map(({ mode: modeOption, label, icon }) => (
                   <button
                     key={modeOption}
                     type="button"
@@ -67,8 +73,8 @@ export function SettingsView({ onRequestImport }: { onRequestImport: (accountId?
                     aria-pressed={settings.mode === modeOption}
                     onClick={() => update({ mode: modeOption })}
                   >
-                    <ActionIcon name={modeOption === 'dark' ? 'moon' : 'sun'} />
-                    {modeOption === 'dark' ? 'Dark' : 'Light'}
+                    <ActionIcon name={icon} />
+                    {label}
                   </button>
                 ))}
               </div>

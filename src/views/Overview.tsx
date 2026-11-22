@@ -8,12 +8,13 @@ import { investmentWorkspace } from '../investmentWorkspace'
 import { hasVerifiedNsePricing, needsInstrumentReview } from '../instruments'
 import { getFolioFreshness } from '../importFreshness'
 import type { LiveQuote, Position } from '../types'
+import { sipEntriesForFund, type SipEntry } from '../sipHoldings'
 import type { View } from '../useStore'
 import { MarketRefreshStatus } from './MarketRefreshStatus'
 import { quoteRefreshIssueText, resolveYahooSymbol } from '../live'
 import { MarketCalendar } from './MarketCalendar'
 import { ActionIcon } from './ActionIcon'
-import { DitherBar } from './DitherBar'
+import { SegmentBar } from './SegmentBar'
 import { PortfolioWelcome } from './PortfolioWelcome'
 import { MarketIndexTicker } from './MarketIndexTicker'
 import { OverviewNotifications } from './OverviewNotifications'
@@ -378,7 +379,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
             {(foliosNeedReview || pendingListings > 0) && <div className="overview-notices">
               {foliosNeedReview && <div className="overview-review overview-review--folios">
                 <button className="btn overview-review-action overview-review-action--red" type="button" onClick={() => onGoTo('settings', 'manage-holdings')}>
-                  <DitherBar className="overview-review-texture" segments={[{ value: 1, color: 'red' }]} />Update folios
+                  <SegmentBar className="overview-review-texture" segments={[{ value: 1, color: 'red' }]} />Update folios
                 </button>
                 <p className="overview-review-note" role="status">Over 21 days since your last check. Review or confirm no changes.</p>
               </div>}
@@ -511,7 +512,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
                         {fund && <button className={`ledger-caret${open ? ' ledger-caret--open' : ''}`} type="button" aria-label={`Show details for ${mask(r.symbol)}`} aria-expanded={open} onClick={() => setExpandedFundId(open ? null : r.id)}>▾</button>}
                         <span className="ledger-symbol-name">{mask(r.symbol)}</span>
                       </td>
-                      <td>{mask(fmtUnits(r.qty))}</td>
+                      <td>{mask(fmtUnits(r.qty))}{r.position.sipEstimate && !hideValues && <SipEstimateMarker fund={r.position} />}</td>
                       <td>{mask(formatCost(r.buy, r.costSupported))}</td>
                       <td>
                         <LastTrade price={r.ltp} dayMove={r.dayMove} hideValues={hideValues} imported={r.importedPrice} />
@@ -540,7 +541,7 @@ export function Overview({ onGoTo, onRequestImport, highlightsEntry }: { onGoTo:
                       <span className="ledger-mobile-primary">
                         <span className="ledger-mobile-name" title={mask(row.symbol)}>{fund && <span className="ledger-fund-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>}{mask(row.symbol)}</span>
                         <span className="ledger-mobile-secondary ledger-mobile-meta">
-                          <span>Qty {mask(fmtUnits(row.qty))}</span>
+                          <span>Qty {mask(fmtUnits(row.qty))}{row.position.sipEstimate && !hideValues && <SipEstimateMarker fund={row.position} />}</span>
                           <span className="ledger-mobile-last-trade"><span>LTP</span><LastTrade price={row.ltp} dayMove={row.dayMove} hideValues={hideValues} imported={row.importedPrice} /></span>
                         </span>
                       </span>
@@ -702,7 +703,7 @@ function MFLedger({
                     {mask(p.name || p.ticker)}
                   </span>
                 </td>
-                <td>{mask(fmtUnits(p.quantity))}</td>
+                <td>{mask(fmtUnits(p.quantity))}{p.sipEstimate && !hideValues && <SipEstimateMarker fund={p} />}</td>
                 <td>{mask(formatCost(p.invested, hasSupportedValuationCurrency(p)))}</td>
                 <td>{mask(livePriceOf(p, live) == null ? 'Unpriced' : formatCurrency(value))}</td>
                 <td className={livePriceOf(p, live) == null ? 'muted' : value >= p.invested ? 'up' : 'down'}>
@@ -739,7 +740,7 @@ function MFLedger({
             <button className="ledger-mobile-row" type="button" onClick={() => setExpandedId(open ? null : fund.id)} aria-expanded={open}>
               <span className="ledger-mobile-primary">
                 <span className="ledger-mobile-name">{mask(fund.name || fund.ticker)}</span>
-                <span className="ledger-mobile-secondary">{mask(fmtUnits(fund.quantity))} units{!hideValues && fund.amc ? ` · ${fund.amc}` : ''}</span>
+                <span className="ledger-mobile-secondary">{mask(fmtUnits(fund.quantity))} units{fund.sipEstimate && !hideValues && <SipEstimateMarker fund={fund} />}{!hideValues && fund.amc ? ` · ${fund.amc}` : ''}</span>
               </span>
               <span className="ledger-mobile-primary ledger-mobile-primary--right">
                 <span className="ledger-mobile-value">{mask(livePriceOf(fund, live) == null ? 'Unpriced' : formatCurrency(value))}</span>
@@ -758,34 +759,64 @@ function MFLedger({
   )
 }
 
+function sipEstimateText(estimate: NonNullable<Position['sipEstimate']>): string {
+  const count = `${estimate.instalments} SIP instalment${estimate.instalments === 1 ? '' : 's'}`
+  const since = estimate.since ? ` after your ${new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${estimate.since}T12:00:00Z`))} import` : ''
+  return `Includes ${count} you added${since}: +${fmtUnits(estimate.units)} units, ${formatCurrency(estimate.amount)}. Estimated from published NAVs until your next import confirms them.`
+}
+
+/** Marks a fund whose quantity and invested amount include SIP estimates. */
+function SipEstimateMarker({ fund }: { fund: Position }) {
+  return <span className="sip-est-marker" title={sipEstimateText(fund.sipEstimate!)}>SIP est.</span>
+}
+
 function FundDetails({ fund, members, live, hideValues }: { fund: Position; members: Position[]; live: Record<string, LiveQuote>; hideValues: boolean }) {
+  const { sipPlans, folios, setSipEstimatesAdded, workspaceReadOnly } = useStore()
   const mask = (text: string) => privateValue(text, hideValues)
+  const sipRows = fund.mfScheme ? sipEntriesForFund(sipPlans, folios, fund.mfScheme.code) : []
+  const estimate = fund.sipEstimate
+  // Imported entries exclude the estimates the user added, so both can be compared side by side.
+  const imported = members.length > 1 ? members : [estimate
+    ? { ...fund, quantity: fund.quantity - estimate.units, invested: fund.invested - estimate.amount, buyPrice: (fund.invested - estimate.amount) / (fund.quantity - estimate.units), sipEstimate: undefined }
+    : fund]
   return <div className="ledger-mobile-detail ledger-fund-detail">
     <div className="ledger-mobile-detail-wide"><span>Scheme</span><strong>{mask(fund.name || fund.ticker)}</strong></div>
-    <div><span>Invested</span><strong>{mask(formatCost(fund.invested, hasSupportedValuationCurrency(fund)))}</strong></div>
-    {fund.xirr != null && <div><span>Imported XIRR</span><strong>{mask(formatPercent(fund.xirr))}</strong></div>}
-    {fund.amc && <div className="ledger-mobile-detail-wide"><span>AMC</span><strong>{mask(fund.amc)}</strong></div>}
-    {fund.folio && <div><span>Folio</span><strong>{mask(fund.folio)}</strong></div>}
-    {members.length > 1 && <LedgerMembers members={members} live={live} hideValues={hideValues} />}
+    <div className="ledger-fund-facts">
+      <div><span>Invested</span><strong>{mask(formatCost(fund.invested, hasSupportedValuationCurrency(fund)))}</strong></div>
+      {fund.xirr != null && <div><span>Imported XIRR</span><strong>{mask(formatPercent(fund.xirr))}</strong></div>}
+      {fund.amc && <div className="ledger-fund-amc"><span>AMC</span><strong>{mask(fund.amc)}</strong></div>}
+      {fund.folio && <div><span>Folio</span><strong>{mask(fund.folio)}</strong></div>}
+    </div>
+    {fund.sipEstimate && !hideValues && <p className="ledger-sip-note">{sipEstimateText(fund.sipEstimate)}</p>}
+    {(members.length > 1 || sipRows.length > 0) && <LedgerMembers members={imported} live={live} hideValues={hideValues}
+      sip={sipRows.length ? { rows: sipRows, fund, readOnly: workspaceReadOnly, onChange: (rows, added) => setSipEstimatesAdded(rows[0].planId, rows.map((row) => row.date), added) } : undefined} />}
   </div>
 }
+
+type SipEntriesProps = { rows: SipEntry[]; fund: Position; readOnly: boolean; onChange: (rows: SipEntry[], added: boolean) => void }
+const sipEntryDate = (date: string) => new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`))
 
 /** Original import entries behind a combined holding. */
 function LedgerMembers({
   members,
   live,
   hideValues,
+  sip,
 }: {
   members: Position[]
   live: Record<string, LiveQuote>
   hideValues: boolean
+  sip?: SipEntriesProps
 }) {
   const mask = (s: string) => privateValue(s, hideValues)
-  const anyFolio = members.some((m) => (m.folio ?? '').trim() !== '')
+  const anyFolio = !!sip || members.some((m) => (m.folio ?? '').trim() !== '')
   const hasFundEntries = members.some((m) => m.type === 'mutual-fund')
+  const waiting = sip?.rows.filter((row) => row.state === 'estimate') ?? []
+  const sipPrice = sip ? livePriceOf(sip.fund, live) : null
+  const title = [members.length > 1 ? `Merged ${members.length} entries` : 'Imported entry', sip ? `${sip.rows.length} SIP ${sip.rows.length === 1 ? 'entry' : 'entries'}` : ''].filter(Boolean).join(' · ')
   return (
     <div className="ledger-members">
-      <div className="ledger-members-title">Merged {members.length} entries</div>
+      <div className="ledger-members-title">{title}{waiting.length > 1 && !hideValues && <button type="button" className="ledger-sip-add-all" disabled={sip!.readOnly} onClick={() => sip!.onChange(waiting, true)}>Add all ({waiting.length})</button>}</div>
       {hasFundEntries && <p className="hint">Imported XIRRs belong to individual entries. A merged XIRR requires dated cash flows.</p>}
       <table className="table table--nested">
         <thead>
@@ -815,6 +846,30 @@ function LedgerMembers({
                 </td>
                 {hasFundEntries && <td data-label="XIRR" className={m.xirr == null ? 'muted' : m.xirr >= 0 ? 'up' : 'down'}>{m.xirr == null ? '—' : mask(formatPercent(m.xirr))}</td>}
                 {anyFolio && <td data-label="Folio" className="muted">{mask((m.folio ?? '').trim() || '—')}</td>}
+              </tr>
+            )
+          })}
+          {sip?.rows.map((row) => {
+            const value = sipPrice == null ? null : row.units * sipPrice
+            const pnl = value == null ? null : value - row.amount
+            const pending = row.state === 'estimate' || row.state === 'added'
+            return (
+              <tr key={row.date} className="ledger-sip-row" data-state={row.state}>
+                <td data-label="Qty">{mask(fmtUnits(row.units))}</td>
+                <td data-label="NAV">{mask(formatCurrency(row.nav))}</td>
+                <td data-label="Invested">{mask(formatCurrency(row.amount))}</td>
+                <td data-label="Value">{value == null ? 'Unpriced' : mask(formatCurrency(value))}</td>
+                <td data-label="P&L" className={pnl != null ? gainTone(pnl) : 'muted'}>{pnl != null ? mask(signedCurrency(pnl)) : '—'}</td>
+                {hasFundEntries && <td data-label="XIRR" className="muted">—</td>}
+                <td data-label="Folio" className="ledger-sip-cell">
+                  <span title={row.navDate !== row.date ? `SIP on ${sipEntryDate(row.date)}, NAV of ${sipEntryDate(row.navDate)}` : undefined}>
+                    {row.state === 'matched' ? 'Matched' : row.state === 'in-import' ? 'In import' : 'Est.'} {sipEntryDate(row.date)}
+                  </span>
+                  {pending && !hideValues && <button type="button" className="ledger-sip-toggle" data-added={row.state === 'added'} disabled={sip.readOnly}
+                    aria-label={row.state === 'added' ? `Remove ${sipEntryDate(row.date)} SIP estimate from holdings` : `Add ${sipEntryDate(row.date)} SIP estimate to holdings`}
+                    title={row.state === 'added' ? 'Added to holdings. Click to remove.' : 'Add to holdings'}
+                    onClick={() => sip.onChange([row], row.state !== 'added')}>{row.state === 'added' ? '✓' : '+'}</button>}
+                </td>
               </tr>
             )
           })}

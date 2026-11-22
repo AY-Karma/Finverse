@@ -190,3 +190,53 @@ describe('unavailable watch references', () => {
     expect(state.events[0].unresolved).toBe(true)
   })
 })
+
+describe('watch rules for securities the user does not own', () => {
+  const security = { kind: 'equity', symbol: 'TCS.NS', isin: 'INE467B01029', name: 'Tata Consultancy Services', type: 'stock' } as const
+  const fundSecurity = { kind: 'fund', code: 119551, name: 'Example Nifty 50 Index Fund Direct Growth' } as const
+  const watch = (overrides: Partial<MonitorRule> = {}): MonitorRule => ({
+    id: 'watched', holding: security.name, holdingId: 'watch:equity:TCS.NS:INE467B01029', instrumentIdentity: 'watch:equity:TCS.NS:INE467B01029',
+    condition: 'price_above', threshold: 4000, active: true, security, ...overrides,
+  })
+  const now = Date.now()
+  const quotes = { 'watch:equity:TCS.NS:INE467B01029': { price: 4100, at: now - 60_000, source: 'yahoo' as const, changePct: 1.2 } }
+
+  it('is observed from its own quote without any holding', () => {
+    expect(monitorRuleObservation(watch(), [], quotes, now, true)).toMatchObject({ state: 'Active', matched: true })
+    expect(monitorRuleObservation(watch({ threshold: 5000 }), [], quotes, now, true)).toMatchObject({ state: 'Active', matched: false })
+    expect(monitorRuleObservation(watch(), [], {}, now, true).state).toBe('Waiting')
+    expect(monitorRuleObservation(watch({ active: false }), [], quotes, now, true).state).toBe('Paused')
+  })
+
+  it('follows funds by published NAV only', () => {
+    const fundRule = watch({ id: 'fund', security: fundSecurity, holdingId: 'watch:fund:119551', instrumentIdentity: 'watch:fund:119551', threshold: 100 })
+    const nav = { 'watch:fund:119551': { price: 120, at: now - 3_600_000, source: 'nav' as const, changePct: 0.4 } }
+    expect(monitorRuleObservation(fundRule, [], nav, now, true)).toMatchObject({ state: 'Active', matched: true })
+    expect(monitorRuleObservation(fundRule, [], { 'watch:fund:119551': { ...nav['watch:fund:119551'], source: 'yahoo' } }, now, true).state).toBe('Waiting')
+    expect(monitorRuleObservation(watch(), [], { 'watch:equity:TCS.NS:INE467B01029': { ...quotes['watch:equity:TCS.NS:INE467B01029'], source: 'nav' as const } }, now, true).state).toBe('Waiting')
+  })
+
+  it('creates one alert per provider day and names the watched security', () => {
+    const state = { ...emptyMonitorState(), rules: [watch()] }
+    const first = evaluateMonitorRules(state, [], quotes, now, true)
+    expect(first.alerts).toHaveLength(1)
+    expect(first.alerts[0]).toMatchObject({ holding: security.name, holdingId: 'watch:equity:TCS.NS:INE467B01029', title: 'Price is above your level' })
+    expect(first.alerts[0].evidence).toContain('₹4,100.00')
+    expect(evaluateMonitorRules(first, [], quotes, now, true).alerts).toHaveLength(1)
+    expect(evaluateMonitorRules(state, [], quotes, now, false).alerts).toHaveLength(0)
+  })
+
+  it('survives holding reconciliation and storage, and drops rules whose security is invalid', () => {
+    expect(reconcileMonitorRules([watch()], [])).toEqual([watch()])
+    const stored = sanitizeMonitorState({ version: 1, rules: [watch(), watch({ id: 'bad', security: { ...security, isin: 'nope' } }), watch({ id: 'forged', holdingId: 'x', instrumentIdentity: 'y' })] })
+    expect(stored.rules.map((item) => item.id)).toEqual(['watched', 'forged'])
+    expect(stored.rules[1]).toMatchObject({ holdingId: 'watch:equity:TCS.NS:INE467B01029', instrumentIdentity: 'watch:equity:TCS.NS:INE467B01029' })
+    expect(hasDuplicateMonitorRule([watch()], { instrumentIdentity: watch().instrumentIdentity, condition: 'price_above', threshold: 4000 })).toBe(true)
+  })
+
+  it('leaves holding rules untouched beside watched securities', () => {
+    const state = { ...emptyMonitorState(), rules: [rule, watch()] }
+    const live = { ...quotes, [valuation.quoteKey(position)]: { price: 50, at: now - 1000, source: 'yahoo' as const } }
+    expect(evaluateMonitorRules(state, [position], live, now, true).alerts.map((alert) => alert.holdingId).sort()).toEqual(['holding', 'watch:equity:TCS.NS:INE467B01029'])
+  })
+})

@@ -4,7 +4,7 @@ import { effectivePrice, positionValue } from './valuation'
 export const MARKET_CAP_STORAGE_KEY = 'finverse:market-cap:v1'
 export const CAP_BANDS = ['large', 'mid', 'small', 'other', 'funds', 'unclassified'] as const
 export type CapBand = typeof CAP_BANDS[number]
-export const CAP_LABELS: Record<CapBand, string> = { large: 'Large cap', mid: 'Mid cap', small: 'Small cap', other: 'Other assets', funds: 'ETF + Mutual Funds', unclassified: 'Unclassified' }
+const CAP_LABELS: Record<CapBand, string> = { large: 'Large cap', mid: 'Mid cap', small: 'Small cap', other: 'Other assets', funds: 'ETF + Mutual Funds', unclassified: 'Unclassified' }
 export interface MarketCapRecord {
   asOf: string
   isin: string
@@ -54,8 +54,8 @@ export function parseMarketCapRecords(value: unknown, now = Date.now()): MarketC
   })
 }
 
-export interface CapExposureMember { id: string; positionId: string; name: string; value: number; asOf: string | null; source: string | null }
-export interface CapExposureBucket { band: CapBand; label: string; value: number; weight: number; members: CapExposureMember[] }
+interface CapExposureMember { id: string; positionId: string; name: string; value: number; asOf: string | null; source: string | null }
+interface CapExposureBucket { band: CapBand; label: string; value: number; weight: number; members: CapExposureMember[] }
 export function calculateMarketCapExposure(positions: Position[], quotes: Record<string, LiveQuote>, records: MarketCapRecord[]) {
   const direct = new Map<string, MarketCapRecord>()
   const fundDates = new Map<string, string>()

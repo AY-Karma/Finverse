@@ -8,6 +8,7 @@ import { handleEventsRequest } from './api/events'
 import { handleNseListingsRequest } from './api/nseListings'
 import { handleMarketCapRequest } from './api/marketCap'
 import { handleIpoApiRequest } from './api/ipos'
+import { handleEconomicCalendarRequest } from './api/economicCalendar'
 
 function localMarketDataApi(): Plugin {
   const handlers = new Map([
@@ -19,6 +20,7 @@ function localMarketDataApi(): Plugin {
     ['/api/marketCap', handleMarketCapRequest],
     ['/api/ipos', handleIpoApiRequest],
     ['/api/ipoGmpHistory', handleIpoApiRequest],
+    ['/api/economicCalendar', handleEconomicCalendarRequest],
   ])
   return {
     name: 'finverse-local-market-data-api',
@@ -73,6 +75,8 @@ function preloadOverview(): Plugin {
 
 export default defineConfig({
   plugins: [react(), localMarketDataApi(), preloadOverview()],
+  // Vercel preview deployments offer the sample workspace; production builds never do.
+  define: { 'import.meta.env.VITE_SAMPLE_WORKSPACE': JSON.stringify(process.env.VERCEL_ENV === 'preview' ? 'true' : '') },
   test: {
     exclude: [...configDefaults.exclude, 'docs/**'],
   },

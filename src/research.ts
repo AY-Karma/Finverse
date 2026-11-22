@@ -19,7 +19,7 @@ function tickerBase(symbol: string): string {
   return symbol.toUpperCase().replace(/\.(NS|NSE|BO|BSE)$/, '').replace(/[^A-Z0-9&_-]/g, '')
 }
 
-export function screenerFallbackSearchUrl(query: string): string {
+function screenerFallbackSearchUrl(query: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(`site:screener.in ${query.trim()}`)}`
 }
 

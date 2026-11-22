@@ -24,7 +24,7 @@ export const BENCHMARKS: BenchmarkDefinition[] = [
   { id: 'cac-40', label: 'CAC 40', symbol: '^FCHI', region: 'Global' },
 ]
 
-export const DEFAULT_MARKET_INDEX_IDS: [string, string] = ['nifty-bank', 'nifty-50']
+const DEFAULT_MARKET_INDEX_IDS: [string, string] = ['nifty-bank', 'nifty-50']
 export const MARKET_INDEX_CHOICES = BENCHMARKS.filter((index) => index.symbol && !index.unavailableReason)
 
 export function normalizeMarketIndexIds(value: unknown): [string, string] {

@@ -6,7 +6,7 @@ export type Exchange = 'NSE' | 'BSE' | 'NASDAQ' | 'NYSE' | 'LSE' | 'OTHER'
 
 export type Density = 'comfortable' | 'compact'
 export type Accent = 'cobalt'
-export type Mode = 'dark' | 'light'
+export type Mode = 'dark' | 'default' | 'light'
 
 export interface MfSchemeMapping {
   code: number
@@ -59,6 +59,8 @@ export interface Position {
   identityIssue?: string
   reportedExchange?: string
   reportedCurrency?: string
+  /** SIP instalments recorded after the latest import, already added to quantity and invested. Never saved with imports. */
+  sipEstimate?: { units: number; amount: number; instalments: number; since: string | null }
 }
 
 export interface AccountStatement {

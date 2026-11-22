@@ -2,6 +2,9 @@ import type { AccountStatement, Folio, PortfolioSnapshot, Position, Settings } f
 import type { MonitorAlert, MonitorEvent, MonitorMetric, MonitorRule, MonitorState } from './monitor'
 import { holdingIdentity, parseIpoWatch } from './monitor'
 import { parseMonitorReadingState } from './monitorReading'
+import { isWatchSecurityKey, parseWatchSecurity } from './watchSecurity'
+import { MAX_SIP_PLANS, parseSipPlan } from './sipPlans'
+import { parseMonitorFollows } from './monitorFollows'
 import { combinePositions } from './valuation'
 import { migrateFolioIdentities } from './instruments'
 import { hasCompatibleFundScheme } from './fundSchemes'
@@ -32,7 +35,7 @@ export interface WorkspaceArchivePreview { archive: WorkspaceArchive; legacy: bo
 
 const MAX_NUMBER = Number.MAX_SAFE_INTEGER
 const MAX_DATE = 8_640_000_000_000_000
-const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false }
+const DEFAULT_SETTINGS: Settings = { currency: 'INR', allowExternalData: false, density: 'comfortable', accent: 'cobalt', mode: 'default', hideValues: false }
 
 function fail(label: string): never { throw new Error(`The backup contains an invalid ${label}. Your current workspace was not changed.`) }
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -156,7 +159,7 @@ function parseSettings(value: unknown): Settings {
   const settings: Settings = {
     currency: 'INR', allowExternalData: boolean(row.allowExternalData, 'external-data preference'),
     density: choice(row.density, ['comfortable', 'compact'], 'density'), accent: 'cobalt',
-    mode: choice(row.mode, ['dark', 'light'], 'theme'), hideValues: boolean(row.hideValues, 'hidden-values preference'),
+    mode: choice(row.mode, ['dark', 'default', 'light'], 'theme'), hideValues: boolean(row.hideValues, 'hidden-values preference'),
     ...(row.marketIndices !== undefined ? { marketIndices: normalizeMarketIndexIds(row.marketIndices) } : {}),
     focusRings: row.focusRings === undefined ? true : boolean(row.focusRings, 'focus outline preference'),
   }
@@ -186,6 +189,7 @@ function parseRule(value: unknown): MonitorRule {
     instrumentIdentity: text(row.instrumentIdentity, 'watch identity'), condition: choice(row.condition, ['price_above', 'price_below', 'daily_move'], 'watch condition'),
     threshold, active: boolean(row.active, 'watch active state'),
     ...(row.unresolved !== undefined ? { unresolved: boolean(row.unresolved, 'watch reference state') } : {}),
+    ...(row.security !== undefined ? { security: parseWatchSecurity(row.security) ?? fail('watched security') } : {}),
   }
 }
 function parseEvent(value: unknown): MonitorEvent {
@@ -220,6 +224,8 @@ function parseMonitor(value: unknown): MonitorState {
     alerts: unique(list(row.alerts, 200, 'historical alerts', parseAlert), 'alert'),
     ...(row.ipoWatches !== undefined ? { ipoWatches: unique(list(row.ipoWatches, 200, 'IPO watches', (value) => parseIpoWatch(value) ?? fail('IPO watch')), 'IPO watch') } : {}),
     ...(row.reading !== undefined ? { reading: parseMonitorReadingState(row.reading) } : {}),
+    ...(row.follows !== undefined ? { follows: parseMonitorFollows(row.follows) ?? fail('notification settings') } : {}),
+    ...(row.sipPlans !== undefined ? { sipPlans: unique(list(row.sipPlans, MAX_SIP_PLANS, 'SIP plans', (value) => parseSipPlan(value) ?? fail('SIP plan')), 'SIP plan') } : {}),
   }
 }
 
@@ -229,6 +235,8 @@ function validateReferences(archive: WorkspaceArchive): string[] {
   const holdings = new Map([...raw, ...combinePositions(raw)].map((position) => [position.id, position]))
   const unresolved = (item: object): boolean => 'unresolved' in item && item.unresolved === true
   for (const rule of archive.monitor.rules) {
+    // A watched security stands on its own; only holding rules must match a holding.
+    if (rule.security) continue
     const holding = holdings.get(rule.holdingId)
     if (!unresolved(rule) && (!holding || holdingIdentity(holding) !== rule.instrumentIdentity)) throw new Error('A watch rule does not match a holding in this backup. Resolve its holding reference before restoring.')
   }
@@ -237,7 +245,7 @@ function validateReferences(archive: WorkspaceArchive): string[] {
   }
   const warnings: string[] = []
   if (archive.monitor.rules.some(unresolved) || archive.monitor.events.some(unresolved)) warnings.push('Unresolved watch rules and reminders are preserved for review and will not be evaluated until their holding references are resolved.')
-  if (archive.monitor.alerts.some((alert) => !holdings.has(alert.holdingId))) warnings.push('Historical alerts for removed holdings are preserved as past observations.')
+  if (archive.monitor.alerts.some((alert) => !holdings.has(alert.holdingId) && !isWatchSecurityKey(alert.holdingId))) warnings.push('Historical alerts for removed holdings are preserved as past observations.')
   return warnings
 }
 

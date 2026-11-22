@@ -21,7 +21,7 @@ const SLOW_RESPONSE_MS = 1_500
 const FAST_RESPONSE_MS = 800
 const CALM_WINDOWS_TO_STEP_DOWN = 2
 
-export interface PaceSample { busy: number; responseMs: number | null }
+interface PaceSample { busy: number; responseMs: number | null }
 
 /** Pure step rule, exported for tests: busy is the share of the window the main thread was blocked. */
 export function nextPaceLevel(level: number, sample: PaceSample, calmWindows: number): { level: number; calmWindows: number } {

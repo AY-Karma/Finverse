@@ -1,4 +1,5 @@
 import { holdingIdentity, type MonitorState } from './monitor'
+import { isWatchSecurityKey } from './watchSecurity'
 import type { Position } from './types'
 import { combinedPositionMembers, combinePositions, quoteKey } from './valuation'
 
@@ -60,6 +61,7 @@ export function remapMonitorReferences(state: MonitorState, beforeRawPositions: 
   return {
     ...state,
     rules: state.rules.map((rule) => {
+      if (rule.security) return rule
       const position = resolve(rule.holdingId, rule.instrumentIdentity)
       if (!position) return { ...rule, unresolved: true }
       const resolved = { ...rule, holdingId: position.id, holding: position.name || position.ticker, instrumentIdentity: holdingIdentity(position) }
@@ -75,6 +77,7 @@ export function remapMonitorReferences(state: MonitorState, beforeRawPositions: 
       return resolved
     }),
     alerts: state.alerts.map((alert) => {
+      if (isWatchSecurityKey(alert.holdingId)) return alert
       const position = resolve(alert.holdingId)
       return position && position.id !== alert.holdingId ? { ...alert, holdingId: position.id } : alert
     }),

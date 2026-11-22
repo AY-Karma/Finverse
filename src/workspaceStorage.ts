@@ -9,7 +9,7 @@ export const WORKSPACE_STORAGE_KEYS = [
 ] as const
 
 export type WorkspaceRecords = Record<typeof WORKSPACE_STORAGE_KEYS[number], string | null>
-export interface WorkspaceWriteOptions { keepRecoveryCopy?: boolean; invalidateCaches?: boolean }
+interface WorkspaceWriteOptions { keepRecoveryCopy?: boolean; invalidateCaches?: boolean }
 
 const JOURNAL_KEY = 'finverse:workspace-write:v1'
 const PREVIOUS_KEY = 'finverse:workspace-previous:v1'

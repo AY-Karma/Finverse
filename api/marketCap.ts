@@ -71,7 +71,7 @@ function parseWorkbook(bytes: Uint8Array, source: { url: string; asOf: string })
   return { asOf: source.asOf, sourceUrl: source.url, records }
 }
 
-export function createMarketCapHandler(dependencies: { fetcher?: typeof fetch; now?: () => number } = {}) {
+function createMarketCapHandler(dependencies: { fetcher?: typeof fetch; now?: () => number } = {}) {
   const fetcher = dependencies.fetcher ?? fetch
   const now = dependencies.now ?? Date.now
   const budget = createRequestBudget(now)

@@ -197,7 +197,7 @@ function clearRetiredStorage(): void {
 export function loadSettings(): Settings {
   const defaults: Settings = {
     currency: 'INR', allowExternalData: true,
-    density: 'comfortable', accent: 'cobalt', mode: 'dark', hideValues: false,
+    density: 'comfortable', accent: 'cobalt', mode: 'default', hideValues: false,
   }
   clearRetiredStorage()
   let parsed: Record<string, unknown> = {}
@@ -213,7 +213,7 @@ export function loadSettings(): Settings {
     allowExternalData: defaults.allowExternalData,
     density: parsed.density === 'compact' ? 'compact' : defaults.density,
     accent: defaults.accent,
-    mode: parsed.mode === 'light' ? 'light' : defaults.mode,
+    mode: parsed.mode === 'light' || parsed.mode === 'dark' ? parsed.mode : defaults.mode,
     hideValues: parsed.hideValues === true,
     focusRings: parsed.focusRings !== false,
     marketIndices: normalizeMarketIndexIds(parsed.marketIndices),

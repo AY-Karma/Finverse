@@ -3,8 +3,6 @@ import { clampViewportStart, createChartViewport, shiftViewportStart } from '../
 import { ActionIcon } from './ActionIcon'
 import { observeSettledResize } from '../observeSettledResize'
 import { plusSign, signedPercent } from '../valuation'
-import { DitherAreaFill } from './DitherAreaFill'
-import type { DitherColor } from '../components/dither-kit/palette'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const FALLBACK_WIDTH = 1000
@@ -55,11 +53,11 @@ interface InteractiveTrendChartProps {
   yAxisLabel: string
   includeZero?: boolean
   onReachStart?: () => void
+  /** Show every row instead of the default recent window, so the view matches a headline computed over all rows. */
+  fitAll?: boolean
   markers?: TrendMarker[]
   referenceLines?: TrendReference[]
   showArea?: boolean
-  ditherColor?: DitherColor
-  ditherTo?: string
   appearance: 'price' | 'insight'
 }
 
@@ -137,11 +135,10 @@ export function InteractiveTrendChart({
   yAxisLabel,
   includeZero = false,
   onReachStart,
+  fitAll = false,
   markers = NO_MARKERS,
   referenceLines = NO_REFERENCES,
   showArea = true,
-  ditherColor,
-  ditherTo,
   appearance,
 }: InteractiveTrendChartProps) {
   const chartId = useId().replace(/:/g, '')
@@ -200,7 +197,7 @@ export function InteractiveTrendChart({
   const plotRight = isRightScaleChart ? Math.max(PLOT_RIGHT, axisWidth + 8) : PLOT_RIGHT
   const plotWidth = chartWidth - plotLeft - plotRight
   const plotHeight = chartHeight - PLOT_TOP - PLOT_BOTTOM
-  const preferredViewport = createChartViewport(chartRows.length)
+  const preferredViewport = createChartViewport(chartRows.length, fitAll ? Math.max(chartRows.length, 1) : undefined)
   const visiblePointCount = preferredViewport.count
   const maxViewportStart = Math.max(0, chartRows.length - visiblePointCount)
   const viewStart = clampViewportStart(viewStartState ?? preferredViewport.start, chartRows.length, visiblePointCount)
@@ -280,16 +277,6 @@ export function InteractiveTrendChart({
       : ''
     return { xAtIndex, yAt, linePaths, areaPath, differencePath }
   }, [pathRows, pathStartIndex, lines, primaryLine, secondaryLine, domain, visiblePointCount, plotLeft, plotWidth, viewStart, plotHeight, showArea, appearance])
-  const ditherPoints = useMemo(() => ditherColor && showArea && primaryLine
-    ? pathRows.map((row, localIndex) => {
-      const index = pathStartIndex + localIndex
-      const value = row[primaryLine.key]
-      const baseline = ditherTo ? row[ditherTo] : undefined
-      if (typeof value !== 'number' || !Number.isFinite(value)) return null
-      if (ditherTo && (typeof baseline !== 'number' || !Number.isFinite(baseline))) return null
-      return { x: xAtIndex(index), y: yAt(value), baselineY: baseline == null ? undefined : yAt(baseline) }
-    })
-    : [], [ditherColor, ditherTo, showArea, primaryLine, pathRows, pathStartIndex, xAtIndex, yAt])
   const markerPositions = useMemo(
     () => markers.flatMap((marker, markerIndex) => {
       if (!Number.isFinite(marker.at) || !Number.isFinite(marker.value) || chartRows.length === 0) return []
@@ -529,9 +516,7 @@ export function InteractiveTrendChart({
         return x >= plotLeft - 1 && x <= chartWidth - plotRight + 1
       }).map((index) => <g key={`${chartRows[index]?.at}-${index}`}><line x1={xAtIndex(index)} y1={chartHeight - PLOT_BOTTOM} x2={xAtIndex(index)} y2={chartHeight - PLOT_BOTTOM + 5} className="interactive-trend-axis" /><text x={xAtIndex(index)} y={chartHeight - 18} textAnchor="middle" className="interactive-trend-axis-text">{dateLabel(chartRows[index]?.at ?? firstAt, visibleTimeSpan)}</text></g>)}
       <g clipPath={`url(#trend-plot-${chartId})`}>
-        {areaPath && (ditherColor
-          ? <DitherAreaFill points={ditherPoints} x={plotLeft} y={PLOT_TOP} width={plotWidth} height={plotHeight} color={ditherColor} />
-          : <path d={areaPath} fill={`url(#trend-area-${chartId})`} className="interactive-trend-area" />)}
+        {areaPath && <path d={areaPath} fill={`url(#trend-area-${chartId})`} className="interactive-trend-area" />}
         {references.map((line) => <g key={`${line.label}-${line.value}`} className="interactive-trend-reference">
           <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} className="interactive-trend-reference-underlay" />
           <line x1={plotLeft} y1={yAt(line.value)} x2={chartWidth - plotRight} y2={yAt(line.value)} stroke={line.color} className="interactive-trend-reference-line" />
@@ -543,7 +528,6 @@ export function InteractiveTrendChart({
           <line x1={xAtIndex(comparisonMarker.index)} y1={PLOT_TOP} x2={xAtIndex(comparisonMarker.index)} y2={PLOT_TOP + plotHeight} />
           <line x1={xAtIndex(comparison.targetIndex)} y1={PLOT_TOP} x2={xAtIndex(comparison.targetIndex)} y2={PLOT_TOP + plotHeight} />
         </g>}
-        {ditherColor && lines.map((line, index) => <path key={line.key} d={linePaths[index]} className={line.dashed ? 'interactive-trend-line interactive-trend-line--dashed' : 'interactive-trend-line'} style={{ stroke: 'var(--surface-1)', strokeWidth: 5, opacity: 1 }} aria-hidden="true" />)}
         {lines.map((line, index) => <path key={line.key} d={linePaths[index]} className={line.dashed ? 'interactive-trend-line interactive-trend-line--dashed' : 'interactive-trend-line'} stroke={line.color} />)}
         {chartRows.length === 1 && lines.map((line) => {
           const pointValue = chartRows[0][line.key]

@@ -1,6 +1,5 @@
-.mi-panel { --mi-inset: 20px; container-type: inline-size; overflow: visible; scroll-margin-top: 24px; }
+.mi-panel { --mi-inset: 20px; container-type: inline-size; overflow: visible; }
 .mi-panel:has(.mi-board-trigger[aria-expanded='true']) { position: relative; z-index: 2; }
-.mp-page .mi-heading > .mi-refresh { padding: 0; }
 .mi-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 10px; padding: 14px var(--mi-inset) 0; }
 .mi-filters[data-simple='true'] { grid-template-columns: minmax(0, 1fr); }
 .mi-board-filter { position: relative; }
@@ -65,11 +64,14 @@
 .mi-timeline li[data-done='true'] .mi-step-dot { border-color: var(--mp-accent); background: var(--mp-accent); }
 .mi-timeline li > span:not(.mi-step-dot) { color: var(--ink-muted); }
 .mi-step-label { overflow-wrap: anywhere; }
-.mi-step-due { color: var(--mp-accent); white-space: nowrap; }
+.mi-step-due { white-space: nowrap; }
+.mi-step-due[data-urgency='calm'] { color: var(--mp-positive); }
+.mi-step-due[data-urgency='soon'] { color: var(--mp-amber); }
+.mi-step-due[data-urgency='urgent'] { color: var(--mp-negative); }
 .mi-due-short { display: none; }
 @container (max-width: 560px) {
-  .mi-due-long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .mi-due-short { display: inline; }
+  .mi-timeline .mi-due-long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .mi-timeline .mi-due-short { display: inline; }
 }
 .mi-timeline strong { color: var(--ink); font-size: 15px; font-weight: 500; }
 .mi-timeline li[data-unknown='true'] strong { color: var(--ink-subtle); font-weight: 400; }
@@ -131,8 +133,7 @@
 .mi-empty-count { color: var(--ink-muted); font-weight: 400; }
 .mi-empty-action > svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--mp-accent); }
 .mi-empty-action:hover { border-color: var(--mp-accent); background: var(--surface-3); }
-.mi-loading { display: grid; gap: 20px; padding: 24px var(--mi-inset); color: var(--ink-muted); font-size: 15px; }
-.mi-loading span { height: 40px; border-top: 1px solid var(--hairline); }
+.mi-loading { padding: 8px var(--mi-inset) 12px; }
 .mi-setup { margin-top: 32px; }
 .mi-setup > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; border-top: 1px solid var(--hairline); color: var(--ink-muted); font-size: 15px; list-style: none; cursor: pointer; }
 .mi-setup > summary::-webkit-details-marker { display: none; }
@@ -151,7 +152,6 @@
 }
 @media (max-width: 760px) {
   .mi-panel { --mi-inset: 16px; }
-  .mi-panel, #monitor-ipos-heading { scroll-margin-top: 120px; }
   .mi-links a { min-height: 44px; }
   .mi-watch-action button { min-height: 44px; }
   .mi-board-trigger, .mi-refresh, .mi-board-menu > button { min-height: 44px; }

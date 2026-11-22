@@ -1,0 +1,5 @@
+.sample-bar { position: fixed; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 60; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; width: max-content; max-width: calc(100vw - 24px); padding: 8px 10px 8px 14px; transform: translateX(-50%); border: 1px solid var(--hairline-strong); border-radius: 999px; background: var(--surface-1); box-shadow: 0 10px 30px #0006; color: var(--ink); font: 500 13px/1.4 var(--font-body); }
+.sample-bar > strong { font-weight: 600; }
+.sample-bar-notice { color: var(--ink-muted); }
+.sample-bar > button { min-height: 32px; padding: 4px 10px; border: 1px solid var(--hairline-strong); border-radius: 999px; background: var(--surface-2); color: var(--ink); font: inherit; cursor: pointer; }
+@media (max-width: 640px) { .sample-bar { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); flex-wrap: nowrap; padding: 6px; } .sample-bar > strong, .sample-bar-notice { display: none; } }

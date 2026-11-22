@@ -76,7 +76,7 @@ describe('fixed blue theme', () => {
     expect(document.documentElement.hasAttribute('data-theme-transition')).toBe(false)
   })
 
-  it.each(['dark', 'light'] as const)('applies blue while preserving %s mode and density', (mode) => {
+  it.each(['dark', 'default', 'light'] as const)('applies blue while preserving %s mode and density', (mode) => {
     document.head.innerHTML = '<meta name="theme-color" content="old">'
     document.documentElement.style.setProperty('--primary', '#10b981')
     applyTheme({ density: 'compact', mode })
@@ -87,6 +87,6 @@ describe('fixed blue theme', () => {
     expect(root.style.getPropertyValue('--spark')).toBe(BLUE_ACCENT.spark)
     expect(root.dataset.mode).toBe(mode)
     expect(root.dataset.density).toBe('compact')
-    expect(document.querySelector('meta')?.content).toBe(mode === 'light' ? '#f2f2ef' : '#0d0d0c')
+    expect(document.querySelector('meta')?.content).toBe({ dark: '#000000', default: '#0d0d0c', light: '#f2f2ef' }[mode])
   })
 })

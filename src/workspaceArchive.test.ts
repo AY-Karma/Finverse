@@ -22,6 +22,19 @@ const reading: MonitorReadingState = { articles: [{ key: newsReadingKey(savedArt
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear() })
 
 describe('workspace archives', () => {
+  it('backs up watched non-holdings and SIP plans, and rejects tampered ones', () => {
+    const security = { kind: 'equity' as const, symbol: 'INFY.NS', isin: 'INE009A01021', name: 'Infosys Limited', type: 'stock' as const }
+    const watched = { id: 'rule-2', holding: security.name, holdingId: 'watch:equity:INFY.NS:INE009A01021', instrumentIdentity: 'watch:equity:INFY.NS:INE009A01021', condition: 'price_below' as const, threshold: 1400, active: true, security }
+    const sip = { id: 'sip-1', schemeCode: 122639, schemeName: 'Parag Parikh Flexi Cap Fund Direct Growth', amount: 5000, day: 5, start: '2026-12-05', provider: 'groww', method: 'Provider AutoPay', paused: false }
+    const saved = createWorkspaceArchive(folios, settings, snapshots, { ...monitor, rules: [...monitor.rules, watched], sipPlans: [sip] })
+    const parsed = parseWorkspaceArchive(JSON.stringify(saved))
+    expect(parsed.archive.monitor.rules[1]).toEqual(watched)
+    expect(parsed.archive.monitor.sipPlans).toEqual([sip])
+    expect(parsed.warnings.join(' ')).not.toContain('watch rule')
+    expect(() => parseWorkspaceArchive(JSON.stringify({ ...saved, monitor: { ...saved.monitor, sipPlans: [{ ...sip, amount: -1 }] } }))).toThrow()
+    expect(() => parseWorkspaceArchive(JSON.stringify({ ...saved, monitor: { ...saved.monitor, rules: [{ ...watched, security: { ...security, symbol: 'https://x' } }] } }))).toThrow()
+  })
+
   it('retains IPO deadline watches through backup and restore and rejects unsafe sources', async () => {
     const watch = { id: 'xflot:example', name: 'Example', openDate: '2026-11-01', closeDate: '2026-11-05', sourceUrl: 'https://www.xflot.com/ipo/example' }
     const saved = createWorkspaceArchive(folios, settings, snapshots, { ...monitor, ipoWatches: [watch] })

@@ -41,7 +41,8 @@ describe('deployment security headers', () => {
 
   it.each([
     ['light', JSON.stringify({ mode: 'light' }), 'light', '#e6e6e3'],
-    ['dark', JSON.stringify({ mode: 'dark' }), undefined, '#0d0d0c'],
+    ['dark', JSON.stringify({ mode: 'dark' }), 'dark', '#000000'],
+    ['default', JSON.stringify({ mode: 'default' }), undefined, '#0d0d0c'],
     ['missing', null, undefined, '#0d0d0c'],
     ['corrupt', '{', undefined, '#0d0d0c'],
   ])('starts the boot screen in the saved theme (%s settings)', (_label, saved, mode, themeColor) => {

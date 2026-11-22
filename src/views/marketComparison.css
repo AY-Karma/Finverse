@@ -1,0 +1,19 @@
+.insight-panel--benchmark .comparison-metric + .comparison-metric { border-left: 0; }
+.comparison-metric--portfolio > span i,
+.comparison-metric--portfolio strong { color: var(--chart-portfolio); }
+.comparison-metric--benchmark > span i,
+.comparison-metric--benchmark strong { color: var(--chart-benchmark); }
+.comparison-metric--result strong.up { color: var(--pct-up); }
+.comparison-metric--result strong.down { color: var(--pct-down); }
+.comparison-verb { margin-right: 0.05em; color: var(--ink-muted); font-weight: 450; }
+.comparison-metric small { font-size: 13px; }
+
+.comparison-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 12px; }
+.comparison-periods { padding: 2px; }
+.comparison-periods .scope-btn { min-width: 34px; padding: 4px 9px; font-size: 12px; }
+
+@media (max-width: 640px) {
+  .comparison-controls { width: 100%; justify-content: flex-start; }
+  .comparison-periods { display: flex; width: 100%; }
+  .comparison-periods .scope-btn { flex: 1; min-height: 32px; font-size: 13px; }
+}

@@ -70,7 +70,7 @@ describe('mobile watch rule actions', () => {
     request = { holdingId: 'NIPPON', revision: 2 }
     await act(async () => root.render(<Context />))
     expect(dialog.open).toBe(true)
-    expect(dialog.querySelector('select')?.value).toBe('NIPPON')
+    expect(dialog.querySelector<HTMLInputElement>('[role="combobox"]')?.value).toBe('Nippon India Small Cap Fund Direct Growth')
     expect(dialog.querySelector('h2')?.textContent).toBe('Create a watch rule')
     await act(async () => dialog.close())
     request = { ...request, revision: 3 }
@@ -97,6 +97,8 @@ describe('mobile watch rule actions', () => {
   })
 
   it('closes a private rule form and blocks editing when masking is enabled', async () => {
+    // Reminders are added from the Company updates tab of the calendar card.
+    sessionStorage.setItem('finverse:monitor-calendar-tab', 'company')
     await renderMonitor()
     const edit = [...container.querySelectorAll<HTMLButtonElement>('.mp-rule-menu button')].find(button => button.textContent === 'Edit')!
     await act(async () => edit.click())
@@ -110,6 +112,7 @@ describe('mobile watch rule actions', () => {
     const actions = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === '+ New rule' || button.getAttribute('aria-label') === 'Add reminder')
     expect(actions).toHaveLength(2)
     expect(actions.every(button => button.disabled)).toBe(true)
+    sessionStorage.clear()
   })
 
   async function openAfterTouchBlur() {

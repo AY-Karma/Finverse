@@ -1,6 +1,6 @@
 import type { View } from './useStore'
 
-export type EntryRoute = { view: View; redirectTo?: string; notFound?: true }
+type EntryRoute = { view: View; redirectTo?: string; notFound?: true }
 
 const VIEW_PATHS: Record<View, string> = {
   overview: '/app',

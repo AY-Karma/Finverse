@@ -258,7 +258,7 @@ describe('overview valuation and visible work', () => {
       expect(container.querySelector('[data-history-panel], .history-panel-placeholder')).toBeNull()
       const panel = container.querySelector('.panel--portfolio')!
       expect(panel.firstElementChild?.className).toBe('portfolio-performance')
-      expect(container.querySelector('[aria-label="Allocation mix"], .alloc-summary, .alloc-more')).toBeNull()
+      expect(container.querySelector('[aria-label="Allocation mix"]')).toBeNull()
       expect(panel.querySelector('.portfolio-performance')?.getAttribute('data-scope')).toBe('all')
       const equity = [...container.querySelectorAll<HTMLButtonElement>('.panel--ledger .scope-btn')].find((button) => button.textContent?.startsWith('Equity'))!
       await act(async () => equity.click())

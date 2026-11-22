@@ -114,7 +114,7 @@ export function matchFundScheme(importedName: string, matches: readonly FundSche
   return { status: 'matched', candidates, match: compatible[0].candidate, reason: 'One complete fund, plan and option matches.' }
 }
 
-async function readSearchResults(response: Response, signal: AbortSignal): Promise<unknown> {
+export async function readSearchResults(response: Response, signal: AbortSignal): Promise<unknown> {
   if (!response.body || Number(response.headers.get('Content-Length')) > MAX_SEARCH_BYTES) {
     throw new Error('Scheme search response is too large or empty.')
   }

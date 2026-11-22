@@ -1,14 +1,16 @@
-.portfolio-allocation .alloc-split { grid-template-rows: auto auto; align-content: start; }
-.portfolio-allocation .alloc-bottom,
-.portfolio-allocation .alloc-more { display: block; }
-.portfolio-allocation .alloc-more > summary { padding: 12px 0; border-top: 1px solid var(--hairline); color: var(--ink-muted); font-size: 14px; font-weight: 600; cursor: pointer; }
-.portfolio-allocation .alloc-more > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .insights-page .portfolio-allocation { container-type: inline-size; padding-top: var(--sp-md); }
-.portfolio-allocation .alloc-top { grid-template-columns: minmax(150px, 280px) minmax(0, 1fr); }
-.portfolio-allocation .alloc-legend li,
-.portfolio-allocation .alloc-legend li strong,
-.portfolio-allocation .alloc-summary-head > span,
-.portfolio-allocation .alloc-figure { font-size: 14px; }
 @container (max-width: 440px) {
   .portfolio-allocation .alloc-top { grid-template-columns: minmax(0, 1fr); }
+}
+.alloc-mix-layout { display: grid; gap: var(--sp-lg); }
+.alloc-mix-main { min-width: 0; }
+.alloc-movers { min-width: 0; padding-top: var(--sp-lg); border-top: 1px solid var(--hairline); }
+.alloc-movers .hint { font-size: 12px; }
+.alloc-movers .contribution-bars { gap: 8px; }
+.alloc-movers .contribution-row { gap: 4px; padding-block: 2px; }
+.insights-page .alloc-movers .contribution-track { height: 8px; }
+@container (min-width: 1000px) {
+  .alloc-mix-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; }
+  .alloc-mix-main { padding-right: var(--sp-lg); }
+  .alloc-movers { padding: 0 0 0 var(--sp-lg); border-top: 0; border-left: 1px solid var(--hairline); }
 }

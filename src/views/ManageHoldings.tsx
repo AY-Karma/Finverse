@@ -4,7 +4,7 @@ import { ActionIcon } from './ActionIcon'
 import { RemoveFolioButton } from './RemoveFolioButton'
 import { UndoImportButton } from './UndoImportButton'
 import { WorkspaceRestore } from './WorkspaceRestore'
-import { FundSchemeReview } from './FundSchemeReview'
+import { SipSettings } from './SipSettings'
 import { ImportHealthIndicator } from './ImportHealthIndicator'
 import { needsInstrumentReview } from '../instruments'
 import { privateValue } from '../privacy'
@@ -59,7 +59,8 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
     const dismiss = (event: MouseEvent) => {
       if (!(event.target instanceof Node)) return
       const path = event.composedPath()
-      sectionRef.current?.querySelectorAll<HTMLDetailsElement>('.import-source-files[open], .fund-review[open], .data-marker-help[open]').forEach((details) => {
+      // SIP settings remain expanded until their own summary is closed.
+      sectionRef.current?.querySelectorAll<HTMLDetailsElement>('.import-source-files[open], .fund-review[open]:not(.sip-schemes), .data-marker-help[open]').forEach((details) => {
         const box = details.matches('.data-marker-help') ? details : details.closest('.imported-portfolio') ?? details
         // An inside action can replace its clicked control before this handler runs.
         if (!path.includes(box)) details.open = false
@@ -183,7 +184,7 @@ export function ManageHoldings({ onRequestImport, reviewOpen, onReviewListings }
         {reviewOpen && <InstrumentReview onClose={onReviewListings} autoFocus={window.location.hash === '#instrument-review'} />}
       </div>
     </div>}
-    <FundSchemeReview />
+    <SipSettings />
     {reviewError && <p className="hint down" role="alert">{reviewError}</p>}
   </section>
 }

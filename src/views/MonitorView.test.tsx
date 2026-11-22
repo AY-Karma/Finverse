@@ -69,20 +69,29 @@ function expectPrivateWatch() {
   expect(container.querySelector('[data-tone="up"], [data-tone="down"], [data-trend="up"], [data-trend="down"]')).toBeNull()
   expect(container.querySelector('.mp-rule-condition svg, .pa-news-button')).toBeNull()
   expect(container.querySelector('.mp-rule-list')?.innerHTML).not.toMatch(/Price above|Price below|Daily move exceeds/)
-  const values = [...container.querySelectorAll('.pa-record-detail dd')]
-  expect(values.length).toBeGreaterThan(0)
-  expect(values.every(element => element.textContent === '\u2022'.repeat(6))).toBe(true)
 }
+
+async function openTab(label: string) {
+  const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.getAttribute('aria-label') === label)
+  expect(tab, `Tab: ${label}`).toBeDefined()
+  await act(async () => { tab!.click() })
+}
+
+const filing = (holding: { id: string; name: string }, index = 0): MarketEvent => ({
+  id: `filing-${holding.id}-${index}`, symbol: holding.id, title: `Filing ${index}`, kind: 'filing', date: '2026-10-27', dateLabel: 'Published', publishedAt: Date.now() - index * 1000,
+  source: 'NSE', sourceUrl: `https://nsearchives.nseindia.com/corporate/${holding.id}-${index}.pdf`, holdingId: holding.id, instrumentIdentity: '', holdingName: holding.name,
+})
 
 afterEach(async () => {
   if (root) await act(async () => { root.unmount() })
   container?.remove()
   localStorage.clear()
+  sessionStorage.clear()
   vi.restoreAllMocks()
 })
 
 describe('single-page Monitor', () => {
-  it('puts public IPOs before the collapsed portfolio guide without loading owned-company feeds', async () => {
+  it('shows public IPOs and the economic calendar before a portfolio exists, without owned-company feeds', async () => {
     state.store = { positions: [], liveQuotes: {}, settings: { ...loadSettings(), allowExternalData: true }, refreshNow: vi.fn() } as unknown as ReturnType<typeof useStore>
     container = document.createElement('div')
     document.body.append(container)
@@ -90,42 +99,83 @@ describe('single-page Monitor', () => {
     const importHoldings = vi.fn()
     await act(async () => root.render(<MonitorView onRequestImport={importHoldings} />))
     expect(container.querySelector('[data-news-identity]')).toBeNull()
-    expect(container.querySelector('.mo-edition')?.querySelectorAll('article')).toHaveLength(3)
     expect(container.querySelector('.mp-monitor-sidebar')).toBeNull()
-    expect(container.querySelector('[data-ipo-panel]')?.getAttribute('data-allowed')).toBe('true')
-    const publicIpos = container.querySelector('[data-ipo-panel]')!
+    expect([...container.querySelectorAll('[role="tab"]')].map((tab) => tab.getAttribute('aria-label'))).toEqual(['IPOs', 'Economic calendar'])
+    const calendar = container.querySelector('#monitor-calendar')!
+    expect(calendar.querySelector('[data-ipo-panel]')?.getAttribute('data-allowed')).toBe('true')
     const guide = container.querySelector<HTMLDetailsElement>('details.mi-setup')!
     expect(guide.open).toBe(false)
-    expect(publicIpos.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(calendar.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     const directImport = container.querySelector<HTMLButtonElement>('.mp-hero button')!
     expect(directImport.textContent).toBe('Import portfolio')
     await act(async () => { directImport.click() })
     expect(importHoldings).toHaveBeenCalledOnce()
     expect(loadMarketEvents).not.toHaveBeenCalled()
     expect(state.store.refreshNow).not.toHaveBeenCalled()
-    await act(async () => { guide.querySelector('summary')!.click() })
-    expect(guide.open).toBe(true)
-    const review = container.querySelector<HTMLDetailsElement>('.mo-story details')!
-    await act(async () => review.querySelector('summary')!.click())
-    expect(review.open).toBe(true)
 
     state.store.positions = [{ id: 'imported', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
     await rerender()
     expect(container.querySelector('.mo-edition')).toBeNull()
     expect(container.querySelector('[data-news-identity]')).not.toBeNull()
+    expect([...container.querySelectorAll('[role="tab"]')].map((tab) => tab.getAttribute('aria-label'))).toEqual(['IPOs', 'Economic calendar', 'Company updates'])
+    expect(loadMarketEvents).not.toHaveBeenCalled()
+    await openTab('Company updates')
     expect(loadMarketEvents).toHaveBeenCalledOnce()
   })
 
-  it('prefills watch and reminder forms from a selected company', async () => {
+  it('puts the calendar card under the news and keeps watch rules beside them', async () => {
     await renderWatch()
-    await clickButton('Open company: UP')
+    const content = container.querySelector('.mp-monitor-content')!
+    expect(content.firstElementChild?.hasAttribute('data-news-identity')).toBe(true)
+    expect(content.children[1]?.id).toBe('monitor-calendar')
+    const sidebar = container.querySelector('.mp-monitor-sidebar')!
+    expect(sidebar.querySelector('.mp-rule-list')?.textContent).toContain('UP')
+    expect([...sidebar.querySelectorAll('button')].some(button => button.textContent === '+ New rule')).toBe(true)
+    expect(sidebar.querySelector('#monitor-calendar, .mi-panel')).toBeNull()
+    expect([...container.querySelectorAll('.mp-section-links a')].map((link) => link.textContent)).toEqual(['News', 'Calendar', 'Watches'])
+  })
+
+  it('loads each tab only when it is opened and remembers the choice', async () => {
+    await renderWatch()
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('IPOs')
+    expect(container.querySelector('[data-ipo-panel]')).not.toBeNull()
+    expect(loadMarketEvents).not.toHaveBeenCalled()
+    await openTab('Economic calendar')
+    expect(container.querySelector('[data-ipo-panel]')).toBeNull()
+    expect(container.querySelector('.mc-econ, [aria-label="Loading economic calendar"]')).not.toBeNull()
+    expect(sessionStorage.getItem('finverse:monitor-calendar-tab')).toBe('economy')
+    expect(loadMarketEvents).not.toHaveBeenCalled()
+    expect(container.querySelector('.mc-head button[aria-label="Add reminder"]')).toBeNull()
+    await openTab('Company updates')
+    expect(container.querySelector('.mc-head button[aria-label="Add reminder"]')).not.toBeNull()
+  })
+
+  it('keeps Company updates in place with a loader until events arrive, then shows their result', async () => {
+    let finish: (feed: Awaited<ReturnType<typeof loadMarketEvents>>) => void = () => {}
+    vi.mocked(loadMarketEvents).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    await renderWatch()
+    await openTab('Company updates')
+    const company = container.querySelector('.mc-company')!
+    expect(company.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('Loading company updates')
+    expect(container.textContent).not.toContain('No announced events')
+    await act(async () => finish({ events: [], issues: [], fetchedAt: Date.now() }))
+    expect(container.querySelector('.mc-company')).toBe(company)
+    expect(container.querySelector('.skeleton-rows')).toBeNull()
+    expect(company.textContent).toContain('No announced events or recent filings for your NSE holdings.')
+  })
+
+  it('prefills watch and reminder forms from a selected company', async () => {
+    vi.mocked(loadMarketEvents).mockResolvedValue({ events: [filing({ id: 'UP', name: 'UP' }), filing({ id: 'DOWN', name: 'DOWN' })], issues: [], fetchedAt: Date.now() })
+    await renderWatch()
+    await openTab('Company updates')
+    await clickButton('UP')
     expect(container.querySelector<HTMLDialogElement>('.mp-company-dialog')?.open).toBe(true)
     await clickButton('Create watch')
     const ruleForm = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-rule-title"]')!
     expect(ruleForm.open).toBe(true)
-    expect(ruleForm.querySelector('select')?.value).toBe('UP')
+    expect(ruleForm.querySelector<HTMLInputElement>('[role="combobox"]')?.value).toBe('UP')
     await clickButton('Close rule form')
-    await clickButton('Open company: DOWN')
+    await clickButton('DOWN')
     await clickButton('Remind me')
     const reminderForm = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-reminder-title"]')!
     expect(reminderForm.open).toBe(true)
@@ -133,13 +183,10 @@ describe('single-page Monitor', () => {
   })
 
   it('makes every company filing available in a focusable feed without expansion', async () => {
-    const filings: MarketEvent[] = Array.from({ length: 8 }, (_, index) => ({
-      id: `filing-${index}`, symbol: 'UP', title: `Filing ${index}`, kind: 'filing', date: '2026-10-27', dateLabel: 'Published', publishedAt: Date.now() - index * 1000,
-      source: 'NSE', sourceUrl: `https://nsearchives.nseindia.com/corporate/UP-${index}.pdf`, holdingId: 'UP', instrumentIdentity: '', holdingName: 'UP',
-    }))
-    vi.mocked(loadMarketEvents).mockResolvedValue({ events: filings, issues: [], fetchedAt: Date.now() })
+    vi.mocked(loadMarketEvents).mockResolvedValue({ events: Array.from({ length: 8 }, (_, index) => filing({ id: 'UP', name: 'UP' }, index)), issues: [], fetchedAt: Date.now() })
     await renderWatch()
-    const region = container.querySelector('[role="region"][aria-label="Company updates feed"]')!
+    await openTab('Company updates')
+    const region = container.querySelector('[role="region"][aria-label="Company filings"]')!
     expect(region.getAttribute('tabindex')).toBe('0')
     expect(region.querySelectorAll('article')).toHaveLength(8)
     expect(container.textContent).not.toContain('Show more updates')
@@ -151,11 +198,12 @@ describe('single-page Monitor', () => {
       source: 'NSE', sourceUrl: 'https://www.nseindia.com/companies-listing/corporate-filings-board-meetings',
       holdingId: 'UP', instrumentIdentity: '', holdingName: 'UP',
     }
-    const filing: MarketEvent = { ...result, id: 'filing', kind: 'filing', date: '2026-10-27', dateLabel: 'Published', publishedAt: Date.now(), title: 'Investor presentation', sourceUrl: 'https://nsearchives.nseindia.com/corporate/UP_27102026.pdf' }
-    vi.mocked(loadMarketEvents).mockResolvedValue({ events: [result, filing], issues: [], fetchedAt: Date.now() })
+    const document = filing({ id: 'UP', name: 'UP' })
+    vi.mocked(loadMarketEvents).mockResolvedValue({ events: [result, document], issues: [], fetchedAt: Date.now() })
     await renderWatch()
+    await openTab('Company updates')
     expect(container.querySelector('.mp-agenda-event time')?.getAttribute('datetime')).toBe(result.date)
-    expect(container.querySelector('.mp-developments article > a')?.getAttribute('href')).toBe(filing.sourceUrl)
+    expect(container.querySelector('.mp-updates-scroll article > a')?.getAttribute('href')).toBe(document.sourceUrl)
     await clickButton('Remind me: UP Quarterly results')
     const form = container.querySelector<HTMLDialogElement>('[aria-labelledby="mp-reminder-title"]')!
     expect(form.open).toBe(true)
@@ -165,128 +213,53 @@ describe('single-page Monitor', () => {
   })
 
   it('clears company context and aborts its event request when masking is enabled', async () => {
-    vi.mocked(loadMarketEvents).mockImplementation(() => new Promise(() => {}))
+    let resolve: (feed: Awaited<ReturnType<typeof loadMarketEvents>>) => void = () => {}
+    vi.mocked(loadMarketEvents).mockResolvedValueOnce({ events: [filing({ id: 'UP', name: 'UP' })], issues: [], fetchedAt: Date.now() })
+      .mockImplementation(() => new Promise((done) => { resolve = done }))
     await renderWatch()
-    const signal = vi.mocked(loadMarketEvents).mock.calls[0][1]?.signal
-    await clickButton('Open company: UP')
+    await openTab('Company updates')
+    await clickButton('UP')
+    await clickButton('Refresh prices')
+    const signal = vi.mocked(loadMarketEvents).mock.calls.at(-1)?.[1]?.signal
     state.store.settings = { ...state.store.settings, hideValues: true }
     await rerender()
     expect(signal?.aborted).toBe(true)
-    expect(container.querySelector('.mp-company-dialog, .mp-developments')).toBeNull()
+    void resolve
+    expect(container.querySelector('.mp-company-dialog, .mc-company article')).toBeNull()
+    expect(container.querySelector('.mc-company')?.textContent).toContain('Company updates are hidden.')
     expectPrivateWatch()
   })
 
-  it('leads with news on quiet days and keeps setup controls together', async () => {
+  it('sends new watch alerts to notifications instead of adding a card to Monitor', async () => {
     await renderWatch()
-    state.store.liveQuotes = {}
-    await restoreSaved(saved => { saved.alerts = []; saved.rules = []; saved.events = [] })
-    await rerender()
-    const content = container.querySelector('.mp-monitor-content')!
-    expect(content.firstElementChild?.hasAttribute('data-news-identity')).toBe(true)
-    expect(container.querySelector('.pa-attention, .pa-history, .mp-check-status')).toBeNull()
-    const sidebar = container.querySelector('.mp-monitor-sidebar')!
-    expect(sidebar.querySelector('.mp-rule-list')).not.toBeNull()
-    expect(sidebar.querySelector('.pa-reminders')).not.toBeNull()
-    expect([...sidebar.querySelectorAll('button')].some(button => button.textContent === '+ New rule')).toBe(true)
-    expect(sidebar.querySelector('button[aria-label="Add reminder"]')).not.toBeNull()
-  })
-
-  it('keeps the initial mobile alert queue short and expands it on request', async () => {
-    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
-    try {
-      await renderWatch()
-      expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(1)
-      expect(container.querySelector('.pa-attention .mp-badge')?.textContent).toBe('3 open')
-      await clickButton('Show more alerts')
-      expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
-    } finally {
-      vi.unstubAllGlobals()
-    }
-  })
-
-  it('shows actionable alerts, reminders and rules together without duplicate portfolio views', async () => {
-    await renderWatch()
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
-    expect(container.querySelector('.pa-reminders')?.textContent).toContain('Upcoming')
-    expect(container.querySelector('.mp-rule-list')?.textContent).toContain('UP')
-    expect(container.querySelector('.pa-views, .pa-table, .pa-movers, .pa-pulse, [role="tablist"]')).toBeNull()
-    const viewButtons = [...container.querySelectorAll('button')].filter(button => ['Brief', 'Holdings', 'Activity'].includes(button.textContent || ''))
-    expect(viewButtons).toHaveLength(0)
-  })
-
-  it('moves reviewed alerts into history and reopens them without changing the page view', async () => {
-    await renderWatch()
-    await clickButton('Mark reviewed: UP')
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(2)
-    const history = container.querySelector<HTMLDetailsElement>('.pa-history')!
-    expect(history.querySelector('summary')?.textContent).toContain('Reviewed & snoozed')
-    await act(async () => { history.querySelector('summary')!.click() })
-    expect(history.open).toBe(true)
-    expect(history.querySelectorAll('.pa-record')).toHaveLength(1)
-    expect(history.querySelector('.pa-record')?.textContent).toContain('Reviewed')
-    await clickButton('Reopen item')
-    expect(container.querySelector('.pa-history')).toBeNull()
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
-    const saved = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!)
-    expect(saved.alerts.every((alert: { state: string }) => alert.state === 'open')).toBe(true)
-  })
-
-  it('keeps snoozed records accessible without treating them as open alerts', async () => {
-    await renderWatch()
-    const earliestDeadline = Date.now() + 24 * 3_600_000
-    await clickButton('Snooze: UP')
-    await clickButton('24 hours')
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(2)
-    expect(container.querySelector('.pa-history .pa-record')?.textContent).toContain('Snoozed')
-    expect(container.querySelector('.pa-history button')?.textContent).toContain('Reopen item')
     const saved = JSON.parse(localStorage.getItem(MONITOR_STORAGE_KEY)!) as MonitorState
-    expect(saved.alerts.find(alert => alert.state === 'snoozed')?.snoozedUntil).toBeGreaterThanOrEqual(earliestDeadline)
-  })
-
-  it('expands a bounded alert queue inline', async () => {
-    await renderWatch()
-    await restoreSaved(saved => {
-      const alert = saved.alerts[0]
-      saved.alerts = Array.from({ length: 8 }, (_, index) => ({ ...alert, id: `alert-${index}`, observationKey: `observation-${index}` }))
-    })
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(3)
-    const more = [...container.querySelectorAll<HTMLElement>('button, summary')].find(button => button.textContent?.startsWith('Show more alerts'))!
-    expect(more).toBeDefined()
-    await act(async () => { more.click() })
-    expect(container.querySelectorAll('.pa-attention > .pa-record').length).toBeGreaterThan(3)
-  })
-
-  it('does not imply all-clear when observations are unavailable', async () => {
-    await renderWatch()
-    state.store.liveQuotes = {}
-    await restoreSaved(saved => { saved.alerts = [] })
-    await rerender()
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(0)
-    expect(container.textContent).not.toMatch(/all clear/i)
-    expect(container.querySelector('.mp-check-status, .pa-attention')).toBeNull()
-    expect(container.querySelector('.mp-rule-list')?.textContent).toContain('UP')
+    expect(saved.alerts.filter((alert) => alert.state === 'open')).toHaveLength(3)
+    expect(container.querySelector('.pa-attention, .pa-record, #monitor-alerts-heading')).toBeNull()
+    expect(container.querySelector('.mp-toast-message')?.textContent).toBe('3 watch alerts added to notifications.')
   })
 
   it('keeps local rules and reminders accessible while external data is off', async () => {
     await renderWatch()
     state.store.settings = { ...state.store.settings, allowExternalData: false }
     await rerender()
+    await openTab('Company updates')
     expect(container.querySelector('.mp-hero')?.textContent).toContain('Market data paused')
     expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh prices')?.disabled).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Add reminder"]')?.disabled).toBe(false)
+    expect(container.querySelector('.mc-company')?.textContent).toContain('Market data is paused')
     expect(container.querySelector('.mp-rule-list')?.textContent).toContain('UP')
-    expect(container.querySelector('.pa-table, .pa-movers')).toBeNull()
   })
 
   it('keeps overdue personal reminders actionable and restores a turned-off reminder', async () => {
     await renderWatch()
+    await openTab('Company updates')
     await restoreSaved(saved => {
       saved.events = [
         { id: 'overdue', holding: 'UP', holdingId: 'UP', title: 'Review old watch level', date: '2000-01-01', kind: 'Reminder', reminder: true },
         { id: 'future', holding: 'DOWN', holdingId: 'DOWN', title: 'Review future watch level', date: '2099-01-01', kind: 'Reminder', reminder: true },
       ]
     })
-    const reminders = container.querySelector('.pa-reminders')!
+    const reminders = container.querySelector('.mc-company')!
     expect(reminders.textContent).toContain('Overdue')
     expect(reminders.textContent).toContain('Review future watch level')
     await clickButton('Turn off reminder: Review old watch level')
@@ -302,6 +275,7 @@ describe('single-page Monitor', () => {
 
   it('deletes only the selected inactive reminder and keeps it deleted after remounting', async () => {
     await renderWatch()
+    await openTab('Company updates')
     await restoreSaved(saved => {
       saved.events = [
         { id: 'remove', holding: 'UP', holdingId: 'UP', title: 'Old results reminder', date: '2000-01-01', kind: 'Reminder', reminder: false },
@@ -320,6 +294,7 @@ describe('single-page Monitor', () => {
     await act(async () => { root.unmount() })
     root = createRoot(container)
     await rerender()
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('Company updates')
     expect(container.textContent).not.toContain('Old results reminder')
     expect(container.querySelector('.pa-inactive-reminders')?.textContent).toContain('Inactive dividend reminder')
     expect(container.querySelector('.mp-personal-reminders')?.textContent).toContain('Active review reminder')
@@ -328,6 +303,7 @@ describe('single-page Monitor', () => {
 
   it('keeps an inactive reminder visible when deletion cannot be saved', async () => {
     await renderWatch()
+    await openTab('Company updates')
     await restoreSaved(saved => {
       saved.events = [{ id: 'remove', holding: 'UP', holdingId: 'UP', title: 'Old results reminder', date: '2000-01-01', kind: 'Reminder', reminder: false }]
     })
@@ -348,38 +324,36 @@ describe('single-page Monitor', () => {
     state.store.liveQuotes = { [quoteKey(fund)]: { price: 83.14, source: 'nav', at: Date.now() } }
     await restoreSaved(saved => { saved.alerts = []; saved.rules = [] })
     await rerender()
-    expect(container.querySelector('.mp-check-status')).toBeNull()
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(0)
-    expect(container.querySelector('.pa-news-button, .pa-table, .pa-movers')).toBeNull()
+    expect(container.querySelector('.mp-check-status, .pa-news-button, .pa-table, .pa-movers')).toBeNull()
     expect(container.textContent).not.toContain('83.14')
   })
 
   it('repeats holding news selection with the same identity and a new revision', async () => {
+    vi.mocked(loadMarketEvents).mockResolvedValue({ events: [filing({ id: 'UP', name: 'UP' })], issues: [], fetchedAt: Date.now() })
     await renderWatch()
+    await openTab('Company updates')
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 1 })
     for (const revision of [1, 2]) {
-      await clickButton('Open company: UP')
+      await clickButton('UP')
       await clickButton('Related news')
       expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-identity')).toBe(holdingIdentity(state.store.positions[0]))
       expect(container.querySelector('[data-news-revision]')?.getAttribute('data-news-revision')).toBe(String(revision))
     }
   })
 
-  it('routes same-symbol alerts by the holding listing rather than ticker alone', async () => {
+  it('routes same-symbol companies by the holding listing rather than ticker alone', async () => {
     await renderWatch()
     const base = state.store.positions[0]
     const airline = { ...base, id: 'airline', ticker: 'AAL', name: 'American Airlines', exchange: 'NASDAQ' as const }
     const miner = { ...base, id: 'miner', ticker: 'AAL', name: 'Anglo American plc', exchange: 'LSE' as const }
+    vi.mocked(loadMarketEvents).mockResolvedValue({ events: [filing(airline), filing(miner)], issues: [], fetchedAt: Date.now() })
     state.store.positions = [airline, miner]
     state.store.liveQuotes = {}
-    await restoreSaved(saved => {
-      const template = saved.alerts[0]
-      saved.rules = []
-      saved.alerts = [airline, miner].map(holding => ({ ...template, id: holding.id, holdingId: holding.id, holding: holding.name, observationKey: holding.id }))
-    })
+    await restoreSaved(saved => { saved.rules = []; saved.alerts = [] })
     await rerender()
+    await openTab('Company updates')
     for (const holding of [airline, miner]) {
-      await clickButton(`Open company: ${holding.name}`)
+      await clickButton(holding.name)
       await clickButton('Related news')
       expect(container.querySelector('[data-news-identity]')?.getAttribute('data-news-identity')).toBe(holdingIdentity(holding))
     }
@@ -387,9 +361,9 @@ describe('single-page Monitor', () => {
 })
 
 describe('Monitor privacy', () => {
-  it('redacts alerts, history, reminders and rule labels without changing saved records', async () => {
+  it('redacts reminders and rule labels without changing saved records', async () => {
     await renderWatch()
-    await clickButton('Mark reviewed: UP')
+    await openTab('Company updates')
     await restoreSaved(saved => { saved.events = [{ id: 'reminder', holding: 'UP', holdingId: 'UP', title: 'Review UP tomorrow', date: '2099-01-01', kind: 'Reminder', reminder: true }] })
     const saved = localStorage.getItem(MONITOR_STORAGE_KEY)
     state.store.settings = { ...state.store.settings, hideValues: true }
@@ -400,19 +374,12 @@ describe('Monitor privacy', () => {
     state.store.settings = { ...state.store.settings, hideValues: false }
     await rerender()
     expect(container.textContent).toContain('Review UP tomorrow')
-    expect(container.querySelector('[data-trend="up"]')).not.toBeNull()
-    expect(container.querySelector('[data-trend="down"]')).not.toBeNull()
     expect(container.querySelector('.mp-rule-condition svg')).not.toBeNull()
   })
 
-  it('starts neutral while masked and preserves review actions', async () => {
+  it('starts masked without naming holdings in the alert announcement', async () => {
     await renderWatch(true)
     expectPrivateWatch()
-    const review = container.querySelector<HTMLButtonElement>('.pa-attention .pa-review-actions button')!
-    expect(review.textContent).toContain('Mark reviewed')
-    await act(async () => { review.click() })
-    expect(container.querySelectorAll('.pa-attention > .pa-record')).toHaveLength(2)
-    expect(container.querySelectorAll('.pa-history .pa-record')).toHaveLength(1)
-    expectPrivateWatch()
+    expect(container.querySelector('.mp-toast-message')?.textContent).toBe('3 watch alerts added to notifications.')
   })
 })

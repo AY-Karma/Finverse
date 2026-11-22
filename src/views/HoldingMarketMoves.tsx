@@ -3,7 +3,7 @@ import type { LiveQuote, Position } from '../types'
 import { marketData } from '../marketData'
 import { calculateHoldingMarketMoves, holdingMovePeriod, holdingMoveToday, uniqueMarketHoldings, type HoldingMoveRange, type HoldingPriceHistories, type HoldingMarketMove } from '../holdingMarketMoves'
 import { formatCurrency, formatPercent, hasSupportedValuationCurrency, quoteKey, signedCurrency } from '../valuation'
-import { DitherBar } from './DitherBar'
+import { SegmentBar } from './SegmentBar'
 import { MovementCalculationHelp } from './MovementCalculationHelp'
 import './holdingMarketMoves.css'
 
@@ -81,7 +81,7 @@ export function HoldingMarketMoveResults({ result, from, compact = false }: {
   const others = ranked.slice(5)
   const remainingChange = others.reduce((sum, row) => sum + row.change, 0)
   const maximum = Math.max(...result.rows.map((row) => Math.abs(row.change)), 1)
-  const column = (title: string, rows: HoldingMarketMove[], positive: boolean) => <div className="holding-move-column"><span className="score-label">{title}</span>{rows.slice(0, 5).map((row) => <div className="contribution-row" key={row.key}><div><span className="holding-move-identity"><span className="holding-move-name" title={row.label}>{row.label}</span><span className="holding-move-pct">{formatPercent(row.changePct)}</span></span><strong className={positive ? 'up' : 'down'}>{formatCurrency(row.change)}</strong></div><DitherBar className="contribution-track" segments={[{ value: Math.abs(row.change), color: positive ? 'green' : 'red' }]} scale={maximum} /></div>)}{!rows.length && <p className="hint">No {positive ? 'positive' : 'negative'} moves.</p>}</div>
+  const column = (title: string, rows: HoldingMarketMove[], positive: boolean) => <div className="holding-move-column"><span className="score-label">{title}</span>{rows.slice(0, 5).map((row) => <div className="contribution-row" key={row.key}><div><span className="holding-move-identity"><span className="holding-move-name" title={row.label}>{row.label}</span><span className="holding-move-pct">{formatPercent(row.changePct)}</span></span><strong className={positive ? 'up' : 'down'}>{formatCurrency(row.change)}</strong></div><SegmentBar className="contribution-track" segments={[{ value: Math.abs(row.change), color: positive ? 'green' : 'red' }]} scale={maximum} /></div>)}{!rows.length && <p className="hint">No {positive ? 'positive' : 'negative'} moves.</p>}</div>
   return <div className={`holding-market-moves${compact ? ' holding-market-moves--compact' : ''}`}>
     {compact ? <div className="movement-breakdown-head"><span className="score-label">Largest contributors</span><MovementCalculationHelp /></div> : <>
       <div className="holding-move-summary"><strong className={result.totalChange > 0 ? 'up' : result.totalChange < 0 ? 'down' : undefined}>{formatCurrency(result.totalChange)}</strong><MovementCalculationHelp /><span className="hint">{from} through latest available market prices</span></div>
@@ -92,7 +92,7 @@ export function HoldingMarketMoveResults({ result, from, compact = false }: {
         {largest.map((row) => <li className="holding-move-ranked-row" key={row.key}>
           <span className="holding-move-identity"><span className="holding-move-name" title={row.label}>{row.label}</span><span className="holding-move-pct">{formatPercent(row.changePct)}</span></span>
           <strong className={row.change > 0 ? 'up' : 'down'}>{signedCurrency(row.change)}</strong>
-          <DitherBar className="holding-move-ranked-track" segments={[{ value: Math.abs(row.change), color: row.change > 0 ? 'green' : 'red' }]} scale={maximum} />
+          <SegmentBar className="holding-move-ranked-track" segments={[{ value: Math.abs(row.change), color: row.change > 0 ? 'green' : 'red' }]} scale={maximum} />
         </li>)}
       </ol> : <p className="hint">No rise or fall over this period.</p>}
       {others.length > 0 && <div className="holding-move-remainder"><span>Other holdings <small>{others.length}</small></span><strong className={remainingChange > 0 ? 'up' : remainingChange < 0 ? 'down' : undefined}>{signedCurrency(remainingChange)}</strong></div>}

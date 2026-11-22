@@ -78,7 +78,7 @@ describe('settings persistence', () => {
         const preferences = loadSettings()
         expect(preferences).toEqual({
           currency: 'INR', allowExternalData: true, density: 'comfortable',
-          accent: 'cobalt', mode: 'dark', hideValues: false, focusRings: true, marketIndices: ['nifty-bank', 'nifty-50'],
+          accent: 'cobalt', mode: 'default', hideValues: false, focusRings: true, marketIndices: ['nifty-bank', 'nifty-50'],
         })
         expect(JSON.parse(localStorage.getItem('finverse:settings')!)).toEqual(preferences)
       }, raw).not.toThrow()
@@ -91,7 +91,7 @@ describe('settings persistence', () => {
     vi.stubGlobal('sessionStorage', { removeItem: blocked })
     expect(loadSettings()).toEqual({
       currency: 'INR', allowExternalData: true, density: 'comfortable',
-      accent: 'cobalt', mode: 'dark', hideValues: false, focusRings: true, marketIndices: ['nifty-bank', 'nifty-50'],
+      accent: 'cobalt', mode: 'default', hideValues: false, focusRings: true, marketIndices: ['nifty-bank', 'nifty-50'],
     })
     expect(saveSettings(loadSettings())).toBe(false)
   })

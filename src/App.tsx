@@ -1,4 +1,6 @@
 import { Activity, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { loadedView, loadView } from './viewModules'
+import { NAVIGATE_ANCHOR_EVENT } from './views/MonitorCalendar'
 import type { Position } from './types'
 import type { View } from './useStore'
 import { IdleWhenHidden, useStore } from './useStore'
@@ -10,23 +12,11 @@ import { MarketStoriesEntry } from './views/MarketStoriesEntry'
 import { NotFound } from './NotFound'
 import { loadIpos } from './ipos'
 
-const loadOverview = () => import('./views/Overview')
-const loadMonitorView = () => import('./views/MonitorView')
-const loadResearchView = () => import('./views/ResearchView')
-const loadSettingsView = () => import('./views/SettingsView')
-const loadInsightsView = () => import('./views/InsightsView')
 
-const Overview = lazy(() => loadOverview().then((module) => ({ default: module.Overview })))
-const MonitorView = lazy(() => loadMonitorView().then((module) => ({ default: module.MonitorView })))
-const ResearchView = lazy(() => loadResearchView().then((module) => ({ default: module.ResearchView })))
-const SettingsView = lazy(() => loadSettingsView().then((module) => ({ default: module.SettingsView })))
-const InsightsView = lazy(() => loadInsightsView().then((module) => ({ default: module.InsightsView })))
 const PortfolioImportDialog = lazy(() => import('./views/PortfolioImportDialog').then((module) => ({ default: module.PortfolioImportDialog })))
 
-const VIEW_LOADERS = { overview: loadOverview, holdings: loadMonitorView, research: loadResearchView, settings: loadSettingsView, insights: loadInsightsView }
-
 function preloadView(view: View, externalEnabled: boolean) {
-  void VIEW_LOADERS[view]().catch(() => { /* Navigation can retry a failed preload. */ })
+  void loadView(view).catch(() => { /* Navigation retries a failed preload. */ })
   if (view === 'holdings' && externalEnabled) void loadIpos().catch(() => {})
 }
 
@@ -51,7 +41,17 @@ export default function App({ initialView }: { initialView: View }) {
   const rememberResearchUrl = useCallback((url: string) => { researchUrl.current = url }, [])
   const { settings } = useStore()
 
-  const navigate = useCallback((nextView: View, anchor?: string) => {
+  const [viewError, setViewError] = useState<View | null>(null)
+  const navigation = useRef(0)
+
+  // A screen opens only once its code is ready, so it never appears as a placeholder that is swapped later.
+  const navigate = useCallback((nextView: View, anchor?: string, afterShow?: () => void) => {
+    const request = ++navigation.current
+    const show = () => { if (request !== navigation.current) return; showView(nextView, anchor); afterShow?.() }
+    loadView(nextView).then(show, () => { setViewError(nextView); show() })
+  }, [])
+
+  const showView = useCallback((nextView: View, anchor?: string) => {
     if (window.location.pathname === '/app/research') researchUrl.current = window.location.pathname + window.location.search
     const nextPath = (nextView === 'research' ? researchUrl.current : pathForView(nextView)) + (anchor ? `#${anchor}` : '')
     if (window.location.pathname + window.location.search + window.location.hash !== nextPath) window.history.pushState({}, '', nextPath)
@@ -60,12 +60,30 @@ export default function App({ initialView }: { initialView: View }) {
     setResearchReturn(false)
     setNotFound(false)
     setView(nextView)
+    // An already-open screen reacts to its anchor (for example a Monitor calendar tab).
+    if (anchor) window.setTimeout(() => window.dispatchEvent(new CustomEvent(NAVIGATE_ANCHOR_EVENT, { detail: anchor })))
+  }, [])
+
+  // The entry screen is normally loaded before the first render; load it here when the app is mounted directly.
+  const [, setLoadedRevision] = useState(0)
+  useEffect(() => {
+    if (loadedView(view)) return
+    let active = true
+    loadView(view).then(() => { if (active) setLoadedRevision((revision) => revision + 1) }, () => { if (active) setViewError(view) })
+    return () => { active = false }
+  }, [view])
+
+  useEffect(() => {
+    // Load the remaining screens in the background so later navigation is instant.
+    const timer = window.setTimeout(() => NAV.forEach((item) => void loadView(item.id).catch(() => {})), 1500)
+    return () => window.clearTimeout(timer)
   }, [])
 
   const openFromResearch = (nextView: View, position?: Position) => {
-    navigate(nextView)
-    if (nextView === 'holdings') setMonitorQuery(position?.name || position?.ticker || '')
-    setResearchReturn(true)
+    navigate(nextView, undefined, () => {
+      if (nextView === 'holdings') setMonitorQuery(position?.name || position?.ticker || '')
+      setResearchReturn(true)
+    })
   }
 
   const openPortfolioImport = (accountId?: string) => {
@@ -88,8 +106,13 @@ export default function App({ initialView }: { initialView: View }) {
         return
       }
       if (route.redirectTo) window.history.replaceState({}, '', route.redirectTo)
-      setVisitedViews((visited) => visited.has(route.view) ? visited : new Set([...visited, route.view]))
-      setView(route.view)
+      const request = ++navigation.current
+      const show = () => {
+        if (request !== navigation.current) return
+        setVisitedViews((visited) => visited.has(route.view) ? visited : new Set([...visited, route.view]))
+        setView(route.view)
+      }
+      loadView(route.view).then(show, () => { setViewError(route.view); show() })
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
@@ -113,6 +136,16 @@ export default function App({ initialView }: { initialView: View }) {
 
   if (notFound) return <NotFound />
 
+  const Overview = loadedView('overview')
+  const MonitorView = loadedView('holdings')
+  const ResearchView = loadedView('research')
+  const InsightsView = loadedView('insights')
+  const SettingsView = loadedView('settings')
+  const unavailable = (target: View, label: string) => <div className="view-loading" role="alert">
+    <p>{label} could not be loaded.</p>
+    <button type="button" className="btn btn--secondary btn--small" onClick={() => { setViewError(null); navigate(target) }}>Try again</button>
+  </div>
+
   return (
     <MarketStoriesEntry navigate={navigate}>{(highlightsEntry) => <AppShell view={view} navigate={navigate} highlightsEntry={highlightsEntry}>
       <main className="main" id="main-content" tabIndex={-1}>
@@ -121,17 +154,15 @@ export default function App({ initialView }: { initialView: View }) {
           <Activity key={item.id} mode={view === item.id ? 'visible' : 'hidden'}>
             <IdleWhenHidden visible={view === item.id}>
             <div className={item.id === 'overview' ? 'overview-sections' : undefined} hidden={view !== item.id}>
-              <Suspense fallback={<div className="view-loading" role="status">Loading {item.label.toLowerCase()}…</div>}>
-                {item.id === 'overview' && <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} highlightsEntry={highlightsEntry} />}
-                {item.id === 'research' && <ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} />}
-                {item.id === 'holdings' && <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} />}
-                {item.id === 'insights' && <InsightsView onRequestImport={requestPortfolioImport} />}
-              </Suspense>
+              {item.id === 'overview' && (Overview ? <Overview onGoTo={navigate} onRequestImport={requestPortfolioImport} highlightsEntry={highlightsEntry} /> : viewError === item.id && unavailable(item.id, item.label))}
+              {item.id === 'research' && (ResearchView ? <ResearchView active={view === 'research'} onUrlChange={rememberResearchUrl} onGoTo={openFromResearch} onRequestImport={requestPortfolioImport} /> : viewError === item.id && unavailable(item.id, item.label))}
+              {item.id === 'holdings' && (MonitorView ? <MonitorView initialQuery={monitorQuery} onRequestImport={requestPortfolioImport} /> : viewError === item.id && unavailable(item.id, item.label))}
+              {item.id === 'insights' && (InsightsView ? <InsightsView onRequestImport={requestPortfolioImport} /> : viewError === item.id && unavailable(item.id, item.label))}
             </div>
             </IdleWhenHidden>
           </Activity>
         ))}
-        {view === 'settings' && <Suspense fallback={<div className="view-loading" role="status">Loading settings…</div>}><SettingsView onRequestImport={openPortfolioImport} /></Suspense>}
+        {view === 'settings' && (SettingsView ? <SettingsView onRequestImport={openPortfolioImport} /> : viewError === 'settings' && unavailable('settings', 'Settings'))}
       </main>
       {importVisited && <Suspense fallback={<div className="view-loading" role="status">Opening import…</div>}><PortfolioImportDialog open={importOpen} accountId={importAccountId} onClose={() => setImportOpen(false)} /></Suspense>}
     </AppShell>}</MarketStoriesEntry>

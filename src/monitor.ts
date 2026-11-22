@@ -3,6 +3,9 @@ import { hasSupportedValuationCurrency, quoteKey, signedPercent } from './valuat
 import { workspaceWritesBlocked } from './workspaceStorage'
 import { parseMonitorReadingState, type MonitorReadingState } from './monitorReading'
 import { isIpoDate, isIpoSourceUrl } from './ipoProtocol'
+import { parseWatchSecurity, watchSecurityKey, type WatchSecurity } from './watchSecurity'
+import { MAX_SIP_PLANS, parseSipPlan, type SipPlan } from './sipPlans'
+import { parseMonitorFollows, type MonitorFollows } from './monitorFollows'
 
 export type RuleCondition = 'price_above' | 'price_below' | 'daily_move'
 export type AlertState = 'open' | 'reviewed' | 'snoozed'
@@ -31,6 +34,8 @@ export interface MonitorRule {
   threshold: number
   active: boolean
   unresolved?: boolean
+  /** Set for a security the user follows without owning it; holdingId and instrumentIdentity then hold its watch key. */
+  security?: WatchSecurity
 }
 export interface MonitorEvent {
   id: string
@@ -43,9 +48,12 @@ export interface MonitorEvent {
   unresolved?: boolean
 }
 export interface MonitorIpoWatch { id: string; name: string; openDate: string | null; closeDate: string; sourceUrl: string }
-export interface MonitorState { rules: MonitorRule[]; events: MonitorEvent[]; alerts: MonitorAlert[]; reading?: MonitorReadingState; ipoWatches?: MonitorIpoWatch[] }
+/** Saved follow-ups for this workspace. SIP plans live here so backup, restore and multi-tab safeguards cover them too. */
+export interface MonitorState { rules: MonitorRule[]; events: MonitorEvent[]; alerts: MonitorAlert[]; reading?: MonitorReadingState; ipoWatches?: MonitorIpoWatch[]; sipPlans?: SipPlan[]; follows?: MonitorFollows }
 
 export const MONITOR_STORAGE_KEY = 'finverse:monitor:v1'
+/** Dispatched in this tab after Monitor state is saved. */
+export const MONITOR_CHANGED = 'finverse:monitor-changed'
 export const emptyMonitorState = (): MonitorState => ({ rules: [], events: [], alerts: [] })
 const DAY = 86_400_000
 const MAX_ITEMS = 200
@@ -90,7 +98,12 @@ export function sanitizeMonitorState(value: unknown): MonitorState {
   const rules: MonitorRule[] = []
   for (const item of Array.isArray(value.rules) ? value.rules.slice(0, MAX_ITEMS) : []) {
     if (!record(item) || !text(item.id) || !text(item.holdingId) || !text(item.instrumentIdentity) || !conditions.includes(item.condition as RuleCondition) || !finite(item.threshold) || item.threshold <= 0 || typeof item.active !== 'boolean') continue
-    rules.push({ id: text(item.id), holding: text(item.holding), holdingId: text(item.holdingId), instrumentIdentity: text(item.instrumentIdentity), condition: item.condition as RuleCondition, threshold: item.threshold, active: item.active, ...(item.unresolved === true ? { unresolved: true } : {}) })
+    const security = item.security === undefined ? undefined : parseWatchSecurity(item.security)
+    if (security === null) continue
+    const target = security
+      ? { holding: security.name, holdingId: watchSecurityKey(security), instrumentIdentity: watchSecurityKey(security), security }
+      : { holding: text(item.holding), holdingId: text(item.holdingId), instrumentIdentity: text(item.instrumentIdentity) }
+    rules.push({ id: text(item.id), ...target, condition: item.condition as RuleCondition, threshold: item.threshold, active: item.active, ...(item.unresolved === true && !security ? { unresolved: true } : {}) })
   }
   const events: MonitorEvent[] = []
   for (const item of Array.isArray(value.events) ? value.events.slice(0, MAX_ITEMS) : []) {
@@ -115,7 +128,12 @@ export function sanitizeMonitorState(value: unknown): MonitorState {
     const watch = parseIpoWatch(item)
     return watch ? [watch] : []
   }))
-  return { rules: unique(rules), events: unique(events), alerts: unique(alerts), ...(reading ? { reading } : {}), ...(ipoWatches.length ? { ipoWatches } : {}) }
+  const sipPlans = unique((Array.isArray(value.sipPlans) ? value.sipPlans.slice(0, MAX_SIP_PLANS) : []).flatMap((item) => {
+    const plan = parseSipPlan(item)
+    return plan ? [plan] : []
+  }))
+  const follows = value.follows === undefined ? null : parseMonitorFollows(value.follows)
+  return { rules: unique(rules), events: unique(events), alerts: unique(alerts), ...(reading ? { reading } : {}), ...(ipoWatches.length ? { ipoWatches } : {}), ...(sipPlans.length ? { sipPlans } : {}), ...(follows ? { follows } : {}) }
 }
 
 export function loadMonitorState(): { state: MonitorState; error: string } {
@@ -149,20 +167,20 @@ export function freshQuote(quote: LiveQuote, now: number): boolean {
   return now - quote.at <= (quote.source === 'nav' ? 4 * DAY : 1.5 * DAY)
 }
 
-export function ruleMatches(rule: MonitorRule, quote: LiveQuote): boolean {
+function ruleMatches(rule: MonitorRule, quote: LiveQuote): boolean {
   if (!rule.active || rule.unresolved || !finite(rule.threshold) || rule.threshold <= 0) return false
   if (rule.condition === 'price_above') return quote.price > rule.threshold
   if (rule.condition === 'price_below') return quote.price < rule.threshold
   return finite(quote.changePct) && Math.abs(quote.changePct) > rule.threshold
 }
 
-function amount(value: number, position: Position): string {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: position.currency ?? 'INR', maximumFractionDigits: 2 }).format(value)
+function amount(value: number, currency: string): string {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
 }
 function time(at: number): string { return new Date(at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) }
 function label(position: Position): string { return position.name || position.ticker }
-function quoteMetrics(position: Position, quote: LiveQuote): MonitorMetric[] {
-  const metrics: MonitorMetric[] = [{ label: quote.source === 'nav' ? 'Published NAV' : 'Latest price', value: amount(quote.price, position) }]
+function quoteMetrics(currency: string, quote: LiveQuote): MonitorMetric[] {
+  const metrics: MonitorMetric[] = [{ label: quote.source === 'nav' ? 'Published NAV' : 'Latest price', value: amount(quote.price, currency) }]
   const changePct = quote.changePct
   if (finite(changePct)) metrics.push({ label: 'Day move', value: signedPercent(changePct), trend: changePct > 0 ? 'up' : changePct < 0 ? 'down' : 'neutral' })
   return metrics
@@ -193,10 +211,20 @@ function findRulePosition(rule: MonitorRule, index: ReturnType<typeof indexRuleP
 export function reconcileMonitorRules(rules: MonitorRule[], positions: Position[]): MonitorRule[] {
   const index = indexRulePositions(positions)
   return rules.map((rule) => {
-    if (rule.unresolved) return rule
+    if (rule.unresolved || rule.security) return rule
     const position = findRulePosition(rule, index)
     return position ? { ...rule, holdingId: position.id, holding: position.name || rule.holding || position.ticker } : { ...rule, unresolved: true }
   })
+}
+
+interface RuleTarget { id: string; name: string; currency: string; fund: boolean; quote: LiveQuote | undefined }
+
+/** What a rule follows: its own watched security, or the holding it resolves to. Undefined when neither can be priced. */
+function ruleTarget(rule: MonitorRule, quotes: Record<string, LiveQuote>, index: ReturnType<typeof indexRulePositions>): RuleTarget | undefined {
+  if (rule.security) return { id: rule.holdingId, name: rule.security.name, currency: 'INR', fund: rule.security.kind === 'fund', quote: quotes[watchSecurityKey(rule.security)] }
+  const position = findRulePosition(rule, index)
+  if (!position || position.identityIssue || !hasSupportedValuationCurrency(position)) return undefined
+  return { id: position.id, name: label(position), currency: position.currency ?? 'INR', fund: position.type === 'mutual-fund', quote: quotes[quoteKey(position)] }
 }
 
 type RuleObservation = {
@@ -214,12 +242,12 @@ export function monitorRuleObservations(rules: MonitorRule[], positions: Positio
 }
 
 function observeRule(rule: MonitorRule, quotes: Record<string, LiveQuote>, now: number, allowed: boolean, index: ReturnType<typeof indexRulePositions>): RuleObservation {
-  const position = findRulePosition(rule, index)
-  if (rule.unresolved || !position || position.identityIssue || !hasSupportedValuationCurrency(position)) return { state: 'Unavailable' }
+  const target = rule.unresolved ? undefined : ruleTarget(rule, quotes, index)
+  if (!target) return { state: 'Unavailable' }
   if (!rule.active) return { state: 'Paused' }
-  const quote = quotes[quoteKey(position)]
+  const quote = target.quote
   if (!allowed || !usableQuote(quote, now) || !freshQuote(quote, now)
-    || (position.type === 'mutual-fund' ? quote.source !== 'nav' : quote.source === 'nav')
+    || (target.fund ? quote.source !== 'nav' : quote.source === 'nav')
     || (rule.condition === 'daily_move' && !finite(quote.changePct))) return { state: 'Waiting' }
   const distance = rule.condition === 'daily_move'
     ? Math.abs(rule.threshold - Math.abs(quote.changePct!))
@@ -227,7 +255,7 @@ function observeRule(rule: MonitorRule, quotes: Record<string, LiveQuote>, now: 
   return { state: 'Active', quote, matched: ruleMatches(rule, quote), ...(Number.isFinite(distance) ? { distance } : {}) }
 }
 
-export function resumeSnoozedAlerts(state: MonitorState, now: number): MonitorState {
+function resumeSnoozedAlerts(state: MonitorState, now: number): MonitorState {
   let changed = false
   const alerts = state.alerts.map((alert) => {
     if (alert.state !== 'snoozed' || alert.snoozedUntil === undefined || alert.snoozedUntil > now) return alert
@@ -245,25 +273,24 @@ export function evaluateMonitorRules(state: MonitorState, positions: Position[],
   const added: MonitorAlert[] = []
   const index = indexRulePositions(positions)
   for (const rule of state.rules) {
-    const position = findRulePosition(rule, index)
-    if (!position || position.identityIssue || !hasSupportedValuationCurrency(position)) continue
-    const quote = quotes[quoteKey(position)]
-    if (!usableQuote(quote, now) || !freshQuote(quote, now) || !ruleMatches(rule, quote)
-      || (position.type === 'mutual-fund' ? quote.source !== 'nav' : quote.source === 'nav')) continue
+    const target = ruleTarget(rule, quotes, index)
+    const quote = target?.quote
+    if (!target || !usableQuote(quote, now) || !freshQuote(quote, now) || !ruleMatches(rule, quote)
+      || (target.fund ? quote.source !== 'nav' : quote.source === 'nav')) continue
     const providerDay = new Date(quote.at).toISOString().slice(0, 10)
     const observationKey = [rule.id, rule.instrumentIdentity, rule.condition, rule.threshold, providerDay].join('|')
     if (seen.has(observationKey)) continue
     seen.add(observationKey)
     const condition = rule.condition === 'daily_move' ? 'Daily move exceeds your threshold' : `Price is ${rule.condition === 'price_above' ? 'above' : 'below'} your level`
-    const level = rule.condition === 'daily_move' ? `${rule.threshold}%` : amount(rule.threshold, position)
+    const level = rule.condition === 'daily_move' ? `${rule.threshold}%` : amount(rule.threshold, target.currency)
     const changePct = quote.changePct
     const hasMove = finite(changePct)
     const move = hasMove ? signedPercent(changePct) : ''
     const title = rule.condition === 'daily_move' && hasMove
       ? `Daily move ${changePct > 0 ? 'up' : 'down'} ${Math.abs(changePct).toFixed(2)}%`
       : condition
-    const evidence = `${sourceLabels[quote.source]} · ${new Date(quote.at).toLocaleString('en-IN')}. Observed price ${amount(quote.price, position)}.${move ? ` Day move ${move}.` : ''} Watch level ${level}. This is a condition match, not a recorded threshold crossing.`
-    added.push({ id: crypto.randomUUID(), holding: label(position), holdingId: position.id, title, reason: `The latest provider observation meets your ${level} watch condition.`, evidence, kind: 'price', state: 'open', observationKey, time: time(quote.at), at: quote.at, metrics: [...quoteMetrics(position, quote), { label: 'Watch level', value: level }] })
+    const evidence = `${sourceLabels[quote.source]} · ${new Date(quote.at).toLocaleString('en-IN')}. Observed price ${amount(quote.price, target.currency)}.${move ? ` Day move ${move}.` : ''} Watch level ${level}. This is a condition match, not a recorded threshold crossing.`
+    added.push({ id: crypto.randomUUID(), holding: target.name, holdingId: target.id, title, reason: `The latest provider observation meets your ${level} watch condition.`, evidence, kind: 'price', state: 'open', observationKey, time: time(quote.at), at: quote.at, metrics: [...quoteMetrics(target.currency, quote), { label: 'Watch level', value: level }] })
   }
   return added.length ? { ...state, alerts: [...added.reverse(), ...state.alerts].slice(0, MAX_ITEMS) } : state
 }
