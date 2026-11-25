@@ -100,6 +100,10 @@ export default function App({ initialView }: { initialView: View }) {
   useEffect(() => {
     const onPopState = () => {
       const route = entryRoute(window.location.pathname, window.location.search)
+      if (route.landing) {
+        window.location.reload()
+        return
+      }
       setNotFound(route.notFound === true)
       if (route.notFound) {
         setImportOpen(false)

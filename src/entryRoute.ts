@@ -1,6 +1,6 @@
 import type { View } from './useStore'
 
-type EntryRoute = { view: View; redirectTo?: string; notFound?: true }
+type EntryRoute = { view: View; landing?: true; redirectTo?: string; notFound?: true }
 
 const VIEW_PATHS: Record<View, string> = {
   overview: '/app',
@@ -16,10 +16,15 @@ export function pathForView(view: View): string {
   return VIEW_PATHS[view]
 }
 
-export function entryRoute(pathname: string, search: string): EntryRoute {
+/** `/` shows the landing page to a first-time visitor only; `/welcome` always shows it. */
+export function entryRoute(pathname: string, search: string, firstVisit = false): EntryRoute {
   const path = normalizePath(pathname)
-  if (new URLSearchParams(search).has('workspace') || path === '/workspace' || path === '/' || path === '/index.html') {
+  if (path === '/welcome') return { view: 'overview', landing: true }
+  if (new URLSearchParams(search).has('workspace') || path === '/workspace') {
     return { view: 'overview', redirectTo: VIEW_PATHS.overview }
+  }
+  if (path === '/' || path === '/index.html') {
+    return firstVisit ? { view: 'overview', landing: true } : { view: 'overview', redirectTo: VIEW_PATHS.overview }
   }
 
   const view = PATH_VIEWS.get(path)

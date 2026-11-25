@@ -9,7 +9,7 @@ import { MonitorToast } from './MonitorToast'
 import { MonitorNewsPanel } from './MonitorNewsPanel'
 import { MonitorIpos } from './MonitorIpos'
 import { IpoWatchRules } from './IpoWatchRules'
-import { MonitorOnboarding } from './MonitorOnboarding'
+import { PortfolioWelcome } from './PortfolioWelcome'
 import { CompanyUpdates } from './CompanyUpdates'
 import { EconomicCalendar } from './EconomicCalendar'
 import { MonitorCalendar, useCalendarTab } from './MonitorCalendar'
@@ -56,12 +56,13 @@ export function MonitorView({ onRequestImport, initialQuery = '' }: { onRequestI
       : <CompanyUpdates controller={controller} feed={feed} loading={loading} pending={eventsPending} onRemind={remind} onOpenHolding={setContextId} onRetry={refreshEvents} />}
   </MonitorCalendar>
 
+  // Public IPOs and the economic calendar stay usable before an import, in place of the welcome illustration.
   if (!hasPortfolio) return <div className="mp-page">
-    <header className="mp-hero"><div className="mp-hero-main"><h1 className="page-title">Monitor</h1><button className="mp-button" type="button" onClick={onRequestImport}>Import portfolio</button></div></header>
-    {calendar}
+    <PortfolioWelcome variant="monitor" onRequestImport={onRequestImport}>
+      <div className="mp-welcome-calendar">{calendar}</div>
+    </PortfolioWelcome>
     {controller.ipoWatches.length > 0 && <div className="mp-panel mp-watch-rules" id="monitor-watch-rules"><IpoWatchRules controller={controller} /></div>}
     <MonitorToast message={controller.statusMessage} revision={controller.statusRevision} />
-    <details className="mi-setup"><summary><span>Portfolio news &amp; watches</span><span>How it works <span aria-hidden="true">⌄</span></span></summary><MonitorOnboarding onRequestImport={onRequestImport} /></details>
   </div>
 
   return <div className="mp-page">

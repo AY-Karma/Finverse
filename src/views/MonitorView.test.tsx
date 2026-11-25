@@ -103,10 +103,8 @@ describe('single-page Monitor', () => {
     expect([...container.querySelectorAll('[role="tab"]')].map((tab) => tab.getAttribute('aria-label'))).toEqual(['IPOs', 'Economic calendar'])
     const calendar = container.querySelector('#monitor-calendar')!
     expect(calendar.querySelector('[data-ipo-panel]')?.getAttribute('data-allowed')).toBe('true')
-    const guide = container.querySelector<HTMLDetailsElement>('details.mi-setup')!
-    expect(guide.open).toBe(false)
-    expect(calendar.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    const directImport = container.querySelector<HTMLButtonElement>('.mp-hero button')!
+    expect(calendar.closest('.portfolio-welcome--monitor')).not.toBeNull()
+    const directImport = container.querySelector<HTMLButtonElement>('.portfolio-welcome-import button')!
     expect(directImport.textContent).toBe('Import portfolio')
     await act(async () => { directImport.click() })
     expect(importHoldings).toHaveBeenCalledOnce()
@@ -115,7 +113,7 @@ describe('single-page Monitor', () => {
 
     state.store.positions = [{ id: 'imported', ticker: 'TCS', name: 'TCS', type: 'stock', quantity: 1, buyPrice: 100, invested: 100, lastPrice: 100 }]
     await rerender()
-    expect(container.querySelector('.mo-edition')).toBeNull()
+    expect(container.querySelector('.portfolio-welcome')).toBeNull()
     expect(container.querySelector('[data-news-identity]')).not.toBeNull()
     expect([...container.querySelectorAll('[role="tab"]')].map((tab) => tab.getAttribute('aria-label'))).toEqual(['IPOs', 'Economic calendar', 'Company updates'])
     expect(loadMarketEvents).not.toHaveBeenCalled()

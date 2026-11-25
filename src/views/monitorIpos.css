@@ -134,10 +134,6 @@
 .mi-empty-action > svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--mp-accent); }
 .mi-empty-action:hover { border-color: var(--mp-accent); background: var(--surface-3); }
 .mi-loading { padding: 8px var(--mi-inset) 12px; }
-.mi-setup { margin-top: 32px; }
-.mi-setup > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; border-top: 1px solid var(--hairline); color: var(--ink-muted); font-size: 15px; list-style: none; cursor: pointer; }
-.mi-setup > summary::-webkit-details-marker { display: none; }
-.mi-setup > summary > span:last-child { display: inline-flex; align-items: center; gap: 12px; flex-shrink: 0; color: var(--mp-accent); font-size: 14px; }
 .mp-content-flow[data-has-portfolio='false'] { grid-template-columns: minmax(0, 1fr); }
 @container (max-width: 680px) {
   .mi-columns { display: none; }

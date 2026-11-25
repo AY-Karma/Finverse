@@ -11,12 +11,19 @@ import { WorkspaceRestorePanel } from './views/WorkspaceRestore'
 import { loadSampleWorkspace, SAMPLE_WORKSPACE_ENABLED } from './sampleWorkspace'
 import { SampleWorkspaceBar } from './views/SampleWorkspaceBar'
 import { loadView } from './viewModules'
+import { isFirstVisit, markLandingSeen } from './landingVisit'
 import './fonts.css'
 import './design.css'
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)
 async function renderWorkspace() {
-  const route = entryRoute(window.location.pathname, window.location.search)
+  const route = entryRoute(window.location.pathname, window.location.search, isFirstVisit())
+  if (route.landing) {
+    const { LandingPage } = await import('./landing/LandingPage')
+    markLandingSeen()
+    root.render(<React.StrictMode><LandingPage /></React.StrictMode>)
+    return
+  }
   if (route.notFound) {
     root.render(<NotFound />)
     return

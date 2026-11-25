@@ -339,3 +339,13 @@
 @media (hover: hover) and (pointer: fine) { .notify-toggle:hover:not(:disabled) { color: var(--ink); background: var(--surface-2); } }
 .mp-filing-when { display: inline-flex; align-items: center; gap: 6px; }
 .mc-group-label { display: flex; align-items: center; gap: 6px; }
+
+/* Before an import, the welcome layout carries the live IPO and calendar card in place of its illustration. */
+.portfolio-welcome--monitor .portfolio-welcome-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: start; }
+.portfolio-welcome--monitor .portfolio-welcome-copy { padding-top: clamp(0px, 4vw, 56px); }
+.mp-page .portfolio-welcome-copy > p { margin: 24px auto 0; }
+.mp-welcome-calendar { min-width: 0; }
+@media (max-width: 900px) {
+  .portfolio-welcome--monitor .portfolio-welcome-main { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .portfolio-welcome--monitor .portfolio-welcome-copy { padding-top: 0; }
+}

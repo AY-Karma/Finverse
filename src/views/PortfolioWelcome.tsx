@@ -28,7 +28,7 @@ const WELCOME_CONTENT = {
   monitor: {
     area: 'Monitor', eyebrow: 'The updates around your investments',
     title: 'Your holdings.', emphasis: 'In the loop.',
-    description: 'News, company updates and watches, tied to the investments you own.',
+    description: 'Follow IPOs and economic dates now. Import your holdings for news, company updates and watches on what you own.',
     artTitle: 'Your first edition', icon: 'bell',
     legend: ['News', 'Watches', 'Reminders'], destination: 'Stay informed',
   },

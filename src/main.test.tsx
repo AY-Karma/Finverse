@@ -30,8 +30,17 @@ it('renders a direct unknown URL as 404 before accessing workspace storage', asy
   expect(window.location.pathname + window.location.search).toBe('/app/not-a-page?query=missing')
 })
 
-it('preserves root redirects and workspace recovery for valid entry', async () => {
+it('shows the landing page once at the root, then opens the workspace', async () => {
+  localStorage.clear()
   window.history.replaceState({}, '', '/')
+  await import('./main')
+  await vi.waitFor(() => expect(state.render).toHaveBeenCalledOnce())
+  expect(window.location.pathname).toBe('/')
+  expect(localStorage.getItem('finverse:landing-seen')).toBe('1')
+  expect(state.recover).not.toHaveBeenCalled()
+
+  vi.resetModules()
+  state.render.mockClear()
   await import('./main')
   await vi.waitFor(() => expect(state.render).toHaveBeenCalledOnce())
   expect(window.location.pathname).toBe('/app')
