@@ -599,6 +599,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let open = isMarketOpen()
     let closeRefreshPending = false
     let active = true
+    let firstLoadPending = false
     let nextAt = 0
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const queue = () => {
@@ -622,14 +623,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!active || document.hidden || (activeQuoteController.current && !activeQuoteController.current.signal.aborted)) return
       // Screens without prices pause polling; the first load and the market-close fetch still run.
       if (!force && livePace.interval() == null && loadedQuoteKey.current === folioRefreshKey) return
+      firstLoadPending = loadedQuoteKey.current !== folioRefreshKey
       loadedQuoteKey.current = folioRefreshKey
       const started = performance.now()
       try {
         const result = await refreshQuoteGroup('equity')
+        firstLoadPending = false
         if (result && result.updated > 0) livePace.recordResponse(performance.now() - started)
         if (active && result) schedule(result.failed > 0 && result.updated === 0 && result.skipped === 0, true, result.nextUpdateAt)
       } catch {
-        if (active && !workspaceChangedRef.current) schedule(false, false)
+        if (!active || workspaceChangedRef.current) return
+        // A folio save cancels requests in flight; a cancelled first load retries, since a closed market has no next poll.
+        if (firstLoadPending) {
+          firstLoadPending = false
+          loadedQuoteKey.current = null
+          void refresh()
+          return
+        }
+        schedule(false, false)
       }
     }
     if (loadedQuoteKey.current !== folioRefreshKey) void refresh()
@@ -669,6 +680,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })
     return () => {
       active = false
+      // A first load cut short here never landed, so the next run must load again instead of waiting for a poll
+      // that never comes while the market is closed.
+      if (firstLoadPending) loadedQuoteKey.current = null
       unsubscribePace()
       livePace.watchMainThread(false)
       activeQuoteController.current?.abort()

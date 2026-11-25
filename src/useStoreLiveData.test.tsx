@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StoreProvider, useStore } from './useStore'
@@ -73,6 +73,18 @@ describe('independent live stock and NAV updates', () => {
     expect(store.snapshot.currentValue).toBe(150)
     expect(loadCachedQuotes(store.positions)[quoteKey(stock)]?.price).toBe(150)
   })
+  it('loads stock quotes after the market close when the first request is cancelled by an effect re-run', async () => {
+    vi.setSystemTime(new Date('2026-11-09T12:00:00Z')) // 17:30 IST, market closed: no poll would retry.
+    refreshQuotes.mockImplementation((_positions, _previous, signal) => new Promise((resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason))
+      setTimeout(() => resolve(result({ [quoteKey(stock)]: equityQuote(150) })), 10)
+    }))
+    localStorage.setItem('finverse:folios', JSON.stringify([{ id: 'live-account', name: 'Live account', importedAt: 1, positions: [stock] }]))
+    root = createRoot(document.createElement('div'))
+    await act(async () => root!.render(<StrictMode><StoreProvider><Capture /></StoreProvider></StrictMode>))
+    await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+    expect(store.snapshot.currentValue).toBe(150)
+  })
   it('restores the last stock observation on first render while startup quotes are pending', async () => {
     refreshQuotes.mockResolvedValueOnce(result({ [quoteKey(stock)]: equityQuote(150) }))
     await mount([stock])
@@ -127,6 +139,25 @@ describe('independent live stock and NAV updates', () => {
     expect(store.portfolioHistory.at(-1)?.value).toBe(18_000)
   })
 
+  it('retries the first stock load after the market close when a folio save cancels it', async () => {
+    vi.setSystemTime(new Date('2026-11-09T12:00:00Z')) // 17:30 IST, market closed: no poll would retry.
+    let requests = 0
+    refreshQuotes.mockImplementation((_positions, _previous, signal) => {
+      requests += 1
+      if (requests === 1) return new Promise<LiveQuotesResult>((_resolve, reject) => {
+        signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+      })
+      return Promise.resolve(result({ [quoteKey(stock)]: equityQuote(150) }))
+    })
+    await mount([stock])
+    expect(requests).toBe(1)
+    await act(async () => store.confirmInstrument(stock.id, { ticker: stock.ticker, type: 'stock', exchange: 'NSE', currency: 'INR', providerSymbol: stock.providerSymbol }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(requests).toBe(2)
+    expect(store.snapshot.currentValue).toBe(150)
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(requests).toBe(2)
+  })
   it('resumes polling when saving an unchanged listing cancels the current request', async () => {
     let requests = 0
     refreshQuotes.mockImplementation(async (_positions, _previous, signal) => {
